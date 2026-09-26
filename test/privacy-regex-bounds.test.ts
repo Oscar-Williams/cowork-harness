@@ -105,11 +105,18 @@ describe("a host path right after `http(s)://` with no host", () => {
       expect(red).not.toContain("alice");
       expect(paths(red)).toEqual([]);
     });
-  it("an empty port is the documented exception: flagged by the scanner, left by the policy", () => {
-    const s = "at https://x.test:/Users/alice/f";
-    expect(paths(s).length).toBeGreaterThan(0);
-    expect(redactText(s, POLICY)).toBe(s);
-  });
+  // The documented exception: a `:` before the root inside an http(s) URL. The scanner's `:`, `://` and
+  // `file://` arms flag it; the policy's URL look-back keeps `:` (or a port URL's path would be rewritten).
+  for (const s of [
+    "at https://x.test:/Users/alice/f",
+    "at https://h/file:///Users/alice/x",
+    "at https://h/computer:///Users/alice/x",
+    "at https://a:///Users/alice/f",
+  ])
+    it(`a \`:\` before the root inside a URL is flagged by the scanner and left by the policy: ${s}`, () => {
+      expect(paths(s).length).toBeGreaterThan(0);
+      expect(redactText(s, POLICY)).toBe(s);
+    });
   for (const s of ["GET https://x/users/y", "GET https://api.example.com:8443/users/octocat/repos"])
     it(`a URL path is still left alone: ${s}`, () => {
       expect(redactText(s, POLICY)).toBe(s);
@@ -141,12 +148,26 @@ describe("a slugged home segment in a URL query value", () => {
   });
 });
 
-describe("the scanner flags a root after `,`, `|` or `<` (the policy already redacted these)", () => {
+describe("the scanner flags a root after `,`, `|` or `<`, and the policy redacts it", () => {
+  it("the scanner's root boundary and the policy's `/Volumes/` boundary are the same class", () => {
+    // `/Volumes/` is the one policy root with a leading boundary (a Docker `…/volumes/…` segment must not
+    // match). It must accept exactly what the scanner accepts, or the scanner flags what the policy leaves.
+    const boundary = (src: string) => /\(\?<!\[\^([^\]]*\\\[[^\]]*)\]\)/.exec(src)?.[1];
+    const scan = boundary(DEFAULT_SCAN_PATTERNS.find((p) => p.cls === "path")!.re.source);
+    const volumes = POLICY_JSON.patterns.filter((p) => p.regex.includes("/Volumes/[") && !p.regex.startsWith("(?<!https"));
+    expect(volumes).toHaveLength(2);
+    expect(scan).toBeDefined();
+    for (const p of volumes) expect(boundary(p.regex)).toBe(scan);
+  });
   for (const s of [
     "a,/Users/alice/x",
     "x|/Users/alice/x",
     "</Users/alice/x>",
     "sed 's|/Users/alice|/home/bob|' f",
+    "a,/Volumes/alice/x",
+    "x|/Volumes/alice/x",
+    "</Volumes/alice/x>",
+    "sed 's|/Volumes/alice|/tmp/x|' f",
     "a,/System/Volumes/Data/Users/alice/p/f.md",
     "x|/System/Volumes/Data/Users/alice/p/f.md",
     "</System/Volumes/Data/Users/alice/p/f.md>",
