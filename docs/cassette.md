@@ -1018,10 +1018,12 @@ counts). Uploads and `mode:r` connected folders are hash-only, and a file over t
   `/Users/<user>/` segment at all. A URL whose path carries one of `( ) [ ] | * <`, a backtick, `,` or `;`
   before a root-like segment — a Next.js route group `…/app/(auth)/users/page.tsx`, a `[id]` segment — is
   rewritten, failing safe (a `[id]` after the root can leave a stray `]` after the token); after `,` the
-  segment (`https://x.test/a,/users/x`) is also flagged by the scanner, so the two layers agree. One malformed URL is
-  the exception to "the policy fixes what the scanner flags": an empty port (`https://host:/Users/…`) is
-  flagged and left alone, since `:` must stay in the URL look-back for a port URL's path to survive.
-  Every scanner class and reference rule runs in linear time. A `(?=/mnt/)` rule matches at most 1024 characters between the
+  segment (`https://x.test/a,/users/x`) is also flagged by the scanner, so the two layers agree. The exception
+  to "the policy fixes what the scanner flags" is a URL whose path carries a `:` before the root — an empty port (`https://host:/Users/…`), a nested `file://` or
+  `computer://` link (`https://h/file:///Users/…`) — flagged and left alone, since `:` must stay in the URL look-back
+  for a port URL's path to survive. Every scanner class and reference rule runs in linear time (measured on Node
+  22 and Node 25; a `file://` host part is capped at 253 characters for that, since Node 22 runs an unbounded
+  look-behind as a backward scan at every position). A `(?=/mnt/)` rule matches at most 1024 characters between the
   root and `/mnt/` (real run dirs are far shorter); past that the bare rule redacts the whole path, so its
   link stops resolving — and if a second root sits inside such a path, a stray `]` follows the token. When you
   write your own rule, bound a lazy repetition that precedes a lookahead the same way (`{1,1024}?`, not
@@ -1074,7 +1076,8 @@ counts). Uploads and `mode:r` connected folders are hash-only, and a file over t
   rewrites a glob like `src/**/users/**`. A slug passed as a URL query value (`?f=/tmp/…/-Users-<user>-…`) is
   flagged and redacted, since `=` ends the URL look-back in both layers. A root after `*` — a bold-wrapped
   `**/Users/<user>/…**` in a model reply — is not flagged (a `*` boundary would flag every glob); the
-  reference policy redacts it. Two classes have a length limit that keeps them linear: the `email` local part
+  reference policy redacts it for every root except `/Volumes/`, which must start a path, so
+  `**/Volumes/<name>/…**` is left by both layers. Two classes have a length limit that keeps them linear: the `email` local part
   is unlimited where it starts a word but at most 64 characters when the address is glued directly to the end
   of another address's domain — it is matched on its last 64 characters and anything before that window stays
   in clear text, in the scanner and the reference policy alike; and a `domain` label is at most 63 characters,

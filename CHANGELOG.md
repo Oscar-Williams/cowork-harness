@@ -159,8 +159,9 @@ All notable changes to this project are documented here. The format is based on
   `/Volumes/` and any `-Users-<user>-…` / `-home-<user>-…` / `-root-…` segment — after a `/`, a quote, or at
   the start of a string or line, as `ls ~/.claude/projects` and `~/.claude.json` print them — keeping the
   `/mnt/` tail so links still resolve on replay. Its local-path rules are now case-insensitive, so every
-  path the scanner flags, the policy can fix — except a malformed URL with an empty port
-  (`https://host:/Users/…`), which the scanner flags and the policy leaves; its root rules skip a segment inside an http(s) URL, and
+  path the scanner flags, the policy can fix — except a URL whose path carries a `:` before the root — an empty port (`https://host:/Users/…`), a nested
+  `file://` or `computer://` link (`https://h/file:///Users/…`) — which the scanner flags and the
+  policy leaves; its root rules skip a segment inside an http(s) URL, and
   `/Volumes/` must start a path, so `https://api.example.com/users/…` and a Docker `…/volumes/…` path are
   left alone — but not a host path passed as a URL query value (`http://localhost:3000/open?f=/Users/…` is
   still redacted). The scanner's `path` class flags the same roots and segments, and now also flags a host path
@@ -189,23 +190,27 @@ All notable changes to this project are documented here. The format is based on
   rule and every `(?=/mnt/)`-anchored path rule) took time that grew with the square of an unbroken run: a
   100 KB tool result of zero-filled base64 or hex took about 5 s per email pass, a long hyphenated run about
   4 s in the `domain` class, and a run of one repeated path root 0.7–1.6 s per rule — so one large event
-  line could stall either command, and a long recording several. Every scanner class and reference rule now
-  runs in linear time. What they match is unchanged except past limits a real value does not reach: a
+  line could stall either command, and a long recording several. On Node 22 the scanner's `path` class and
+  the two `/Volumes/` rules were quadratic as well (about 5 s each on a 100 KB run with no `/`), through an
+  unbounded `file://` host part in a look-behind that later engines skip. Every scanner class and reference
+  rule now runs in linear time, measured on Node 22 and Node 25. What they match is unchanged except past limits a real value does not reach: a
   domain label longer than 63 characters is no longer flagged when it is all letters and digits, and is
   flagged on its last 63 characters when it is hyphenated (so a whole-token `--allow-domain` written against
   the longer sample stops matching); an address glued directly to the end of another address's domain, with
   a local part over 64 characters, is matched on its last 64 local-part characters, and anything before that
-  window stays in clear text, unflagged; and a path with more than 1024
+  window stays in clear text, unflagged; a `file://` host part longer than 253 characters (the longest
+  hostname) no longer counts as a link prefix; and a path with more than 1024
   characters between its root and `/mnt/` is redacted whole, so its `computer://` link no longer resolves on
   replay (`record` refuses the write only if that flips a `computer_links_resolve` verdict; otherwise the
   over-redaction is silent). Three shapes are newly caught: a host path right after `https://` with no host
   (`https:///Users/…`) is now redacted, a slugged home segment passed as a URL query value
   (`?f=/tmp/claude-501/-Users-<user>-…`) is now flagged and redacted, and the scanner now flags a host path
   right after `,`, `|` or `<` — a comma-joined list, `sed 's|/Users/<user>|…|'`, an angle-bracketed path —
-  which the reference policy already redacted. **`verify-cassettes` can fail on a cassette it previously
-  passed**, for those shapes only. A malformed URL with an empty port (`https://host:/Users/…`) remains the
-  one shape the scanner flags and the policy leaves alone: `:` stays in the URL look-back so a port URL's path
-  is not rewritten. A `.cowork-redact.json` copied by an earlier `init-redact` keeps the slow rules until it
+  which the reference policy redacts (its `/Volumes/` rules gain the same three boundaries; every other root
+  already had none). **`verify-cassettes` can fail on a cassette it previously passed**, for those shapes
+  only. The shape the scanner flags and the policy leaves alone is a URL whose path carries a `:` before the root — an empty port (`https://host:/Users/…`), a nested
+  `file://` or `computer://` link (`https://h/file:///Users/…`) — since `:` stays in the URL
+  look-back so a port URL's path is not rewritten. A `.cowork-redact.json` copied by an earlier `init-redact` keeps the slow rules until it
   is re-copied: re-run `init-redact --force` (after saving any tailoring).
 
 ### Changed
