@@ -159,7 +159,8 @@ All notable changes to this project are documented here. The format is based on
   `/Volumes/` and any `-Users-<user>-…` / `-home-<user>-…` / `-root-…` segment — after a `/`, a quote, or at
   the start of a string or line, as `ls ~/.claude/projects` and `~/.claude.json` print them — keeping the
   `/mnt/` tail so links still resolve on replay. Its local-path rules are now case-insensitive, so every
-  path the scanner flags, the policy can fix; its root rules skip a segment inside an http(s) URL, and
+  path the scanner flags, the policy can fix — except a malformed URL with an empty port
+  (`https://host:/Users/…`), which the scanner flags and the policy leaves; its root rules skip a segment inside an http(s) URL, and
   `/Volumes/` must start a path, so `https://api.example.com/users/…` and a Docker `…/volumes/…` path are
   left alone — but not a host path passed as a URL query value (`http://localhost:3000/open?f=/Users/…` is
   still redacted). The scanner's `path` class flags the same roots and segments, and now also flags a host path
@@ -190,9 +191,11 @@ All notable changes to this project are documented here. The format is based on
   4 s in the `domain` class, and a run of one repeated path root 0.7–1.6 s per rule — so one large event
   line could stall either command, and a long recording several. Every scanner class and reference rule now
   runs in linear time. What they match is unchanged except past limits a real value does not reach: a
-  domain label longer than 63 characters is no longer flagged; an address glued directly to the end of
-  another address's domain is matched on its last 64 local-part characters, so a longer filler before it
-  stays in clear text (the username and domain are still redacted); and a path with more than 1024
+  domain label longer than 63 characters is no longer flagged when it is all letters and digits, and is
+  flagged on its last 63 characters when it is hyphenated (so a whole-token `--allow-domain` written against
+  the longer sample stops matching); an address glued directly to the end of another address's domain, with
+  a local part over 64 characters, is matched on its last 64 local-part characters, and anything before that
+  window stays in clear text, unflagged; and a path with more than 1024
   characters between its root and `/mnt/` is redacted whole, so its `computer://` link no longer resolves on
   replay (`record` refuses the write only if that flips a `computer_links_resolve` verdict; otherwise the
   over-redaction is silent). Three shapes are newly caught: a host path right after `https://` with no host

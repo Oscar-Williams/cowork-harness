@@ -1013,18 +1013,19 @@ counts). Uploads and `mode:r` connected folders are hash-only, and a file over t
   start of a string or line, or after a `/` or a quote. Root rules skip a path segment inside an http(s) URL
   (`https://api.example.com/users/…`) but not a host path passed as a query value
   (`http://localhost:3000/open?f=/Users/…` is still redacted), and `/Volumes/` must start a path, so a Docker or kubelet
-  `…/volumes/…` segment is left alone. A URL whose path carries one of `( ) [ ] | * <`, a backtick, `,` or `;`
+  `…/volumes/…` segment is left alone. The slugged-segment rule is what catches a run dir inside a
+  Claude session scratchpad — `/tmp/claude-<uid>/-Users-<user>-<project>/…` — where the username is not in a
+  `/Users/<user>/` segment at all. A URL whose path carries one of `( ) [ ] | * <`, a backtick, `,` or `;`
   before a root-like segment — a Next.js route group `…/app/(auth)/users/page.tsx`, a `[id]` segment — is
-  rewritten, failing safe (a `[id]` after the root can leave a stray `]` after the token). One malformed URL is
+  rewritten, failing safe (a `[id]` after the root can leave a stray `]` after the token); after `,` the
+  segment (`https://x.test/a,/users/x`) is also flagged by the scanner, so the two layers agree. One malformed URL is
   the exception to "the policy fixes what the scanner flags": an empty port (`https://host:/Users/…`) is
   flagged and left alone, since `:` must stay in the URL look-back for a port URL's path to survive.
-  Every reference rule runs in linear time. A `(?=/mnt/)` rule matches at most 1024 characters between the
+  Every scanner class and reference rule runs in linear time. A `(?=/mnt/)` rule matches at most 1024 characters between the
   root and `/mnt/` (real run dirs are far shorter); past that the bare rule redacts the whole path, so its
   link stops resolving — and if a second root sits inside such a path, a stray `]` follows the token. When you
   write your own rule, bound a lazy repetition that precedes a lookahead the same way (`{1,1024}?`, not
-  `+?`): unbounded, a long run of the root with no `/mnt/` costs time proportional to its length squared. That last rule is what catches a run dir inside a
-  Claude session scratchpad — `/tmp/claude-<uid>/-Users-<user>-<project>/…` — where the username is not in a
-  `/Users/<user>/` segment at all. A policy copied by an earlier `init-redact` does not have these rules:
+  `+?`): unbounded, a long run of the root with no `/mnt/` costs time proportional to its length squared. A policy copied by an earlier `init-redact` does not have these rules:
   re-run `init-redact --force` (after saving any tailoring) or add them by hand. That fixes **future**
   recordings only — there is no command that re-applies a policy to a cassette already committed, so one
   that now fails `verify-cassettes` must be re-recorded, or reviewed and cleared with `--allow-path`.
@@ -1071,7 +1072,14 @@ counts). Uploads and `mode:r` connected folders are hash-only, and a file over t
   flagged; a directory literally named `-home-…` inside the VM, a prose line that begins `-home-…`, and a
   quoted route literal like `'/users/:id'` are (clear a reviewed one with `--allow-path`); the policy likewise
   rewrites a glob like `src/**/users/**`. A slug passed as a URL query value (`?f=/tmp/…/-Users-<user>-…`) is
-  flagged and redacted, since `=` ends the URL look-back in both layers. `--allow <regex>` suppresses synthetic / public reference names
+  flagged and redacted, since `=` ends the URL look-back in both layers. A root after `*` — a bold-wrapped
+  `**/Users/<user>/…**` in a model reply — is not flagged (a `*` boundary would flag every glob); the
+  reference policy redacts it. Two classes have a length limit that keeps them linear: the `email` local part
+  is unlimited where it starts a word but at most 64 characters when the address is glued directly to the end
+  of another address's domain — it is matched on its last 64 characters and anything before that window stays
+  in clear text, in the scanner and the reference policy alike; and a `domain` label is at most 63 characters,
+  so a longer all-alphanumeric one is not flagged and a longer hyphenated one is flagged on its last 63-character
+  window (a whole-token `--allow-domain` written against the longer sample no longer matches it). `--allow <regex>` suppresses synthetic / public reference names
   (e.g. `NVCA`, `Cooley GO`, `Acme`) — each `--allow` value is a **pattern**, matched against a finding, not a
   path to allow; each allow must match the **whole** finding token (so a bare-domain allow no longer silently
   clears an email whose domain it matches), and `--allow-domain` / `--allow-email` / `--allow-path` /
