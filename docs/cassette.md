@@ -1013,7 +1013,16 @@ counts). Uploads and `mode:r` connected folders are hash-only, and a file over t
   start of a string or line, or after a `/` or a quote. Root rules skip a path segment inside an http(s) URL
   (`https://api.example.com/users/…`) but not a host path passed as a query value
   (`http://localhost:3000/open?f=/Users/…` is still redacted), and `/Volumes/` must start a path, so a Docker or kubelet
-  `…/volumes/…` segment is left alone. That last rule is what catches a run dir inside a
+  `…/volumes/…` segment is left alone. A URL whose path carries one of `( ) [ ] | * <`, a backtick, `,` or `;`
+  before a root-like segment — a Next.js route group `…/app/(auth)/users/page.tsx`, a `[id]` segment — is
+  rewritten, failing safe (a `[id]` after the root can leave a stray `]` after the token). One malformed URL is
+  the exception to "the policy fixes what the scanner flags": an empty port (`https://host:/Users/…`) is
+  flagged and left alone, since `:` must stay in the URL look-back for a port URL's path to survive.
+  Every reference rule runs in linear time. A `(?=/mnt/)` rule matches at most 1024 characters between the
+  root and `/mnt/` (real run dirs are far shorter); past that the bare rule redacts the whole path, so its
+  link stops resolving — and if a second root sits inside such a path, a stray `]` follows the token. When you
+  write your own rule, bound a lazy repetition that precedes a lookahead the same way (`{1,1024}?`, not
+  `+?`): unbounded, a long run of the root with no `/mnt/` costs time proportional to its length squared. That last rule is what catches a run dir inside a
   Claude session scratchpad — `/tmp/claude-<uid>/-Users-<user>-<project>/…` — where the username is not in a
   `/Users/<user>/` segment at all. A policy copied by an earlier `init-redact` does not have these rules:
   re-run `init-redact --force` (after saving any tailoring) or add them by hand. That fixes **future**
@@ -1023,6 +1032,8 @@ counts). Uploads and `mode:r` connected folders are hash-only, and a file over t
   - a run dir under a root outside the list whose username is not in a slugged segment — a Linux
     `/tmp/<name>/…`, `/scratch/<user>/…`, a custom `$TMPDIR`. Simplest fix: keep the run dir under `$HOME`,
     which the policy and the scanner both cover;
+  - a host path served as a URL **path** — Vite's `http://localhost:5173/@fs/Users/<user>/…`, a static server's
+    `http://localhost:8080/Users/<user>/…` — the price of leaving REST routes like `/users/<id>` alone;
   - encoded spellings: percent-encoded (`%2FUsers%2F…`) or JSON-escaped (`\/Users\/…`) paths, and Windows
     paths (`C:\Users\…`);
   - a slugged segment after a space or tab — the way `ls -l`, `tree` and `du` print a directory name — is not
@@ -1052,13 +1063,15 @@ counts). Uploads and `mode:r` connected folders are hash-only, and a file over t
   this machine: …") is never legitimate catalog boilerplate either; none of the three share the ambiguity that
   gets `currency`/`domain` excluded there. The `path` class matches the recording machine's own roots
   (`/Users/`, `/home/`, `/root/`, `/private/tmp/`, `/private/var/`, `/var/folders/`, `/System/Volumes/`,
-  `/Volumes/`, any case) after whitespace, a quote, a backtick, `(`, `[`, `=`, `:`, `>` or a newline (raw or
-  JSON-escaped) — including inside a `computer://` or `file://` URI, `file://localhost/…` too —
+  `/Volumes/`, any case) after whitespace, a quote, a backtick, `(`, `[`, `=`, `:`, `>`, `,`, `|`, `<` or a
+  newline (raw or JSON-escaped) — including inside a `computer://` or `file://` URI, `file://localhost/…` too —
   plus a slugged home segment (`-Users-<user>-…`, `-home-<user>-…`, `-root-…`) under any root or on its own
   line or JSON key, so a temp-dir run path carrying a username is flagged. Bare `/tmp/` alone is not a root:
   it is the in-VM home and appears in clean recordings. A slug-shaped segment in an http(s) URL is not
   flagged; a directory literally named `-home-…` inside the VM, a prose line that begins `-home-…`, and a
-  quoted route literal like `'/users/:id'` are (clear a reviewed one with `--allow-path`). `--allow <regex>` suppresses synthetic / public reference names
+  quoted route literal like `'/users/:id'` are (clear a reviewed one with `--allow-path`); the policy likewise
+  rewrites a glob like `src/**/users/**`. A slug passed as a URL query value (`?f=/tmp/…/-Users-<user>-…`) is
+  flagged and redacted, since `=` ends the URL look-back in both layers. `--allow <regex>` suppresses synthetic / public reference names
   (e.g. `NVCA`, `Cooley GO`, `Acme`) — each `--allow` value is a **pattern**, matched against a finding, not a
   path to allow; each allow must match the **whole** finding token (so a bare-domain allow no longer silently
   clears an email whose domain it matches), and `--allow-domain` / `--allow-email` / `--allow-path` /

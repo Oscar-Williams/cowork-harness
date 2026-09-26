@@ -183,6 +183,27 @@ All notable changes to this project are documented here. The format is based on
   `/private/tmp/`.** The live host-path check accepted a `file://` prefix but not `computer://` or a
   backtick, so a delivered-file link to a host path, or one quoted as "Saved to `/Users/…`" — the usual ways
   one reaches the model's reply — was not detected at the sealed tiers.
+- **`verify-cassettes` and `record`'s redaction no longer stall on long unbroken text.** The privacy
+  scanner's `email` and `domain` classes and nine rules of the reference `.cowork-redact.json` (the email
+  rule and every `(?=/mnt/)`-anchored path rule) took time that grew with the square of an unbroken run: a
+  100 KB tool result of zero-filled base64 or hex took about 5 s per email pass, a long hyphenated run about
+  4 s in the `domain` class, and a run of one repeated path root 0.7–1.6 s per rule — so one large event
+  line could stall either command, and a long recording several. Every scanner class and reference rule now
+  runs in linear time. What they match is unchanged except past limits a real value does not reach: a
+  domain label longer than 63 characters is no longer flagged; an address glued directly to the end of
+  another address's domain is matched on its last 64 local-part characters, so a longer filler before it
+  stays in clear text (the username and domain are still redacted); and a path with more than 1024
+  characters between its root and `/mnt/` is redacted whole, so its `computer://` link no longer resolves on
+  replay (`record` refuses the write only if that flips a `computer_links_resolve` verdict; otherwise the
+  over-redaction is silent). Three shapes are newly caught: a host path right after `https://` with no host
+  (`https:///Users/…`) is now redacted, a slugged home segment passed as a URL query value
+  (`?f=/tmp/claude-501/-Users-<user>-…`) is now flagged and redacted, and the scanner now flags a host path
+  right after `,`, `|` or `<` — a comma-joined list, `sed 's|/Users/<user>|…|'`, an angle-bracketed path —
+  which the reference policy already redacted. **`verify-cassettes` can fail on a cassette it previously
+  passed**, for those shapes only. A malformed URL with an empty port (`https://host:/Users/…`) remains the
+  one shape the scanner flags and the policy leaves alone: `:` stays in the URL look-back so a port URL's path
+  is not rewritten. A `.cowork-redact.json` copied by an earlier `init-redact` keeps the slow rules until it
+  is re-copied: re-run `init-redact --force` (after saving any tailoring).
 
 ### Changed
 
