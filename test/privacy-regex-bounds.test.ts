@@ -65,17 +65,17 @@ describe("domain — a label is at most 63 characters", () => {
   });
 });
 
-describe("policy `(?=/mnt/)` rules — keep the /mnt/ tail for any prefix up to 1024 characters", () => {
+describe("policy `(?=/mnt/)` rules — keep the /mnt/ tail for up to 1024 characters between the root and /mnt/", () => {
   const link = (len: number) => `[v](computer:///Users/alice/${"x".repeat(len)}/mnt/outputs/f.md)`;
-  it("a 1024-character prefix still redacts to a token followed by the /mnt/ tail", () => {
-    // prefix = "/Users/alice/" (13) + filler, so 1011 filler characters make it exactly 1024
-    const red = redactText(link(1011), POLICY);
+  it("1024 characters after the root still redact to a token followed by the /mnt/ tail", () => {
+    // after the root "/Users/": "alice/" (6) + 1018 filler characters = exactly 1024
+    const red = redactText(link(1018), POLICY);
     expect(red).not.toContain("alice");
     const target = red.slice(red.indexOf("computer://") + "computer://".length, -1);
     expect(normalizeHostShapedForReplay(target, undefined)).toBe("outputs/f.md");
   });
   it("past 1024 the whole path is redacted: no username, and the link no longer resolves (fails safe)", () => {
-    const red = redactText(link(1012), POLICY);
+    const red = redactText(link(1019), POLICY);
     expect(red).not.toContain("alice");
     expect(red).not.toContain("/mnt/");
   });
