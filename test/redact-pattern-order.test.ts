@@ -86,6 +86,12 @@ describe("findShadowedPatterns", () => {
     expect(findShadowedPatterns(["/x/[a-z]{1,1024}?(?=/mnt/)", "/x/[a-z]+"])).toEqual([]);
   });
 
+  it("reads any `{m,N}` repetition (lazy or not) as `+`, since it is the same base for ordering", () => {
+    // `{2,5}?(?=/mnt/)` behind a bare `+` twin is a real shadow: the bare rule eats the /mnt/ tail first.
+    expect(findShadowedPatterns(["/x/[a-z]+", "/x/[a-z]{2,5}?(?=/mnt/)"])).toHaveLength(1);
+    expect(findShadowedPatterns(["/x/[a-z]+", "/x/[a-z]{3,}(?=/mnt/)"])).toHaveLength(1);
+  });
+
   it("does not fire on unrelated patterns, or on a policy with no lookaheads", () => {
     expect(findShadowedPatterns(["/Users/[^/]+", "/home/[^/]+"])).toEqual([]);
     expect(findShadowedPatterns(["a@b\\.com", "/Users/[^/]+"])).toEqual([]);

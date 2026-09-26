@@ -40,18 +40,29 @@ describe("email — no length limit where a real address starts, 64 characters e
     expect(emails(s)).toEqual([s]);
     expect(redactText(s, POLICY)).toMatch(/^\[REDACTED:email:[0-9a-f]{12}\]$/);
   });
-  it("two adjacent addresses are both found", () => {
+  it("two adjacent addresses are both found and both redacted", () => {
     expect(emails("a@x.com+b@y.com")).toEqual(["a@x.com", "+b@y.com"]);
+    const red = redactText("a@x.com+b@y.com", POLICY);
+    expect(red).toMatch(/^\[REDACTED:email:[0-9a-f]{12}\]\[REDACTED:email:[0-9a-f]{12}\]$/);
+    expect(emails(red)).toEqual([]);
   });
   it("an address glued to the end of another, with a local part over 64 characters, is matched on its last 64", () => {
     // The only shape where the bounded form differs from the unbounded one: the second local part does not
-    // start a word (it continues the first address's domain), so it gets the 64-character window. The
-    // username and the domain are still redacted; the clear-text residue is the leading run of filler.
+    // start a word (it continues the first address's domain), so it gets the 64-character window; anything
+    // before that window stays in clear text. Here the name sits inside the window, so it is redacted.
     const s = "a@b.io+" + "x".repeat(64) + ".alice@y.io";
     expect(emails(s)).toEqual(["a@b.io", "x".repeat(58) + ".alice@y.io"]);
     const red = redactText(s, POLICY);
     expect(red).not.toContain("alice");
     expect(red).not.toContain("y.io");
+  });
+  it("…and anything before the 64-character window stays in clear text, unflagged (documented residue)", () => {
+    // A name at the HEAD of a glued local part over 64 characters falls outside the window. The residue has
+    // no `@`, so the scanner does not see it after redaction either. Pinned so the limit stays a decision.
+    const s = "a@b.io+alice." + "x".repeat(65) + "@y.io";
+    const red = redactText(s, POLICY);
+    expect(red).toMatch(/^\[REDACTED:email:[0-9a-f]{12}\]\+alice\.x+\[REDACTED:email:[0-9a-f]{12}\]$/);
+    expect(emails(red)).toEqual([]);
   });
 });
 
@@ -138,13 +149,36 @@ describe("the scanner flags a root after `,`, `|` or `<` (the policy already red
     "sed 's|/Users/alice|/home/bob|' f",
     "a,/System/Volumes/Data/Users/alice/p/f.md",
     "x|/System/Volumes/Data/Users/alice/p/f.md",
+    "</System/Volumes/Data/Users/alice/p/f.md>",
   ])
     it(`${s}`, () => {
-      expect(paths(s).some((p) => p.includes("alice"))).toBe(true);
-      expect(redactText(s, POLICY)).not.toContain("alice");
+      expect(paths(s).filter((p) => p.includes("alice"))).toHaveLength(1);
+      const red = redactText(s, POLICY);
+      expect(red).not.toContain("alice");
+      expect(paths(red)).toEqual([]);
     });
+  it("a URL path with `,` before a root-like segment is flagged, and the policy rewrites it too", () => {
+    // `,` ends the policy's URL look-back and is a scanner boundary, so both layers treat the segment as a path.
+    const s = "https://x.test/a,/users/x";
+    expect(paths(s)).toEqual(["/users/x"]);
+    expect(redactText(s, POLICY)).not.toBe(s);
+    expect(paths(redactText(s, POLICY))).toEqual([]);
+  });
   it("plain prose with those characters stays clean", () => {
     expect(paths("a,b x|y <b>")).toEqual([]);
+  });
+});
+
+describe("`*` is not a scanner root boundary (it would flag globs); the policy rewrites both shapes", () => {
+  it("a glob is not flagged by the scanner, and is rewritten by the policy", () => {
+    const s = "include: src/**/users/**";
+    expect(paths(s)).toEqual([]);
+    expect(redactText(s, POLICY)).not.toBe(s);
+  });
+  it("a bold-wrapped host path is not flagged by the scanner, but the policy redacts it", () => {
+    const s = "Saved to **/Users/alice/proj/report.md** now";
+    expect(paths(s)).toEqual([]);
+    expect(redactText(s, POLICY)).not.toContain("alice");
   });
 });
 
