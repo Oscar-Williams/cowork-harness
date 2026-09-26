@@ -19,6 +19,8 @@ import { DEFAULT_SCAN_PATTERNS } from "../src/scan.js";
  *
  * `npm run ci` runs this in the default lane on every supported Node version, alongside the rest of the suite.
  * Targets are derived from the shipped code and policy, so a new class or rule is covered without an edit here.
+ * Deliberately not a target: `scanHostInventory`'s inline `^mcp__…__` tool-prefix regex — anchored, it only ever
+ * sees one `tools[]` name, and measures under 1 ms at 200k on its worst shape.
  */
 const PROBE = join(process.cwd(), "test/helpers/privacy-regex-probe.ts");
 const E2E_KILL_MS = 60_000;

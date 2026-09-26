@@ -13,7 +13,8 @@ import { DEFAULT_SCAN_PATTERNS, scanText } from "../../src/scan.js";
 import { redactJsonLine, type RedactionPolicy } from "../../src/redact.js";
 import { hostPathLeaked } from "../../src/run/execute.js";
 
-/** Input length. 200k is ~the longest raw event line seen in real recordings, doubled. */
+/** Input length. 200k separates a quadratic regex from a linear one by 30× or more. Real event lines reach
+ *  2 MB (an inlined image); the linear versions redact or scan one of those in about 0.25 s. */
 export const N = 200_000;
 
 const POLICY_JSON = JSON.parse(readFileSync(resolve(".cowork-redact.json"), "utf8")) as {
