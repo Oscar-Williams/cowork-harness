@@ -49,6 +49,21 @@ describe("the shipped policy", () => {
     // and the detector flags exactly the three shadowed pairs
     expect(findShadowedPatterns(bad)).toHaveLength(3);
   });
+
+  it("MUTATION: every bare catch-all moved ahead of its lookahead twin is flagged — all eight pairs", () => {
+    // The anchored rules are bounded (`{1,N}?`) to keep them linear; the detector must still see them as the
+    // same base as their bare twins, or a reordered policy would load with no warning at all.
+    const pairs: [number, number][] = [];
+    SOURCES.forEach((s, i) => {
+      if (!s.endsWith("(?=/mnt/)")) return;
+      const bare = SOURCES.findIndex((b, j) => j > i && !b.includes("(?=") && s.startsWith(b.slice(0, b.lastIndexOf("["))));
+      if (bare !== -1) pairs.push([i, bare]);
+    });
+    expect(pairs).toHaveLength(8);
+    const bad = [...SOURCES];
+    for (const [a, b] of pairs) [bad[a], bad[b]] = [bad[b], bad[a]];
+    expect(findShadowedPatterns(bad)).toHaveLength(8);
+  });
 });
 
 describe("findShadowedPatterns", () => {
@@ -63,6 +78,12 @@ describe("findShadowedPatterns", () => {
 
   it("normalizes lazy quantifiers, so `+?` and `+` are recognized as the same base", () => {
     expect(findShadowedPatterns(["/x/[a-z]+?", "/x/[a-z]+?(?=/mnt/)"])).toHaveLength(1);
+  });
+
+  it("normalizes bounded repetition, so `{1,N}?` / `{0,N}` read as `+` / `*`", () => {
+    expect(findShadowedPatterns(["/x/[a-z]+", "/x/[a-z]{1,1024}?(?=/mnt/)"])).toHaveLength(1);
+    expect(findShadowedPatterns(["/x/[a-z]*", "/x/[a-z]{0,64}(?=/mnt/)"])).toHaveLength(1);
+    expect(findShadowedPatterns(["/x/[a-z]{1,1024}?(?=/mnt/)", "/x/[a-z]+"])).toEqual([]);
   });
 
   it("does not fire on unrelated patterns, or on a policy with no lookaheads", () => {
