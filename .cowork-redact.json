@@ -10,12 +10,12 @@
     { "regex": "(?<!https?://[^\\s\"'`,;=()<>|*\\[\\]]{1,256})/private/var/[^\\s\"'\\\\)\\]`]{1,1024}?(?=/mnt/)", "label": "local-path", "flags": "gi" },
     { "regex": "(?<!https?://[^\\s\"'`,;=()<>|*\\[\\]]{1,256})/var/folders/[^\\s\"'\\\\)\\]`]{1,1024}?(?=/mnt/)", "label": "local-path", "flags": "gi" },
     { "regex": "(?<!https?://[^\\s\"'`,;=()<>|*\\[\\]]{1,256})/System/Volumes/[^\\s\"'\\\\)\\]`]{1,1024}?(?=/mnt/)", "label": "local-path", "flags": "gi" },
-    { "regex": "(?:(?<![^\\s\"'(=:`\\[>])|(?<=://|file://[^\\s/\"']*))/Volumes/[^\\s\"'\\\\)\\]`]{1,1024}?(?=/mnt/)", "label": "local-path", "flags": "gi" },
+    { "regex": "(?:(?<![^\\s\"'(=:`\\[>,|<])|(?<=://|file://[^\\s/\"']{0,253}))/Volumes/[^\\s\"'\\\\)\\]`]{1,1024}?(?=/mnt/)", "label": "local-path", "flags": "gi" },
     { "regex": "(?<!https?://[^\\s\"'`,;=()<>|*\\[\\]]{1,256})/private/tmp/[^\\s\"'\\\\)\\]`]+", "label": "local-path", "flags": "gi" },
     { "regex": "(?<!https?://[^\\s\"'`,;=()<>|*\\[\\]]{1,256})/private/var/[^\\s\"'\\\\)\\]`]+", "label": "local-path", "flags": "gi" },
     { "regex": "(?<!https?://[^\\s\"'`,;=()<>|*\\[\\]]{1,256})/var/folders/[^\\s\"'\\\\)\\]`]+", "label": "local-path", "flags": "gi" },
     { "regex": "(?<!https?://[^\\s\"'`,;=()<>|*\\[\\]]{1,256})/System/Volumes/[^\\s\"'\\\\)\\]`]+", "label": "local-path", "flags": "gi" },
-    { "regex": "(?:(?<![^\\s\"'(=:`\\[>])|(?<=://|file://[^\\s/\"']*))/Volumes/[^\\s\"'\\\\)\\]`]+", "label": "local-path", "flags": "gi" },
+    { "regex": "(?:(?<![^\\s\"'(=:`\\[>,|<])|(?<=://|file://[^\\s/\"']{0,253}))/Volumes/[^\\s\"'\\\\)\\]`]+", "label": "local-path", "flags": "gi" },
     { "regex": "(?<!https?://[^\\s\"',;=]{0,256})(?<=^|/|\"|'|\\n)-(?:Users|home|root)-[^/\\s\"'\\\\)\\]`]+", "label": "local-path", "flags": "gi" },
     { "regex": "(?:(?<![a-zA-Z0-9._%+-])[a-zA-Z0-9._%+-]+|[a-zA-Z0-9._%+-]{1,64})@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}", "label": "email", "flags": "g" }
   ]

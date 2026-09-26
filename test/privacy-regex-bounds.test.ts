@@ -97,6 +97,14 @@ describe("policy `(?=/mnt/)` rules — keep the /mnt/ tail for up to 1024 charac
   });
 });
 
+describe("a `file://` host part is at most 253 characters", () => {
+  it("flags a host path after a 253-character host part, and not after a 254-character one", () => {
+    // Bounded so the look-behind stays linear on every supported Node version; 253 is the longest hostname.
+    expect(paths(`file://${"h".repeat(253)}/Users/alice/x`)).toEqual(["/Users/alice/x"]);
+    expect(paths(`file://${"h".repeat(254)}/Users/alice/x`)).toEqual([]);
+  });
+});
+
 describe("a host path right after `http(s)://` with no host", () => {
   for (const s of ["at https:///Users/alice/f", "at HTTPS:///USERS/alice/f", "at http:///home/alice/x"])
     it(`is redacted: ${s}`, () => {
@@ -195,6 +203,11 @@ describe("`*` is not a scanner root boundary (it would flag globs); the policy r
     const s = "include: src/**/users/**";
     expect(paths(s)).toEqual([]);
     expect(redactText(s, POLICY)).not.toBe(s);
+  });
+  it("a bold-wrapped `/Volumes/` path is left by both layers (`/Volumes/` must start a path; documented)", () => {
+    const s = "see **/Volumes/alice/x** now";
+    expect(paths(s)).toEqual([]);
+    expect(redactText(s, POLICY)).toBe(s);
   });
   it("a bold-wrapped host path is not flagged by the scanner, but the policy redacts it", () => {
     const s = "Saved to **/Users/alice/proj/report.md** now";

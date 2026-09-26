@@ -99,13 +99,16 @@ export const DEFAULT_SCAN_PATTERNS: { re: RegExp; cls: string }[] = [
     // char before the root is the URI's own third slash, which the plain lookbehind rejects — so a host
     // path inside a link was never flagged. A `file://` URI may also carry a host part
     // (`file://localhost/Users/…`); that is accepted for `file:` only, so an http(s) URL whose path
-    // happens to start `/home/` is not a host path. `/System/Volumes/` is the macOS data-volume spelling
-    // of the same tree (`/System/Volumes/Data/Users/…`), as `df`/`mount`/`realpath` print it.
+    // happens to start `/home/` is not a host path. That host part is bounded at 253 characters (the longest
+    // hostname): unbounded, the look-behind scans back to the start of the input at every position of a long run
+    // with no `/` — quadratic on Node 22's V8 (about 5 s on a 100 KB letter run), though later engines skip it.
+    // `/System/Volumes/` is the macOS data-volume spelling of the same tree (`/System/Volumes/Data/Users/…`),
+    // as `df`/`mount`/`realpath` print it.
     //
     // The run-level `hostPathLeaked` detector (src/run/execute.ts) shares the zero-false-positive arms
     // (`/private/tmp/`, a `computer://`/`file://` prefix) but NOT the slug arm or `/System/Volumes/`: it
     // is a live verdict signal, and a slug-shaped name is a weaker signal than a root prefix.
-    re: /(?:(?<![^\s"'(=:`\[>,|<])|(?<=:\/\/|file:\/\/[^\s\/"']*|\\[nt]))(\/Users\/|\/home\/|\/root\/|\/private\/var\/|\/private\/tmp\/|\/var\/folders\/|\/System\/Volumes\/|\/Volumes\/)[^\s"'\\)]+|(?<!https?:\/\/[^\s"',;=]{0,256})(?<=^|\/|"|'|\n|\\n)-(?:Users|home|root)-[^/\s"'\\)]+/gi,
+    re: /(?:(?<![^\s"'(=:`\[>,|<])|(?<=:\/\/|file:\/\/[^\s\/"']{0,253}|\\[nt]))(\/Users\/|\/home\/|\/root\/|\/private\/var\/|\/private\/tmp\/|\/var\/folders\/|\/System\/Volumes\/|\/Volumes\/)[^\s"'\\)]+|(?<!https?:\/\/[^\s"',;=]{0,256})(?<=^|\/|"|'|\n|\\n)-(?:Users|home|root)-[^/\s"'\\)]+/gi,
     cls: "path",
   },
   {
