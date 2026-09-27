@@ -216,6 +216,25 @@ describe("llms.txt ↔ docs/*.md", () => {
   });
 });
 
+/** Bold first-cell names of a markdown table section. */
+function stageRowNames(section: string): string[] {
+  return [...section.matchAll(/^\| \*\*([a-z0-9-]+)\*\* \|/gm)].map((m) => m[1]);
+}
+
+describe("stageRowNames — the table-row reader the stage-table guard relies on", () => {
+  // A row the reader cannot see is a job the guard reports as missing for the wrong reason — or, worse,
+  // a stale row it silently ignores. Each case below is a legal spelling of a bold first cell.
+  it("reads a cell with extra whitespace around the bold name", () => {
+    expect(stageRowNames("|  **build**   | x |")).toEqual(["build"]);
+  });
+  it("reads underscore bold (`__name__`) as well as `**name**`", () => {
+    expect(stageRowNames("| __build__ | x |")).toEqual(["build"]);
+  });
+  it("reads a job id with uppercase letters or underscores", () => {
+    expect(stageRowNames("| **Build_Job** | x |")).toEqual(["Build_Job"]);
+  });
+});
+
 describe("CONTRIBUTING.md CI stage table ↔ ci.yml jobs", () => {
   // The table named nine stages while ci.yml ran eleven jobs: two were added with no row, and the prose
   // count ("nine-stage") went stale with them. Compare JOB IDS — `Object.keys(jobs)` — not the display
@@ -228,7 +247,7 @@ describe("CONTRIBUTING.md CI stage table ↔ ci.yml jobs", () => {
   const rest = start === -1 ? "" : contributing.slice(start + 1);
   const next = rest.indexOf("\n## ");
   const section = next === -1 ? rest : rest.slice(0, next);
-  const rows = [...section.matchAll(/^\| \*\*([a-z0-9-]+)\*\* \|/gm)].map((m) => m[1]).sort();
+  const rows = stageRowNames(section).sort();
 
   it("parsed both sides (an empty parse must not pass)", () => {
     expect(start, "CONTRIBUTING.md lost its `## This repo's own CI pipeline` heading").toBeGreaterThan(-1);
