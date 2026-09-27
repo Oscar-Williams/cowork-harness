@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { execFileSync } from "node:child_process";
 import { parse as parseYaml } from "yaml";
 import { Scenario, PlatformBaseline } from "../src/types.js";
 import { SessionConfig } from "../src/session.js";
@@ -44,9 +45,18 @@ describe("examples/README.md's scenario catalogue ↔ examples/scenarios/", () =
   const start = readme.indexOf("## The scenarios");
   const table = readme.slice(start, readme.indexOf("\n## ", start + 1));
   const rows = [...table.matchAll(/^\| `scenarios\/([^`]+)` \|/gm)].map((m) => m[1]);
-  const onDisk = readdirSync("examples/scenarios", { withFileTypes: true })
-    .filter((e) => e.isDirectory() || YAML(e.name))
-    .map((e) => (e.isDirectory() ? `${e.name}/` : e.name));
+  // Tracked files only, as check:versions' shippedDocs() does: an untracked scratch scenario is not part of
+  // the catalogue and must not red a local run.
+  const onDisk = [
+    ...new Set(
+      execFileSync("git", ["ls-files", "-z", "examples/scenarios"], { encoding: "utf8" })
+        .split("\0")
+        .filter(Boolean)
+        .map((p) => p.slice("examples/scenarios/".length))
+        .map((rel) => (rel.includes("/") ? `${rel.split("/")[0]}/` : rel))
+        .filter((rel) => rel.endsWith("/") || YAML(rel)),
+    ),
+  ];
 
   it("found the table and the directory (an empty side would pass vacuously)", () => {
     expect(start, 'examples/README.md has no "## The scenarios" section').toBeGreaterThanOrEqual(0);
