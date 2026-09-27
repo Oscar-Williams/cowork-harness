@@ -66,16 +66,15 @@ All notable changes to this project are documented here. The format is based on
   no re-record. `verify-cassettes examples/replays/` reports all three clean, and all three replay green.
 - **Live-validated against `desktop-2.9939.2`** (agent 2.1.281) on 2026-09-27, on the release code, all
   four tiers: `boundary-check` 6/6, e2e self-tests 9/9 (including `smoke-l2-microvm` in a real VM and the
-  `--decider-llm` path), and `run examples/scenarios/` 7/7 on its first run, with no assertion skipped.
-  The protocol tier runs the host `claude` CLI (2.1.283 here), not the staged agent. The model was pinned
-  to `claude-sonnet-5`, which the two previous passes ran on unpinned; the unpinned default had moved to a
-  costlier model. **`test:live` ran API-key-only and is mostly uncovered: 6 passed, 15 skipped.** Its
-  token-gated files (`live-outputs-delete`, `live-resume-continuity`, `live-stop-hook`, `live-matrix`, and
-  `live-contract`'s full-turn and host-loop probe blocks) skip without an OAuth token, so the new
-  `subagent-write-refused-probe` and the live outputs-delete re-tier check did not run in this pass. The
-  host-loop change is exercised by `canary-hostloop`, `hostloop-computer-links` and
-  `subagent-manifest-probe`, which passed. A VM-name argument to `vm delete` is a usage error (exit 2,
-  category `usage`). Details are in `DESIGN.md`'s scope note.
+  `--decider-llm` path), `run examples/scenarios/` 7/7 on its first run, and `test:live` 21/21 with none
+  skipped, including the host-loop probe that a relative sub-agent `Write` is refused from Desktop 2.7032.0
+  and the live outputs-delete check. On its first run `test:live` was 18/21: the two outputs-delete cases
+  and the container `--resume` case failed before inference while other container runs on the machine
+  held Docker's network address pool ("Docker address pool exhausted"). All three passed on one serial
+  re-run. The protocol tier runs the host `claude` CLI (2.1.283 here), not the staged agent. The model was
+  pinned to `claude-sonnet-5`, which the two previous passes ran on unpinned; the unpinned default had
+  moved to a costlier model. A VM-name argument to `vm delete` is a usage error (exit 2, category
+  `usage`). Details are in `DESIGN.md`'s scope note.
 
 ### Added
 
