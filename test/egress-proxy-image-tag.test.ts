@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { createHash } from "node:crypto";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
+import ts from "typescript";
 import { PROXY_IMAGE_DEFAULT } from "../src/runtime/agent-image.js";
 
 const RESOLVER = join("src", "runtime", "agent-image.ts");
@@ -13,6 +14,19 @@ function srcFiles(dir: string): string[] {
     if (statSync(abs).isDirectory()) out.push(...srcFiles(abs));
     else if (name.endsWith(".ts")) out.push(abs);
   }
+  return out;
+}
+
+/** Every string / template-literal token in `file` whose text starts with a proxy tag. */
+function proxyTagLiterals(file: string): string[] {
+  const sf = ts.createSourceFile(file, readFileSync(file, "utf8"), ts.ScriptTarget.Latest, false, ts.ScriptKind.TS);
+  const out: string[] = [];
+  const visit = (node: ts.Node) => {
+    if ((ts.isStringLiteralLike(node) || ts.isTemplateLiteralToken(node)) && /^cowork-egress-proxy:\d+/.test(node.text))
+      out.push(node.text);
+    ts.forEachChild(node, visit);
+  };
+  visit(sf);
   return out;
 }
 
@@ -40,16 +54,11 @@ describe("egress proxy image", () => {
   });
 
   it("no src/ file other than the resolver spells a proxy tag", () => {
-    // A second quoted `cowork-egress-proxy:<n>` literal is a second default that the digest guard below
-    // would not move — the exact split this constant exists to prevent. Comments are stripped first, so a
-    // doc comment naming a tag is not code. (Crude but sufficient: a `//` preceded by whitespace or at line
-    // start, and block comments; a URL's `://` has no whitespace before it.)
-    const literal = /["'`]cowork-egress-proxy:\d+/g;
-    const code = (f: string) =>
-      readFileSync(f, "utf8")
-        .replace(/\/\*[\s\S]*?\*\//g, "")
-        .replace(/(^|\s)\/\/.*$/gm, "$1");
-    const hits = srcFiles("src").flatMap((f) => (code(f).match(literal) ?? []).map(() => f));
+    // A second `cowork-egress-proxy:<n>` literal is a second default that the digest guard below would
+    // not move — the exact split this constant exists to prevent. Parsed, not regex-stripped: only string
+    // and template-literal tokens count, so a comment naming a tag is ignored, and a `/*` inside a string
+    // (a glob such as `**/*.md`) cannot hide the code after it.
+    const hits = srcFiles("src").flatMap((f) => proxyTagLiterals(f).map(() => f));
     expect(hits).toEqual([RESOLVER]);
   });
 
