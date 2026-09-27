@@ -35,7 +35,7 @@ body:
     id: baseline
     attributes:
       label: Platform baseline
-      description: Which baselines/desktop-*.json (and your Desktop app version if relevant)
+      description: Which baselines/desktop-*.json the run used — the scenario's or session's `baseline:`, where `latest` is the newest one `cowork-harness list` prints (and your Desktop app version if relevant)
       placeholder: "desktop-X.Y.Z / app X.Y.Z / agent X.Y.Z"
   - type: textarea
     id: env
