@@ -516,7 +516,7 @@ export function checkBaselinePinClaims(files: { path: string; text: string }[]):
     for (const m of text.matchAll(/currently\s+`?desktop-\d/gi))
       errors.push(
         `${path}:${lineOf(text, m.index)} pins the current baseline in prose ("${m[0]}…") — it goes stale at the next sync; ` +
-          "point at README § Status or `cowork-harness list` instead",
+          "point at README § Status instead",
       );
     if (!path.startsWith(".github/ISSUE_TEMPLATE/")) continue;
     templates++;
