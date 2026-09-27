@@ -218,7 +218,7 @@ describe("llms.txt ↔ docs/*.md", () => {
 
 /** Bold first-cell names of a markdown table section. */
 function stageRowNames(section: string): string[] {
-  return [...section.matchAll(/^\| \*\*([a-z0-9-]+)\*\* \|/gm)].map((m) => m[1]);
+  return [...section.matchAll(/^\|\s*(\*\*|__)([A-Za-z0-9_-]+)\1\s*\|/gm)].map((m) => m[2]);
 }
 
 describe("stageRowNames — the table-row reader the stage-table guard relies on", () => {
