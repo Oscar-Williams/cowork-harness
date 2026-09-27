@@ -400,6 +400,12 @@ a global install has them locally too, not just on GitHub.
 | [CONTRIBUTING.md](./CONTRIBUTING.md) | local gates, which CI stages block a merge, and the rule that a consumer-visible change updates the companion skill |
 | [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md) | Contributor Covenant v2.1, with a private reporting channel |
 
+## Getting help
+
+- **Questions and ideas:** [GitHub Discussions](https://github.com/yaniv-golan/cowork-harness/discussions).
+- **Bugs and feature requests:** [open an issue](https://github.com/yaniv-golan/cowork-harness/issues/new/choose) from one of the templates.
+- **Anything security or sandbox related:** report it privately, as [SECURITY.md](./SECURITY.md) describes, not in a public issue.
+
 ## Versioning
 
 From `1.0.0` this project follows [semver](https://semver.org/). What that covers is enumerated in
