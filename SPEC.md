@@ -597,6 +597,10 @@ batch is still judged on its own completed-runs `passRate`. A `--stop-on-diverge
 and a fail observed) always fails that batch, regardless of the numeric rate.
 
 **`RunResult`** (`src/types.ts`):
+abridged to the fields most consumers branch on. The complete field list is
+[`schema/run-result.json`](./schema/run-result.json), the covered surface named in
+[§12](#12-versioning--the-10-compatibility-contract), kept in step with the `RunResult` type by
+`test/run-result-schema-sync.test.ts`.
 ```jsonc
 {
   "scenario": "string",
@@ -636,6 +640,8 @@ and a fail observed) always fails that batch, regardless of the numeric rate.
   "toolResults?": [{ "toolUseId?","isError","text","assertText?" }], // tool-result text at assertion-fidelity cap (10 KB); backs tool_result_contains/tool_result_not_contains and their regex siblings tool_result_matches/tool_result_not_matches
   "skillsInvoked?": ["string"],                  // Wave 1: skill/plugin ids invoked via the Skill tool_use event, call order, duplicates kept. Backs skill_triggered/no_skill_triggered.
   "skillToolAvailable?": bool,                    // Wave 1: whether the agent's init tool list included "Skill" — false ⇒ skill_triggered/no_skill_triggered fail as evidence-unavailable (agent-version drift)
+  "scan?": { "outputsDeletes?": ["string"], "outputsDeleteBasis?": ["fs-diff|named|inferred"], "hostPathLeaked?": bool, "selfHealRan?": bool, … }, // post-run scan signals (live lane only). outputsDeleteBasis is positional with outputsDeletes: fs-diff = proven by the filesystem diff; named = a delete in command/call position has an outputs path as its own operand; inferred = flagged by the detector's inference
+  "fsDiff?": { "status": "clean|findings|unavailable", "reason?": "baseline-incomplete|post-walk-incomplete", "findings": ["string"] }, // the outputs-delete filesystem diff for this turn (live lane only): outputs/ at turn start vs. after the turn. clean = no path present at turn start was deleted; unavailable = it could not verify. A sibling of scan so a filesystem-proven delete survives a missing events.jsonl
   "evidenceErrors?": { "taskTracking?": number, "webSearchParse?": number, "presentFilesMalformed?": number, "egressParse?": number } // dropped/malformed telemetry lines per stream; a >0 taskTracking/presentFilesMalformed count fails the dependent assertion "malformed" rather than silently dropping bad entries; webSearchParse/egressParse are observability-only
 }
 ```
