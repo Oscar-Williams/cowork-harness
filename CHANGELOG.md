@@ -59,6 +59,12 @@ All notable changes to this project are documented here. The format is based on
 
 ### Fixed
 
+- **A `COWORK_PROXY_IMAGE` set in `.env` or a `--dotenv` file now reaches the egress sidecar.** The sidecar read
+  the variable once, when the CLI loaded, which is before `.env` is applied, so it ran the default proxy image while
+  `doctor` checked the one `.env` named. A blank value is now treated as unset and falls back to the default
+  instead of passing an empty image name to the container runtime. `docs/cli.md` also named the old default
+  (`cowork-egress-proxy:4`); it now names `cowork-egress-proxy:5`.
+
 - **The outputs-delete scanner no longer takes seconds on a long command.** A `shred` or `find` without its
   delete flag, an unclosed `$(mktemp`, or one statement referencing thousands of variables made the scan
   quadratic: an 81 KB `shred -a …` line took 1.2 s, and a 4000-variable statement 3.2 s, or about 1.3–1.6 s per
