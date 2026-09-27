@@ -1,5 +1,8 @@
 # Maintenance: parity across Claude Desktop releases
 
+> **Who this is for:** maintainers, mostly. Baselines ship in the package, so `baseline: latest` resolves
+> without a `sync`. Run `sync` only to refresh parity past the committed set after a Claude Desktop update.
+
 A core design goal is that keeping up with Claude Desktop is **cheap and visible**. Release-specific facts live in one JSON file per release (`baselines/desktop-<ver>.json`); the orchestration code rides the stable Agent SDK stream-json protocol.
 
 ## The seam
