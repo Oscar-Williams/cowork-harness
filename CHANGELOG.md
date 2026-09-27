@@ -327,7 +327,9 @@ All notable changes to this project are documented here. The format is based on
   `SPEC.md` has a table of contents; the README gains a short summary under "Pick your path" and a "Getting
   help" section; `docs/maintenance.md` says up top that it is for maintainers; three `docs/README.md` task cells
   are trimmed to a link. `CONTRIBUTING.md`'s CI stage table now has a row for every job, `live-key` and
-  `ci-green` included, and a new test fails when that table and `ci.yml`'s jobs disagree. `docs/fidelity-gaps.md`
+  `ci-green` included, and a new test fails when that table and `ci.yml`'s jobs disagree; it also no longer
+  says a keyless `scenarios` run warns and exits 0 (the job is skipped), names `live-key` among the jobs a fork PR
+  skips, and states the two required status contexts directly. `docs/fidelity-gaps.md`
   no longer says the remote lane's document tools (`tesseract`, `pdftoppm`, `soffice`, `pdfplumber`) are
   absent locally: the committed rootfs manifest carries them.
 
