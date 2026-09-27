@@ -375,7 +375,7 @@ a global install has them locally too, not just on GitHub.
 | [docs/discovery.md](./docs/discovery.md) | Where plugins/skills/MCP are found + overrides. |
 | [docs/plugin-root.md](./docs/plugin-root.md) | How `${CLAUDE_PLUGIN_ROOT}` resolves per execution mode (host-loop vs VM-loop) — for when a skill's bundled-file path doesn't resolve. |
 | [docs/maintenance.md](./docs/maintenance.md) | Parity across Desktop releases via `sync`. |
-| [docs/cowork-spawn-contract-1.12603.1.md](./docs/cowork-spawn-contract-1.12603.1.md) | The binary-grounded spawn/control contract (cwd, env, mounts, control-protocol fields) the harness implements. **Frozen historical research — the live values are `baselines/desktop-*.json` (the newest is named under [Status](#status), or run `cowork-harness list`);** the version in the filename is when it was written, not an expiry. Verified on `desktop-1.12603.1`; control-protocol fields re-verified unchanged through `desktop-1.20186.0`. |
+| [docs/cowork-spawn-contract-1.12603.1.md](./docs/cowork-spawn-contract-1.12603.1.md) | The binary-grounded spawn/control contract (cwd, env, mounts, control-protocol fields) the harness implements. **Frozen historical research — the live values are `baselines/desktop-*.json` (the newest is named under [Status](#status));** the version in the filename is when it was written, not an expiry. Verified on `desktop-1.12603.1`; control-protocol fields re-verified unchanged through `desktop-1.20186.0`. |
 | [docs/decisions/](./docs/decisions/) | Architecture decision records — the "why" behind a cross-cutting default. |
 | [DESIGN.md](./DESIGN.md) | Architecture deep-dive + full parity matrix. |
 | [SPEC.md](./SPEC.md) | The authoritative testable contract (scenario/session schema, `RunResult`, exit codes). |
@@ -406,7 +406,7 @@ inputs/outputs. Human-readable terminal text is explicitly **not** part of the c
 
 ## Status
 
-The latest shipped baseline — what `baseline: latest` resolves to (`cowork-harness list`) — is
+The latest shipped baseline — what `baseline: latest` resolves to, the highest version under `baselines/` — is
 **`desktop-2.9939.2`**. Release-by-release verification notes (what was re-verified against
 which live agent/asar) are recorded in [CHANGELOG.md](./CHANGELOG.md); the feature catalogue
 this section would otherwise duplicate lives in the sections above.
