@@ -546,13 +546,31 @@ It is informational — it never changes the verdict. The block is a live/`parti
 
 ## Reproducibility knobs
 
-Most runs need **none** of these — the defaults are correct. They're grouped by theme below (container/runtime, networking/loop, strictness, staleness, secret-scrubbing, L2 microVM, `skill`/`chat` defaults); reach for one only when a default doesn't fit. Every var name is `COWORK_*` / `CLAUDE_*` — except `PYTHON` (see "Advanced / internal escape hatches" below) — so a search across this section finds nearly all of it fast.
+Most runs need **none** of these — the defaults are correct. They're grouped by theme below, one variable per entry; reach for one only when a default doesn't fit. Every var name is `COWORK_*` / `CLAUDE_*` — except `PYTHON` (see [Advanced / internal escape hatches](#advanced--internal-escape-hatches)) — so a search across this section finds nearly all of it fast.
+
+### Container, agent image and agent binary
 
 - `COWORK_LOCKDOWN=off` — relax container hardening for debugging (default `on`). With it `on`, an L2 microVM whose guest egress firewall fails to apply **aborts loudly** rather than running un-isolated.
 - `COWORK_CONTAINER_RUNTIME=podman` — use Podman instead of Docker.
-- `COWORK_AGENT_IMAGE=<tag>` — override the agent image name (default `cowork-agent-base:2`; set to an empty or blank value, it falls back to the default rather than passing an empty ref to the container runtime). It governs the Bash sidecar at **both** `container` and `hostloop` (hostloop's agent is a native host process, but its `mcp__workspace__bash` runs in the Docker sidecar), so a full-parity image changes what a skill's shell-outs find at either tier. Provenance: the image tag + digest are stamped into a recorded **cassette's** environment; `result.json` records the fidelity tier only and never names the image — log the variable in your CI step if a plain run must carry it; `COWORK_AGENT_BINARY=<path>` — override the auto-detected staged agent ELF; `COWORK_HOST_AGENT_BINARY=<path>` — override the auto-detected staged **native macOS** agent binary the `hostloop` tier spawns directly (distinct from `COWORK_AGENT_BINARY`, the container ELF). `COWORK_HARNESS_VERIFY_AGENT_SHA=0` — skip the default sha256 integrity check of the resolved agent ELF against the baseline's recorded hash (on by default).
+- `COWORK_AGENT_IMAGE=<tag>` — override the agent image name (default `cowork-agent-base:2`; set to an empty or blank value, it falls back to the default rather than passing an empty ref to the container runtime). It governs the Bash sidecar at **both** `container` and `hostloop` (hostloop's agent is a native host process, but its `mcp__workspace__bash` runs in the Docker sidecar), so a full-parity image changes what a skill's shell-outs find at either tier. Provenance: the image tag + digest are stamped into a recorded **cassette's** environment; `result.json` records the fidelity tier only and never names the image — log the variable in your CI step if a plain run must carry it.
+- `COWORK_AGENT_BINARY=<path>` — override the auto-detected staged agent ELF.
+- `COWORK_HOST_AGENT_BINARY=<path>` — override the auto-detected staged **native macOS** agent binary the `hostloop` tier spawns directly (distinct from `COWORK_AGENT_BINARY`, the container ELF).
+- `COWORK_HARNESS_VERIFY_AGENT_SHA=0` — skip the default sha256 integrity check of the resolved agent ELF against the baseline's recorded hash (on by default).
 - `COWORK_SKIP_CAPABILITY_PROBE=1` — skip the per-run capability probe (the harness otherwise probes the agent image/VM for the document/OCR/Office capabilities the real Cowork rootfs ships and **fails a run that uses one the image omits** — a likely false negative; suppress per-scenario with `allow_missing_capability: true`, or rebuild full parity).
-- `COWORK_HARNESS_DECIDER_MODEL` — the default `--decider-llm` answering model (overridden by the `--decider-model` flag; falls back to the Sonnet default — pin a cheaper model for simple gates to cut cost). `COWORK_HARNESS_DECIDER_DIR_POLL_MS` / `COWORK_HARNESS_DECIDER_DIR_TIMEOUT_MS` — tune the `--decider-dir` rendezvous poll/backstop (poll defaults: 300 ms for the run-side rendezvous, 500 ms for `gates --follow`; see [decider-dir.md](./decider-dir.md#notes-and-tuning)); `COWORK_HARNESS_DECIDER_CMD_TIMEOUT_MS` / `COWORK_HARNESS_LLM_TIMEOUT_MS` — backstop a hung `--decider-cmd` helper / `--decider-llm` model call (default 600 s, fail loud; a `--decider-cmd` or `--decider-dir` timeout ends the run as an unanswered-gate partial with `errorSource: "decider_timeout"`, `result.json` written, exit 2); `COWORK_HARNESS_LLM_RETRIES` — bounded retries for a transient non-zero `claude -p` exit in the `--decider-llm` transport (default 2, clamped to 0–10; set `0` to disable, e.g. deterministic CI; a usage/quota-limit exit is treated as non-retryable and bypasses this budget — retrying a spent quota is futile); `COWORK_HARNESS_LLM_MAX_BYTES` — stdout cap on a `--decider-llm` model call (default 8 MiB, fail loud past it); `COWORK_HARNESS_DIALOG_TIMEOUT_MS` — override the 6 s dialog auto-cancel.
+
+### Deciders and dialogs
+
+- `COWORK_HARNESS_DECIDER_MODEL` — the default `--decider-llm` answering model (overridden by the `--decider-model` flag; falls back to the Sonnet default — pin a cheaper model for simple gates to cut cost).
+- `COWORK_HARNESS_DECIDER_DIR_POLL_MS` — the `--decider-dir` rendezvous poll interval (defaults: 300 ms for the run-side rendezvous, 500 ms for `gates --follow`; see [decider-dir.md](./decider-dir.md#notes-and-tuning)).
+- `COWORK_HARNESS_DECIDER_DIR_TIMEOUT_MS` — the `--decider-dir` per-gate backstop (see [decider-dir.md](./decider-dir.md#notes-and-tuning)). A `--decider-dir` timeout ends the run as an unanswered-gate partial with `errorSource: "decider_timeout"`, `result.json` written, exit 2.
+- `COWORK_HARNESS_DECIDER_CMD_TIMEOUT_MS` — backstop a hung `--decider-cmd` helper (default 600 s, fail loud). A timeout ends the run as an unanswered-gate partial with `errorSource: "decider_timeout"`, `result.json` written, exit 2.
+- `COWORK_HARNESS_LLM_TIMEOUT_MS` — backstop a hung `--decider-llm` model call (default 600 s, fail loud).
+- `COWORK_HARNESS_LLM_RETRIES` — bounded retries for a transient non-zero `claude -p` exit in the `--decider-llm` transport (default 2, clamped to 0–10; set `0` to disable, e.g. deterministic CI; a usage/quota-limit exit is treated as non-retryable and bypasses this budget — retrying a spent quota is futile).
+- `COWORK_HARNESS_LLM_MAX_BYTES` — stdout cap on a `--decider-llm` model call (default 8 MiB, fail loud past it).
+- `COWORK_HARNESS_DIALOG_TIMEOUT_MS` — override the 6 s dialog auto-cancel.
+
+### Graders
+
 - `COWORK_HARNESS_JUDGE_MODEL` — the default model for `semantic_matches`' LLM judge (overridden by a
   per-assertion `judge_model`; falls back to the pinned default `claude-opus-4-8`). Pin it alongside `judge_model` for a
   reproducible before/after comparison across re-records.
@@ -569,26 +587,85 @@ Most runs need **none** of these — the defaults are correct. They're grouped b
   smaller artifact. Note this budget does not lift the 16384-byte PER-FILE cap; only an `evidence_files` scope does.
 - `COWORK_HARNESS_EVALUATOR_MODEL` — the default `critique` grading model (overridden by the `--evaluator-model` flag;
   falls back to the pinned default `claude-opus-4-8`).
-- `COWORK_HARNESS_RUNS_DIR` (or the `--run-dir <path>` flag — a **global** flag that must precede the subcommand — `--dotenv` follows the same rule everywhere except `critique`, which also takes it per-command) — override the default run-output root `~/.cowork-harness/runs` (kept out of any working tree so sensitive skill inputs/outputs don't land in a repo). Precedence: `--run-dir` > env > default. The root is flat and machine-global (shared across projects); pinned `--session-id` runs are guarded against cross-project overwrite, and `prune` never prunes them. In CI, set it to a workspace path (e.g. `runs`) so artifact upload can collect the runs. `COWORK_HARNESS_ALLOW_FOREIGN_RESUME=1` overrides the guard that blocks `--resume` onto another project's pinned session.
-- **Networking / loop:** `COWORK_PROXY_IMAGE` overrides the egress proxy Docker image name (default `cowork-egress-proxy:5`; set to an empty or blank value, it falls back to the default). It can also be set in `.env` or a `--dotenv` file; the per-run sidecar and `doctor` both read that value. The egress proxy URL and Docker network are **not** overridable: each run builds its own per-run sidecar and network, and pointing a run at outside infrastructure would move the boundary `boundary-check` verifies. `CLAUDE_FORCE_HOST_LOOP=1` forces the host-loop path regardless of the baseline's loop decision (the `cowork` tier's auto-pick). `COWORK_LIMACTL` overrides the `limactl` binary path (default `/opt/homebrew/bin/limactl`).
+
+### Run output, evidence caps and status
+
+- `COWORK_HARNESS_RUNS_DIR` (or the `--run-dir <path>` flag — a **global** flag that must precede the subcommand — `--dotenv` follows the same rule everywhere except `critique`, which also takes it per-command) — override the default run-output root `~/.cowork-harness/runs` (kept out of any working tree so sensitive skill inputs/outputs don't land in a repo). Precedence: `--run-dir` > env > default. The root is flat and machine-global (shared across projects); pinned `--session-id` runs are guarded against cross-project overwrite, and `prune` never prunes them. In CI, set it to a workspace path (e.g. `runs`) so artifact upload can collect the runs.
+- `COWORK_HARNESS_ALLOW_FOREIGN_RESUME=1` — overrides the guard that blocks `--resume` onto another project's pinned session.
 - `COWORK_HARNESS_PRERUN_HASH_CAP` — override the default cap on pre-run file hashing (bytes); raise it if `input_unmodified`/`no_unexpected_files` report evidence unavailable on a large connected folder.
 - `COWORK_HARNESS_MAX_ARTIFACT_BYTES` — override the inline-artifact-body cap (default 65536 bytes;
   same knob as `record --max-artifact-bytes`, which takes precedence) so a large structured deliverable
   stays replay-checkable instead of being truncated.
-- **Status/resource polling:** `COWORK_HARNESS_STATUS_INTERVAL_MS` — how often `status.json` is
-  refreshed during a run (default 5000ms). `COWORK_HARNESS_STATUS_POLL_MS` /
-  `COWORK_HARNESS_STATUS_FIRST_SEEN_TIMEOUT_MS` / `COWORK_HARNESS_STATUS_STALE_MS` /
-  `COWORK_HARNESS_STATUS_CORRUPT_TIMEOUT_MS` tune `status --follow`'s polling/timeout/staleness/corrupt-file thresholds (see
-  [docs/run-status.md](./run-status.md) for the full reference). `COWORK_HARNESS_RESOURCE_INTERVAL_MS`
-  tunes the resource sampler's polling cadence (default 1000ms; an invalid value warns and falls back to
+- `COWORK_HARNESS_STATUS_INTERVAL_MS` — how often `status.json` is refreshed during a run (default 5000ms).
+- `COWORK_HARNESS_STATUS_POLL_MS` — how often `status --follow` polls (see [run-status.md](./run-status.md) for this and the next three).
+- `COWORK_HARNESS_STATUS_FIRST_SEEN_TIMEOUT_MS` — how long `status --follow` waits for `status.json` to appear.
+- `COWORK_HARNESS_STATUS_STALE_MS` — the staleness threshold `status --follow` applies to a `"running"` status.
+- `COWORK_HARNESS_STATUS_CORRUPT_TIMEOUT_MS` — how long `status --follow` tolerates a `status.json` that exists but never parses.
+- `COWORK_HARNESS_RESOURCE_INTERVAL_MS` — the resource sampler's polling cadence (default 1000ms; an invalid value warns and falls back to
   the default rather than silently sampling on the wrong cadence — see
   [docs/maintenance.md](./maintenance.md)).
 - `COWORK_HARNESS_NO_HYPERLINKS` — disable OSC-8 terminal hyperlinks in CLI output (auto-disabled outside a TTY, under CI, or with `--compact`/`--demo`).
-- **Strictness escape hatches** (the harness fails loud by default): `COWORK_HARNESS_SOFT_MISSING=1` downgrades a missing mount source from a hard error to warn-and-exclude (an excluded *folder* is still named to a host-loop sub-agent, as one the shell cannot reach — production lists a mount-failed folder rather than dropping it, see [subagents.md](./subagents.md)); `COWORK_HARNESS_ALLOW_CONFIG_DIR_WRITE=1` permits writing into an existing pinned `plugins.config_dir` (otherwise refused, to avoid clobbering a real Claude config).
-- **Staleness boundary** (the git-tracked-files-only default and its `git add`/hard-fail rationale are explained in [Test a local skill](#test-a-local-skill-in-one-command)): a **non-repo** source dir falls back to a raw walk instead; OS-junk like `.DS_Store` is always excluded; a partial exclusion emits a `::notice:: [stage]`. `COWORK_HARNESS_GITSET=0` opts out to a raw walk for every dir (and copies untracked files too); `COWORK_HARNESS_DEBUG_SKILLHASH=1` dumps the exact file set feeding the staleness hash on a mismatch (and flags OS-junk) so a drift source is one line. Declare per-plugin non-runtime paths in a `.cowork-hashignore` file (or the session `staleness.hash_ignore`). `COWORK_HARNESS_AGENT_SCOPE=skill` (opt-in) refines a scenario's `skills:` scope so a **skill-named** `agents/<name>.md` re-stales only that skill's cassettes instead of the whole fleet (generic agents stay shared; stamped into the fingerprint, so flipping it is a one-time re-record like `GITSET`).
-- **`skill` / `chat` defaults:** `COWORK_HARNESS_FIDELITY` sets the default fidelity tier for ad-hoc `skill`/`chat` runs (a `--fidelity` flag or a scenario's `fidelity:` still wins); `COWORK_HARNESS_MODEL` sets the default model on every lane that takes `--model` (`run`, `record`, `skill`, `probe-dispatch`, `chat`), where an explicit flag and a matrix `models:` axis both outrank it; `COWORK_HARNESS_OUTPUT_FORMAT` (`text`|`json`) sets the default output format. Each is overridden by the matching explicit flag. **Caveat:** `chat` only accepts `protocol`/`container`/`hostloop` — `microvm` and `cowork` are rejected (no Lima/auto-pick plumbing in the interactive REPL), so a `COWORK_HARNESS_FIDELITY` set to either is rejected loudly for `chat` even though `skill` accepts the full tier set.
-- **Secret scrubbing:** `COWORK_HARNESS_SCRUB_KEYS=<KEY1,KEY2>` adds extra env-var names whose values are redacted from logs (beyond the known auth tokens + `ANTHROPIC_CUSTOM_HEADERS`); `COWORK_HARNESS_SCRUB_VALUES=<v1,v2>` redacts literal values regardless of env. **Committed-cassette redaction:** `COWORK_HARNESS_REDACT_PATTERNS=<rx1,rx2>` / `COWORK_HARNESS_REDACT_KEYS=<k1,k2>` extend the privacy layer that scrubs recorded `controlOut` before a cassette is written for commit.
-- L2 microVM: `COWORK_VM_GATEWAY` overrides the Lima host-proxy gateway IP (default `192.168.5.2`; must be a canonical IPv4 literal — an invalid value is rejected, since it is interpolated into the guest firewall rule); `COWORK_VM_PROXY_PORT` pins the egress-proxy port (unset, the host binds an OS-assigned free port and threads that same value into the guest firewall + `HTTP(S)_PROXY`). The Lima instance is named `cowork-vm-<config-hash>` (a config change → a fresh VM); `COWORK_LIMA_INSTANCE` pins a fixed name, and `vm prune` removes orphaned ones.
-- **Advanced / internal escape hatches** (rarely needed): `PYTHON` overrides the interpreter for `lint` / scenario tooling (default `python3`); `COWORK_HARNESS_DEBUG=1` surfaces which `.env` files were loaded; `COWORK_HARNESS_CLAUDE_BIN=<path>` points the `--decider-llm` transport at a specific `claude` binary; `COWORK_HARNESS_ALLOW_AGENT_FALLBACK=1` lets the harness use the newest sibling agent binary when the baseline-pinned version is missing (a fidelity compromise — off by default) — a same-major.minor **patch** bump of the staged NATIVE binary is auto-accepted without this flag (the native binary carries no sha256 pin, so a patch drift is safe by default; it prints a loud stderr note naming the pinned and substituted versions). At `hostloop`, and at `cowork` **only when it resolves to host-loop** on the synced baseline, the staged **VM ELF** is auto-accepted on a patch bump too, because on that path it's a non-executed parity mount into the bash sidecar; a `cowork` baseline that resolves to VM-loop instead executes the ELF directly, so it keeps the strict sha-pinned exact-version match, same as `container`/`microvm`, which always keep it (the ELF is the executed agent there), so the flag remains required for any ELF drift on those tiers/paths, and for a major/minor gap everywhere; `COWORK_MANAGED_CONFIG=1` forces the managed-config path on `protocol` and `=0` suppresses the token-derived managed branch there (leaving the `ANTHROPIC_API_KEY` CI path intact); any other value is rejected rather than silently picking a branch; `COWORK_HARNESS_ALLOW_MISSING_PROMPT=1` downgrades a missing prompt asset to a warning; `COWORK_HARNESS_SAFE_STAGING_PREFIX=<a,b>` whitelists prefixes under which a delete in `outputs/` is allowed (otherwise delete-in-outputs fails loud); `COWORK_HARNESS_NO_HEARTBEAT=1` disables the idle-run heartbeat, `COWORK_HARNESS_HEARTBEAT_MS` tunes its interval (default 30000ms / 30s); `COWORK_HARNESS_CLI=/path/to/cli.js` overrides which built CLI the Python `cowork` pytest lane drives (see python/README.md); `COWORK_HARNESS_PYTEST_LANE=1` opts that lane in without `-m cowork` — the lane spawns node, Docker and a real model, so a run that did not ask for it by marker skips those tests, and this is the switch for a suite you want run whole.
-- Pin `baseline: desktop-<ver>` in the scenario and `model:` in the session for byte-stable runs; `baseline: latest` tracks the newest.
 
+### Networking and loop
+
+The egress proxy URL and Docker network are **not** overridable: each run builds its own per-run sidecar and network, and pointing a run at outside infrastructure would move the boundary `boundary-check` verifies.
+
+- `COWORK_PROXY_IMAGE` — overrides the egress proxy Docker image name (default `cowork-egress-proxy:5`; set to an empty or blank value, it falls back to the default). It can also be set in `.env` or a `--dotenv` file; the per-run sidecar and `doctor` both read that value.
+- `CLAUDE_FORCE_HOST_LOOP=1` — forces the host-loop path regardless of the baseline's loop decision (the `cowork` tier's auto-pick).
+- `COWORK_LIMACTL` — overrides the `limactl` binary path (default `/opt/homebrew/bin/limactl`).
+
+### Strictness escape hatches
+
+The harness fails loud by default; these relax it.
+
+- `COWORK_HARNESS_SOFT_MISSING=1` — downgrades a missing mount source from a hard error to warn-and-exclude (an excluded *folder* is still named to a host-loop sub-agent, as one the shell cannot reach — production lists a mount-failed folder rather than dropping it, see [subagents.md](./subagents.md)).
+- `COWORK_HARNESS_ALLOW_CONFIG_DIR_WRITE=1` — permits writing into an existing pinned `plugins.config_dir` (otherwise refused, to avoid clobbering a real Claude config).
+
+### Staleness boundary
+
+The git-tracked-files-only default and its `git add`/hard-fail rationale are explained in [Test a local skill](#test-a-local-skill-in-one-command). A **non-repo** source dir falls back to a raw walk instead; OS-junk like `.DS_Store` is always excluded; a partial exclusion emits a `::notice:: [stage]`. Declare per-plugin non-runtime paths in a `.cowork-hashignore` file (or the session `staleness.hash_ignore`).
+
+- `COWORK_HARNESS_GITSET=0` — opts out to a raw walk for every dir (and copies untracked files too).
+- `COWORK_HARNESS_DEBUG_SKILLHASH=1` — dumps the exact file set feeding the staleness hash on a mismatch (and flags OS-junk) so a drift source is one line.
+- `COWORK_HARNESS_AGENT_SCOPE=skill` (opt-in) — refines a scenario's `skills:` scope so a **skill-named** `agents/<name>.md` re-stales only that skill's cassettes instead of the whole fleet (generic agents stay shared; stamped into the fingerprint, so flipping it is a one-time re-record like `GITSET`).
+
+### `skill` / `chat` defaults
+
+Each is overridden by the matching explicit flag.
+
+- `COWORK_HARNESS_FIDELITY` — the default fidelity tier for ad-hoc `skill`/`chat` runs (a `--fidelity` flag or a scenario's `fidelity:` still wins). **Caveat:** `chat` only accepts `protocol`/`container`/`hostloop` — `microvm` and `cowork` are rejected (no Lima/auto-pick plumbing in the interactive REPL), so a `COWORK_HARNESS_FIDELITY` set to either is rejected loudly for `chat` even though `skill` accepts the full tier set.
+- `COWORK_HARNESS_MODEL` — the default model on every lane that takes `--model` (`run`, `record`, `skill`, `probe-dispatch`, `chat`), where an explicit flag and a matrix `models:` axis both outrank it.
+- `COWORK_HARNESS_OUTPUT_FORMAT` (`text`|`json`) — the default output format.
+
+### Secret scrubbing and cassette redaction
+
+- `COWORK_HARNESS_SCRUB_KEYS=<KEY1,KEY2>` — adds extra env-var names whose values are redacted from logs (beyond the known auth tokens + `ANTHROPIC_CUSTOM_HEADERS`).
+- `COWORK_HARNESS_SCRUB_VALUES=<v1,v2>` — redacts literal values regardless of env.
+- `COWORK_HARNESS_REDACT_PATTERNS=<rx1,rx2>` — extends the committed-cassette privacy layer that scrubs recorded `controlOut` before a cassette is written for commit.
+- `COWORK_HARNESS_REDACT_KEYS=<k1,k2>` — extends the same committed-cassette privacy layer.
+
+### L2 microVM
+
+- `COWORK_VM_GATEWAY` — overrides the Lima host-proxy gateway IP (default `192.168.5.2`; must be a canonical IPv4 literal — an invalid value is rejected, since it is interpolated into the guest firewall rule).
+- `COWORK_VM_PROXY_PORT` — pins the egress-proxy port (unset, the host binds an OS-assigned free port and threads that same value into the guest firewall + `HTTP(S)_PROXY`).
+- `COWORK_LIMA_INSTANCE` — pins a fixed Lima instance name. By default the instance is named `cowork-vm-<config-hash>` (a config change → a fresh VM), and `vm prune` removes orphaned ones.
+
+### Advanced / internal escape hatches
+
+Rarely needed.
+
+- `PYTHON` — overrides the interpreter for `lint` / scenario tooling (default `python3`).
+- `COWORK_HARNESS_DEBUG=1` — surfaces which `.env` files were loaded.
+- `COWORK_HARNESS_CLAUDE_BIN=<path>` — points the `--decider-llm` transport at a specific `claude` binary.
+- `COWORK_HARNESS_ALLOW_AGENT_FALLBACK=1` — lets the harness use the newest sibling agent binary when the baseline-pinned version is missing (a fidelity compromise — off by default). A same-major.minor **patch** bump of the staged NATIVE binary is auto-accepted without this flag (the native binary carries no sha256 pin, so a patch drift is safe by default; it prints a loud stderr note naming the pinned and substituted versions). At `hostloop`, and at `cowork` **only when it resolves to host-loop** on the synced baseline, the staged **VM ELF** is auto-accepted on a patch bump too, because on that path it's a non-executed parity mount into the bash sidecar; a `cowork` baseline that resolves to VM-loop instead executes the ELF directly, so it keeps the strict sha-pinned exact-version match, same as `container`/`microvm`, which always keep it (the ELF is the executed agent there), so the flag remains required for any ELF drift on those tiers/paths, and for a major/minor gap everywhere.
+- `COWORK_MANAGED_CONFIG=1` — forces the managed-config path on `protocol`, and `=0` suppresses the token-derived managed branch there (leaving the `ANTHROPIC_API_KEY` CI path intact); any other value is rejected rather than silently picking a branch.
+- `COWORK_HARNESS_ALLOW_MISSING_PROMPT=1` — downgrades a missing prompt asset to a warning.
+- `COWORK_HARNESS_SAFE_STAGING_PREFIX=<a,b>` — whitelists prefixes under which a delete in `outputs/` is allowed (otherwise delete-in-outputs fails loud).
+- `COWORK_HARNESS_NO_HEARTBEAT=1` — disables the idle-run heartbeat.
+- `COWORK_HARNESS_HEARTBEAT_MS` — tunes the idle-run heartbeat interval (default 30000ms / 30s).
+- `COWORK_HARNESS_CLI=/path/to/cli.js` — overrides which built CLI the Python `cowork` pytest lane drives (see python/README.md).
+- `COWORK_HARNESS_PYTEST_LANE=1` — opts that lane in without `-m cowork`. The lane spawns node, Docker and a real model, so a run that did not ask for it by marker skips those tests, and this is the switch for a suite you want run whole.
+
+### Byte-stable runs
+
+Pin `baseline: desktop-<ver>` in the scenario and `model:` in the session for byte-stable runs; `baseline: latest` tracks the newest.
