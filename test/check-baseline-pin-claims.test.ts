@@ -37,6 +37,10 @@ describe("checkBaselinePinClaims", () => {
     expect(errors[1]).toMatch(/^docs\/README\.md:1 /);
   });
 
+  it("rejects a pin at the start of a sentence", () => {
+    expect(checkBaselinePinClaims([TEMPLATE_OK, { path: "a.md", text: "Currently `desktop-2.9939.2` is the newest." }])).toHaveLength(1);
+  });
+
   it("rejects a pin that wraps onto the next line", () => {
     expect(checkBaselinePinClaims([TEMPLATE_OK, { path: "a.md", text: "(currently\n  `desktop-2.9939.2`)" }])).toHaveLength(1);
   });

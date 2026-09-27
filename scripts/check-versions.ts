@@ -513,7 +513,7 @@ export function checkBaselinePinClaims(files: { path: string; text: string }[]):
   let templates = 0;
   for (const { path, text } of files) {
     if (/^docs\/cowork-spawn-contract-[^/]*\.md$/.test(path) || path.startsWith("docs/decisions/")) continue;
-    for (const m of text.matchAll(/currently\s+`?desktop-\d/g))
+    for (const m of text.matchAll(/currently\s+`?desktop-\d/gi))
       errors.push(
         `${path}:${lineOf(text, m.index)} pins the current baseline in prose ("${m[0]}…") — it goes stale at the next sync; ` +
           "point at README § Status or `cowork-harness list` instead",
