@@ -73,6 +73,11 @@
 //       manifest is the sole evidence behind the user-facing "likely a FALSE NEGATIVE (real Cowork ships
 //       them)" claim, and until this invariant it had sat two baselines behind with nothing saying so — a
 //       consumer who correctly distrusted an inherited note had nothing to check it against.
+//   15. no present-tense baseline pin outside the sentences above: no shipped doc, llms.txt or issue template
+//       may say "currently `desktop-X`" — such a pin goes stale at the next `sync` whatever its value, and the
+//       only live-pin sentences are the ones 7/9/11 derive from baselines/. An issue template may carry no
+//       X.Y.Z version at all: its placeholders are examples, and a real version in one reads as current.
+//       See `checkBaselinePinClaims`.
 import { execFileSync } from "node:child_process";
 import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -90,16 +95,18 @@ const TASK_RECIPES = ".claude/skills/cowork-harness/references/task-recipes.md";
  *  Enumerated from git rather than by walking the filesystem, which gets the untracked working-notes
  *  directory excluded as a consequence of it being untracked instead of by a hardcoded path — and the
  *  same for any other scratch file a developer happens to have sitting under `docs/`. */
-function shippedDocs(): { path: string; text: string }[] {
-  const tracked = execFileSync("git", ["-C", REPO_ROOT, "ls-files", "-z", "*.md"], { encoding: "utf8" })
+export function shippedDocs(extra: string[] = []): { path: string; text: string }[] {
+  const tracked = execFileSync("git", ["-C", REPO_ROOT, "ls-files", "-z", "*.md", ...extra], { encoding: "utf8" })
     .split("\0")
     .filter(Boolean)
     // An ALLOW-list of prefixes, not a deny-list: `baselines/prompts/**` is captured prompt text rather
     // than documentation, `test/**` holds fixtures that may name a bogus schema on purpose, and
-    // `.github/**` ships to nobody. A new directory should have to opt in.
+    // `.github/**` ships to nobody. A new directory should have to opt in. A non-markdown path can only
+    // have come from `extra`, which a caller names explicitly, so it bypasses the prefix list.
     .filter(
       (p) =>
-        p !== "CHANGELOG.md" && (!p.includes("/") || ["docs/", ".claude/skills/", "examples/", "python/"].some((d) => p.startsWith(d))),
+        p !== "CHANGELOG.md" &&
+        (!p.endsWith(".md") || !p.includes("/") || ["docs/", ".claude/skills/", "examples/", "python/"].some((d) => p.startsWith(d))),
     );
   if (tracked.length === 0) throw new Error("shippedDocs(): git ls-files returned no markdown — the corpus would be empty");
   return tracked.map((path) => ({ path, text: r(path) }));
@@ -487,6 +494,38 @@ export function checkCassetteVersionClaims(opts: {
       if (!have.has(Number(m[1])))
         errors.push(`${path} references schema/cassette.v${m[1]}.json, which is not in schema/ (have v${sorted.join(", v")})`);
 
+  return errors;
+}
+
+/** Invariant 15 — no present-tense baseline pin, and no real version in an issue template.
+ *
+ *  Three doc indexes copied the spawn-contract doc's "(currently `desktop-X`)" parenthetical and were then
+ *  left two baselines behind, because invariant 7 exempts that doc as frozen history and nothing read the
+ *  copies. The bug-report template's placeholders drifted the same way. A pin of either kind is wrong the
+ *  moment the next baseline ships, so the check bans the FORM rather than comparing the value: a correct
+ *  pin would pass a value check today and fail silently tomorrow.
+ *
+ *  The spawn-contract doc itself is exempt for the reason invariant 7 gives, and so are the dated decision
+ *  records under docs/decisions/: like CHANGELOG.md, they record what was true when they were written. */
+export function checkBaselinePinClaims(files: { path: string; text: string }[]): string[] {
+  const errors: string[] = [];
+  const lineOf = (text: string, i: number) => text.slice(0, i).split("\n").length;
+  let templates = 0;
+  for (const { path, text } of files) {
+    if (/^docs\/cowork-spawn-contract-[^/]*\.md$/.test(path) || path.startsWith("docs/decisions/")) continue;
+    for (const m of text.matchAll(/currently\s+`?desktop-\d/gi))
+      errors.push(
+        `${path}:${lineOf(text, m.index)} pins the current baseline in prose ("${m[0]}…") — it goes stale at the next sync; ` +
+          "point at README § Status instead",
+      );
+    if (!path.startsWith(".github/ISSUE_TEMPLATE/")) continue;
+    templates++;
+    // An environment example ("Node 22.13.0", "macOS 15.1.1") is the reporter's own toolchain, not a
+    // harness or baseline version, so a version right after one of those names is not flagged.
+    for (const m of text.matchAll(/(?<!\b(?:Node|macOS|Docker|Podman|Python)\s+)(?<![\w.])\d+\.\d+\.\d+(?![\w.])/g))
+      errors.push(`${path}:${lineOf(text, m.index)} carries the version "${m[0]}" — a template placeholder should be version-free (X.Y.Z)`);
+  }
+  if (templates === 0) errors.push("no .github/ISSUE_TEMPLATE/ file was scanned — the template half of invariant 15 would pass vacuously");
   return errors;
 }
 
@@ -884,6 +923,9 @@ export function checkVersions(): { ok: boolean; errors: string[]; values: Record
         `expected at least 2 shipped-doc citations of the form "rootfs manifest captured at Desktop \`X\`" (SKILL.md + docs/scenario.md), found ${sites}`,
       );
   }
+
+  // 15. present-tense baseline pins and versioned issue-template placeholders (see `checkBaselinePinClaims`).
+  errors.push(...checkBaselinePinClaims(shippedDocs(["llms.txt", ".github/ISSUE_TEMPLATE/*.yml"])));
 
   return {
     ok: errors.length === 0,

@@ -839,18 +839,20 @@ from evaluation (not vacuously passed). Re-record with a current harness to enab
 `computer_links_resolve_if_present`, `no_unexpected_files`, `input_unmodified`)
 run on `replay` **when the cassette carries an artifact manifest** — `record` snapshots `outputs/` + connected
 folders (paths + hashes + small JSON bodies) into the cassette, and `replay` materializes that snapshot to
-evaluate them token-free. `artifact_json` needs the JSON body inlined (small files); a hash-only (oversized)
-entry still satisfies `file_exists` but not `artifact_json`. `computer_links_resolve` resolves BOTH
+evaluate them token-free. `artifact_json` needs the JSON body inlined (small files), and `artifact_text` needs
+the body it matches against the same way; a hash-only (oversized) entry still satisfies `file_exists` but
+neither of those two. `computer_links_resolve` resolves BOTH
 `/sessions/…/mnt/…`-shaped links and host-shaped (hostloop) links against the manifest — a host-shaped link
 normalizes to a mount-relative path first (via the recorded connected-folder prefixes + the outputs/uploads
 mounts), since replay has no live filesystem to probe directly (that direct check only happens on a live
-`run`/`verify-run`). Without a manifest (older cassettes), all seven are **skipped** (loud) — (five need
-the manifest; two more — `no_unexpected_files` and `input_unmodified` — need the pre-run path/hash capture).
+`run`/`verify-run`). Without a manifest (older cassettes), every one of these is **skipped** (loud).
+`no_unexpected_files` and `input_unmodified` additionally need the pre-run path/hash capture (`preRunPaths` /
+`preRunHashes`), and are excluded with a loud warning when it is missing, even if a manifest is present.
 
 A `mode: r` connected folder (see [session.md](./session.md)) holds pre-existing INPUTS, not deliverables —
 `record` captures its contents **body-less** (path + hash, `truncated: true`, no `body`): `file_exists` and
 `computer_links_resolve` still pass against it (the placeholder materializes on replay), while `artifact_json`
-against it reports a clear evidence-unavailable identically on live, verify-run, and replay (so a cassette
+or `artifact_text` against it reports a clear evidence-unavailable identically on live, verify-run, and replay (so a cassette
 can't record green and replay red). This keeps a read-only input out of the cassette's committed content
 (no bloat, no `binary` privacy finding) while `no_unexpected_files`/`computer_links_resolve` keep enumerating
 the folder as a user-visible root. A `mode: rw`/`rwd` folder's contents are captured with a full body, same
@@ -875,8 +877,8 @@ Two consequences for CI:
   `subagent_*` + `question_asked`/`gate_answers_delivered` (with `controlOut`) for content/structure; put
   **filesystem/egress** checks in a **nightly/pre-release live job**.
   A `replay`-based PR gate verifies artifact *content* only when the cassette carries an artifact
-  manifest (small inlined bodies, via `artifact_json`); without one it can't read the file, and
-  oversized/hash-only entries satisfy `file_exists` but not `artifact_json`.
+  manifest (small inlined bodies, via `artifact_json` or `artifact_text`); without one it can't read the file,
+  and oversized/hash-only entries satisfy `file_exists` but neither of those two.
 - On `replay`, skipped assertions are **absent** from `results[].assertions[]` (filtered before evaluation),
   not present-and-passing — so a CI script must not assume a fixed assertion count across the two lanes.
 

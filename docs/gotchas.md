@@ -32,7 +32,7 @@
 - **`lint` exits 127.** `python3` isn't on `PATH`. Install it or point `PYTHON` at an interpreter.
 - **A local skill folder loses its untracked files — and is REFUSED outright if nothing is tracked.**
   Untracked files are invisible to the mount, and zero tracked files is a hard failure rather than an
-  empty mount (`src/session.ts:675`) — `git add` the skill
+  empty mount (`src/session.ts`, the zero-tracked-files `BoundaryError`) — `git add` the skill
   first (see [docs/cli.md → Test a local skill in one command](./cli.md#test-a-local-skill-in-one-command)).
 - **`docker build` fails or the agent won't start on Apple Silicon.** Confirm `--platform linux/arm64` is in
   your `docker build` invocation and that Docker Desktop's VM is arm64, not Rosetta-emulated.

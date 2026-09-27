@@ -50,3 +50,34 @@ describe("schema/run-result.json ↔ RunResult type (name-level sync)", () => {
     expect(stale, `schema/run-result.json declares properties the type no longer has: ${stale.join(", ")}`).toEqual([]);
   });
 });
+
+describe("SPEC.md's RunResult excerpt ↔ schema/run-result.json", () => {
+  // SPEC.md shows an abridged RunResult: the fields most consumers branch on. One direction only — a key
+  // SPEC omits is by design, but a key SPEC shows must still exist, so a rename or removal cannot leave the
+  // old name in the contract document. The block must also say it is abridged and where the full list is,
+  // or a reader takes the missing fields as absent.
+  const ANCHOR = "**`RunResult`** (`src/types.ts`):";
+  const spec = readFileSync(resolve("SPEC.md"), "utf8");
+  const at = spec.indexOf(ANCHOR);
+  const fence = spec.indexOf("```jsonc\n", at);
+  const intro = spec.slice(at + ANCHOR.length, fence);
+  const block = spec.slice(fence, spec.indexOf("\n```", fence + 1));
+  const specKeys = [...block.matchAll(/^ {2}"([\w$]+)\??"\s*:/gm)].map((m) => m[1]);
+  const schema = JSON.parse(readFileSync(resolve("schema/run-result.json"), "utf8")) as { properties: Record<string, unknown> };
+
+  it("found the block (a moved anchor must fail loudly, not empty the check)", () => {
+    expect(at, `SPEC.md no longer has the line ${ANCHOR}`).toBeGreaterThanOrEqual(0);
+    expect(fence - at, "the RunResult anchor is no longer directly followed by its jsonc block").toBeLessThan(800);
+    expect(specKeys.length).toBeGreaterThan(20);
+  });
+
+  it("every top-level key SPEC.md shows is a real schema property", () => {
+    const stale = specKeys.filter((k) => !(k in schema.properties));
+    expect(stale, `SPEC.md's RunResult block shows keys schema/run-result.json does not declare: ${stale.join(", ")}`).toEqual([]);
+  });
+
+  it("the block says it is abridged and names the schema file as the full list", () => {
+    expect(intro).toMatch(/abridged/i);
+    expect(intro).toContain("`schema/run-result.json`");
+  });
+});

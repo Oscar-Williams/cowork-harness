@@ -310,6 +310,20 @@ All notable changes to this project are documented here. The format is based on
   tracked `SKILL.md`, and a target whose git-tracked set could not be read at all. Previously these ran both
   turns and failed or degraded afterwards.
 
+### Documentation
+
+- Corrected facts that had drifted from the code: three doc indexes named `desktop-2.2553.1` as the
+  current baseline and the bug-report template carried stale versions; `docs/scenario.md` counted seven
+  filesystem assertions where there are eight, and `docs/cassette.md`'s filesystem section omitted
+  `artifact_text` and `computer_links_resolve_if_present`, and several passages named only `artifact_json`
+  as needing an artifact's inlined body when `artifact_text` needs it too; four env vars were missing by full name from
+  `docs/cli.md`'s knobs list; `examples/README.md` did not list `subagent-manifest-probe.yaml`; eight
+  `file:line` citations pointed at the wrong line; `SPEC.md`'s `RunResult` block did not say it is abridged
+  and lacked `scan` and `fsDiff`. New checks fail on a present-tense baseline pin or a versioned issue
+  template (`check:versions`), a line-number citation, an env var missing from `docs/cli.md`, a
+  filesystem-assertion list that disagrees with the code, an uncatalogued example scenario, and a stale key
+  in `SPEC.md`'s `RunResult` block.
+
 ## [3.9.0] — 2026-09-25
 
 ### Upgrade notes

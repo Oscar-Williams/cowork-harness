@@ -582,8 +582,8 @@ debugging a run's behavior. The two are **numbered independently**: a bare "gotc
    the stochastic path flags the run `nonDeterministic`. The LLM decider is one mechanism, two
    spellings: `on_unanswered: llm` (YAML) and `--decider-llm` (CLI). The bare `--on-unanswered llm`
    is rejected (use `--decider-llm`). `agent` is **retired** — `on_unanswered: agent` is rejected by
-   the schema. (`src/types.ts` — the `on_unanswered` enum; `src/cli.ts:899` — the CLI-side
-   `--on-unanswered` value check.)
+   the schema. (`src/types.ts` — the `on_unanswered` enum; `src/cli.ts` — the CLI-side
+   `--on-unanswered` value check; grep `--on-unanswered llm is not a user flag`.)
 
 4. **`--on-unanswered first` is non-deterministic too** — it picks option 1 and is flagged
    `nonDeterministic`; not a deterministic substitute for scripted answers.
@@ -664,8 +664,8 @@ debugging a run's behavior. The two are **numbered independently**: a bare "gotc
 21. **A `mode: r` connected folder's contents are recorded body-less, not excluded.** `record` captures a
     read-only folder's files as `path` + `bytes` + `sha256` only (`truncated: true`, no `body`) — it's an
     input the agent read, not a deliverable it wrote. `file_exists`/`computer_links_resolve` still pass
-    against it on replay (the hash-only entry still materializes a 0-byte placeholder); `artifact_json`
-    reports a clear evidence-unavailable on every lane (live/verify-run/replay agree). This is also why a
+    against it on replay (the hash-only entry still materializes a 0-byte placeholder); `artifact_json`/`artifact_text`
+    report a clear evidence-unavailable on every lane (live/verify-run/replay agree). This is also why a
     `mode: r` input never trips the `binary` privacy finding
     or needs `--allow` in `verify-cassettes` — only a *committed* body is scanned. `scaffold` won't emit
     `file_exists` for one either, since it isn't in `RunResult.artifacts`. A `mode: rw`/`rwd` folder's

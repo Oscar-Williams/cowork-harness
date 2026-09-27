@@ -21,7 +21,7 @@ body:
     attributes:
       label: Harness version
       description: Output of `cowork-harness --version` (and whether it's an npm install or a source checkout).
-      placeholder: "3.6.0 (npm -g)"
+      placeholder: "X.Y.Z (npm -g)"
     validations:
       required: true
   - type: dropdown
@@ -35,8 +35,8 @@ body:
     id: baseline
     attributes:
       label: Platform baseline
-      description: Which baselines/desktop-*.json (and your Desktop app version if relevant)
-      placeholder: "desktop-2.2553.1 / app 2.2553.1 / agent 2.1.275"
+      description: Which baselines/desktop-*.json the run used — the scenario's `baseline:` (default `latest` = the newest `baselines/desktop-*.json`; README § Status names it), and your Desktop app version if relevant
+      placeholder: "desktop-X.Y.Z / app X.Y.Z / agent X.Y.Z"
   - type: textarea
     id: env
     attributes:

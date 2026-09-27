@@ -150,7 +150,7 @@ reproduce. See [docs/scenario.md](./scenario.md#how-an-assertion-edit-reaches-ci
     { "path": "uploads/report.pdf", "bytes": 51200, "sha256": "…", "truncated": true, "truncationReason": "input" }, // uploaded file under an inputRoots root → body-less, hash-only (see below), regardless of size
     { "path": "outputs/link-to-elsewhere", "bytes": 0, "sha256": "", "linkKind": "symlink" } // v10: symlink/hardlink — path+kind only, never dereferenced, so a link stray is still visible to no_unexpected_files
   ],
-  "fingerprint": { "baseline": "1.15962.1", "skillHash": "…", "mode": "git", "contentSig": "…", "fileSigs": [["skills/x/SKILL.md", "…"]], "skillSources": ["…"], "promptAssetsHash": "…" }, // staleness tripwire (v5: fileSigs only; v6: mode + git default; v7: NUL-delimited hash entries; v8: folds fixed-length content shas + type-prefixed/NUL-framed entries; promptAssetsHash: sha16 over the baseline's committed prompt-asset files, keyed independently of `baseline` (appVersion) — see the prompt-assets staleness class below)
+  "fingerprint": { "baseline": "…", "skillHash": "…", "mode": "git", "contentSig": "…", "fileSigs": [["skills/x/SKILL.md", "…"]], "skillSources": ["…"], "promptAssetsHash": "…" }, // staleness tripwire (v5: fileSigs only; v6: mode + git default; v7: NUL-delimited hash entries; v8: folds fixed-length content shas + type-prefixed/NUL-framed entries; promptAssetsHash: sha16 over the baseline's committed prompt-asset files, keyed independently of `baseline` (appVersion) — see the prompt-assets staleness class below)
   "sessionFingerprint": "…", // v9+: hash of the session's content-relevant SHAPE (model/folders/plugins/skills/mcp/egress/web_fetch, plus projects and agent_env when set) — verify-cassettes-only, never the default replay verdict
   "folderPrefixMap": [{ "from": "/Users/me/myproject", "mount": "myproject" }], // v9+: record-time connected-folder host-path → mount-name map; computer_links_resolve uses THIS on replay
   "timeline": [ /* … */ ], // harness-observation timeline (see src/agent/timeline.ts): seq/ts/line/type per meaningful in-run event, in total order; `ts` is wall-clock-observation-time, frozen not recomputed on replay — informational only, no verdict impact. ABSENT on a pre-timeline cassette or when timeline.jsonl was empty/unreadable at record time
@@ -560,8 +560,8 @@ the per-path sha256 baseline recorded alongside it).
 
 ### Filesystem assertions — replay-checkable WITH an artifact manifest
 
-`file_exists`, `user_visible_artifact`, `artifact_json`, `computer_links_resolve`, `no_unexpected_files`, and
-`input_unmodified` run on replay **when the cassette carries an `artifacts` manifest** — `record` snapshots
+`file_exists`, `artifact_text`, `user_visible_artifact`, `artifact_json`, `computer_links_resolve`,
+`computer_links_resolve_if_present`, `no_unexpected_files`, and `input_unmodified` run on replay **when the cassette carries an `artifacts` manifest** — `record` snapshots
 `outputs/` + connected folders and `replay` materializes that snapshot to evaluate them token-free.
 `no_unexpected_files` additionally requires `preRunPaths` (the pre-run path baseline, optional cassette
 metadata since 0.24 — no version bump); without it the key is **excluded with a loud warning**, not a
@@ -576,12 +576,15 @@ would falsely report a change. The pre-run baseline also walks `uploads` (alongs
 connected folders), so an uploaded file is a valid `input_unmodified` target even though `uploads` stays
 **out** of `no_unexpected_files` (that key's baseline is the user-visible tree only — an upload is an
 input, not a place a stray output would land). `artifact_json` needs the JSON `body`
-inlined (small files); a hash-only (`truncated`) entry still satisfies `file_exists` but not `artifact_json`.
+inlined (small files), and `artifact_text` needs the body it matches against the same way; a hash-only
+(`truncated`) entry still satisfies `file_exists` but neither of those two.
 The inline cap is 64 KiB; raise it with `record --max-artifact-bytes <n>` (or
 `COWORK_HARNESS_MAX_ARTIFACT_BYTES`) so a large structured deliverable stays replay-checkable, and `record`
-fails fast if an `artifact_json` targets an artifact it had to truncate (that would pass at record but fail
-at replay). `computer_links_resolve` resolves every `computer://` link in the transcript against the same
-manifest, with host-shaped links normalized via the recorded session folders. Without a manifest (older
+fails fast if an `artifact_json` or `artifact_text` targets an artifact it had to truncate (that would pass at
+record but fail at replay). `computer_links_resolve` resolves every `computer://` link in the transcript against
+the same manifest, with host-shaped links normalized via the recorded session folders;
+`computer_links_resolve_if_present` resolves against the same manifest and differs only in passing when the
+transcript has no link at all. Without a manifest (older
 cassettes), these are skipped.
 
 **Read-only (`mode: r`) connected-folder contents are captured body-less.** A folder mounted `mode: r` in
@@ -589,8 +592,8 @@ cassettes), these are skipped.
 the same way it snapshots an over-cap file: path + `bytes` + `sha256`, `truncated: true`, **no `body`**,
 regardless of size. The entry still lands in `artifacts[]` (unlike a fully-excluded path) so
 `materializeManifest` writes a 0-byte placeholder at replay and `computer_links_resolve`/`file_exists`
-resolve identically live and on replay; only `artifact_json` (which needs the inlined body) can't target
-one. Two side benefits: no cassette bloat from a large input file, and no `binary` privacy finding (the
+resolve identically live and on replay; only `artifact_json` and `artifact_text` (which need the inlined
+body) can't target one. Two side benefits: no cassette bloat from a large input file, and no `binary` privacy finding (the
 scanner only flags a *committed* binary body) — so a `mode: r` input never needs `--allow`. A `mode: rw`/`rwd`
 folder's contents are captured with a full body exactly as `outputs/` is.
 
