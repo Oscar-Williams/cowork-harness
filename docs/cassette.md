@@ -560,8 +560,8 @@ the per-path sha256 baseline recorded alongside it).
 
 ### Filesystem assertions — replay-checkable WITH an artifact manifest
 
-`file_exists`, `user_visible_artifact`, `artifact_json`, `computer_links_resolve`, `no_unexpected_files`, and
-`input_unmodified` run on replay **when the cassette carries an `artifacts` manifest** — `record` snapshots
+`file_exists`, `artifact_text`, `user_visible_artifact`, `artifact_json`, `computer_links_resolve`,
+`computer_links_resolve_if_present`, `no_unexpected_files`, and `input_unmodified` run on replay **when the cassette carries an `artifacts` manifest** — `record` snapshots
 `outputs/` + connected folders and `replay` materializes that snapshot to evaluate them token-free.
 `no_unexpected_files` additionally requires `preRunPaths` (the pre-run path baseline, optional cassette
 metadata since 0.24 — no version bump); without it the key is **excluded with a loud warning**, not a
@@ -576,12 +576,15 @@ would falsely report a change. The pre-run baseline also walks `uploads` (alongs
 connected folders), so an uploaded file is a valid `input_unmodified` target even though `uploads` stays
 **out** of `no_unexpected_files` (that key's baseline is the user-visible tree only — an upload is an
 input, not a place a stray output would land). `artifact_json` needs the JSON `body`
-inlined (small files); a hash-only (`truncated`) entry still satisfies `file_exists` but not `artifact_json`.
+inlined (small files), and `artifact_text` needs the body it matches against the same way; a hash-only
+(`truncated`) entry still satisfies `file_exists` but neither of those two.
 The inline cap is 64 KiB; raise it with `record --max-artifact-bytes <n>` (or
 `COWORK_HARNESS_MAX_ARTIFACT_BYTES`) so a large structured deliverable stays replay-checkable, and `record`
-fails fast if an `artifact_json` targets an artifact it had to truncate (that would pass at record but fail
-at replay). `computer_links_resolve` resolves every `computer://` link in the transcript against the same
-manifest, with host-shaped links normalized via the recorded session folders. Without a manifest (older
+fails fast if an `artifact_json` or `artifact_text` targets an artifact it had to truncate (that would pass at
+record but fail at replay). `computer_links_resolve` resolves every `computer://` link in the transcript against
+the same manifest, with host-shaped links normalized via the recorded session folders;
+`computer_links_resolve_if_present` resolves against the same manifest and differs only in passing when the
+transcript has no link at all. Without a manifest (older
 cassettes), these are skipped.
 
 **Read-only (`mode: r`) connected-folder contents are captured body-less.** A folder mounted `mode: r` in
