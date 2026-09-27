@@ -520,7 +520,9 @@ export function checkBaselinePinClaims(files: { path: string; text: string }[]):
       );
     if (!path.startsWith(".github/ISSUE_TEMPLATE/")) continue;
     templates++;
-    for (const m of text.matchAll(/(?<![\w.])\d+\.\d+\.\d+(?![\w.])/g))
+    // An environment example ("Node 22.13.0", "macOS 15.1.1") is the reporter's own toolchain, not a
+    // harness or baseline version, so a version right after one of those names is not flagged.
+    for (const m of text.matchAll(/(?<!\b(?:Node|macOS|Docker|Podman|Python)\s+)(?<![\w.])\d+\.\d+\.\d+(?![\w.])/g))
       errors.push(`${path}:${lineOf(text, m.index)} carries the version "${m[0]}" — a template placeholder should be version-free (X.Y.Z)`);
   }
   if (templates === 0) errors.push("no .github/ISSUE_TEMPLATE/ file was scanned — the template half of invariant 15 would pass vacuously");

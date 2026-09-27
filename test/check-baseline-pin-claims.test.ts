@@ -76,6 +76,14 @@ describe("checkBaselinePinClaims", () => {
     ]);
   });
 
+  it("accepts an environment example that happens to have three version parts", () => {
+    const env = {
+      path: ".github/ISSUE_TEMPLATE/bug_report.yml",
+      text: 'placeholder: "macOS 15.1.1 arm64, Node 22.13.0, Docker 27.3.1, Python 3.12.4, ..."\n',
+    };
+    expect(checkBaselinePinClaims([env])).toEqual([]);
+  });
+
   it("fails when no issue template was scanned, rather than passing vacuously", () => {
     expect(checkBaselinePinClaims([{ path: "README.md", text: "" }])).toEqual([
       expect.stringContaining("no .github/ISSUE_TEMPLATE/ file was scanned"),
