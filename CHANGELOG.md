@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [3.10.0] — 2026-09-27
+
 ### Upgrade notes
 
 - **Outputs-delete verdicts loosen.** A delete the scanner only infers from a command's text — no
@@ -42,8 +44,43 @@ All notable changes to this project are documented here. The format is based on
   schema is not tightened. This is the same class of change as the `enum-value-invalid` rule that shipped in
   3.2.0, so it ships in a minor release. Running `python3 scenario.py lint` directly stays behaviourally
   unchanged.
+- **`verify-cassettes` can now fail on a cassette it previously passed.** The reference redaction policy and
+  the privacy scanner's `path` class cover more host-path roots and boundaries (temp directories,
+  `/private/var/`, `/Volumes/`, slugged `-Users-<user>-…` segments, paths inside `computer://`/`file://`
+  links, after a backtick, `,`, `|` or `<`; see Fixed). The finding class (`path`), the redaction token
+  format, the JSON schema and the exit codes are unchanged. A `.cowork-redact.json` copied by an earlier
+  `init-redact` lacks the new rules and keeps the old slow ones: re-run `init-redact --force` (after saving
+  any tailoring). That only protects future recordings. No command re-redacts a committed cassette, so one
+  that now fails must be re-recorded, or reviewed and cleared with `--allow-path`.
+- **Cassettes: re-record `hostloop` cassettes pinned to Desktop 2.7032.0 or later; nothing else.** What
+  moved: under `src/runtime` and `src/hostloop`, the host-loop spawn for those baselines (agent cwd,
+  `--settings`, the `/var/empty` deny rules on `--disallowedTools`, the path gate's re-anchoring, and one
+  prompt line). A cassette's fingerprint (baseline version, skill and file hashes, session shape, and the
+  baseline prompt-asset hash) covers none of these, and no baseline changed, so `verify-cassettes` will
+  not report such a cassette stale; re-record it so it freezes the new behaviour. The committed
+  `hostloop-computer-links` cassette is already re-recorded. `container`, `microvm` and `protocol` spawns
+  are unchanged: the `microvm` diff is the in-VM stop on interrupt, `src/runtime/agent-image.ts` only
+  changes how the egress proxy image name is read, and nothing moved under `src/staging`, `src/session.ts`,
+  `baselines/` or the cassette constants (`CASSETTE_VERSION` stays 12, same hash format). The other two
+  committed cassettes (`example-pdf-skill` at `container`, `example-multiselect-gate` at `protocol`) need
+  no re-record. `verify-cassettes examples/replays/` reports all three clean, and all three replay green.
+- **Live-validated against `desktop-2.9939.2`** (agent 2.1.281) on 2026-09-27, on the release code, all
+  four tiers: `boundary-check` 6/6, e2e self-tests 9/9 (including `smoke-l2-microvm` in a real VM and the
+  `--decider-llm` path), `run examples/scenarios/` 7/7 on its first run, and `test:live` 21/21 with none
+  skipped, including the host-loop probe that a relative sub-agent `Write` is refused from Desktop 2.7032.0
+  and the live outputs-delete check. On its first run `test:live` was 18/21: the two outputs-delete cases
+  and the container `--resume` case failed before inference while other container runs on the machine
+  held Docker's network address pool ("Docker address pool exhausted"). All three passed on one serial
+  re-run. The protocol tier runs the host `claude` CLI (2.1.283 here), not the staged agent. The model was
+  pinned to `claude-sonnet-5`, which the two previous passes ran on unpinned; the unpinned default had
+  moved to a costlier model. A VM-name argument to `vm delete` is a usage error (exit 2, category
+  `usage`). Details are in `DESIGN.md`'s scope note.
 
 ### Added
+
+- **`cowork-harness/secrets` also exports `KNOWN_SECRET_KEYS`**: the four env-var names whose values
+  `collectSecrets()` always scrubs (`CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`,
+  `ANTHROPIC_CUSTOM_HEADERS`), before any `COWORK_HARNESS_SCRUB_KEYS` additions.
 
 - **`errorSource: "decider_timeout"`** in `result.json` and `status.json` (and `schema/run-result.json`'s
   `errorSource` enum): the run ended because a `--decider-cmd` helper or a `--decider-dir` rendezvous did not
@@ -65,7 +102,8 @@ All notable changes to this project are documented here. The format is based on
   PR with a failing build or unit test was mergeable. It now runs with `if: always()` and fails unless
   every job it needs concluded `success` (a `failure`, `cancelled` or `skipped` prerequisite fails it), and
   it prints which one did not. A structural test in `test/workflow-structure.test.ts` fails if either half
-  is removed.
+  is removed. It also fails on `continue-on-error` on the gate, on any of its steps or on any job it needs,
+  and on a job-level `if:` on a needed job.
 - **A `COWORK_PROXY_IMAGE` set in `.env` or a `--dotenv` file now reaches the egress sidecar.** The sidecar read
   the variable once, when the CLI loaded, which is before `.env` is applied, so it ran the default proxy image while
   `doctor` checked the one `.env` named. A blank value is now treated as unset and falls back to the default
@@ -128,8 +166,9 @@ All notable changes to this project are documented here. The format is based on
   running, where it could finish a paid turn. One handler now owns the signal for the whole process: it
   kills `--decider-cmd` helpers, sends the agent SIGTERM and SIGKILLs it after 2 s (at once when there is
   no agent to wait for; a second signal skips the wait), reaps the container/network resources, and exits
-  130 (`SIGINT`) or 143 (`SIGTERM`) — so `status.json` ends `"error"`. The exit status a shell sees is
-  unchanged. `container`/`hostloop` keep their immediate container reap, with no added wait. The
+  130 (`SIGINT`) or 143 (`SIGTERM`) — so `status.json` ends `"error"`. When there is an agent to stop, it
+  first prints `::warning:: [interrupt] <signal> — stopping the agent and cleaning up before exit` to
+  stderr. The exit status a shell sees is unchanged. `container`/`hostloop` keep their immediate container reap, with no added wait. The
   `--decider-cmd` helper cleanup no longer re-raises the signal, which had bypassed all of this. A
   multi-scenario `run` interrupted mid-batch starts no further scenario, and an interrupted `record` never
   writes a cassette, even with `--allow-failing`. An interrupt while the run waits on a `--decider-cmd` gate
@@ -172,22 +211,16 @@ All notable changes to this project are documented here. The format is based on
   `/Volumes/` and any `-Users-<user>-…` / `-home-<user>-…` / `-root-…` segment — after a `/`, a quote, or at
   the start of a string or line, as `ls ~/.claude/projects` and `~/.claude.json` print them — keeping the
   `/mnt/` tail so links still resolve on replay. Its local-path rules are now case-insensitive, so every
-  path the scanner flags, the policy can fix — with known exceptions the scanner flags and the policy leaves,
-  among them a URL whose path carries a `:` before the root (an empty port `https://host:/Users/…`, a nested
-  `file://` or `computer://` link `https://h/file:///Users/…`) and a literal two-character `\n` or `\t`
-  escape directly before `/Volumes/` inside a string value; its root rules skip a segment inside an http(s) URL, and
+  path the scanner flags, the policy can fix — with the known exceptions listed in the entry below on long
+  unbroken text; its root rules skip a segment inside an http(s) URL, and
   `/Volumes/` must start a path, so `https://api.example.com/users/…` and a Docker `…/volumes/…` path are
   left alone — but not a host path passed as a URL query value (`http://localhost:3000/open?f=/Users/…` is
   still redacted). The scanner's `path` class flags the same roots and segments, and now also flags a host path
   inside a `computer://` or `file://` link (including `file://localhost/…`), after a backtick (a path quoted
   in the model's reply), and after a newline inside a raw event line (a one-path-per-line tool result) —
   all shapes its boundary check had skipped. Bare `/tmp/` is still not flagged: it is the in-VM home and appears
-  in clean recordings. **`verify-cassettes` can now fail on a cassette it previously passed**; the finding
-  class (`path`), the redaction token format, the JSON schema and the exit codes are unchanged. A
-  `.cowork-redact.json` copied by an earlier `init-redact` lacks the new rules — re-run `init-redact
-  --force` or add them. That only protects future recordings: there is no command that re-redacts a
-  committed cassette, so one that now fails must be re-recorded or reviewed and cleared with
-  `--allow-path`. Still covered by neither layer: a run dir under an unlisted root whose username is not in
+  in clean recordings. `verify-cassettes` can therefore fail on a cassette it previously passed (see
+  Upgrade notes). Still covered by neither layer: a run dir under an unlisted root whose username is not in
   a slugged segment (a Linux `/tmp/<name>/…`, `/scratch/…`, a custom `$TMPDIR` — keep the run dir under
   `$HOME`, or add a policy rule), percent-encoded or JSON-escaped paths (`%2FUsers%2F`, `\/Users\/`),
   Windows-style paths (`C:\Users\…`), and a bare (non-markdown) `computer://` link, which stops resolving on
@@ -221,14 +254,16 @@ All notable changes to this project are documented here. The format is based on
   (`?f=/tmp/claude-501/-Users-<user>-…`) is now flagged and redacted, and the scanner now flags a host path
   right after `,`, `|` or `<` — a comma-joined list, `sed 's|/Users/<user>|…|'`, an angle-bracketed path —
   which the reference policy redacts (its `/Volumes/` rules gain the same three boundaries; every other root
-  already had none). **`verify-cassettes` can fail on a cassette it previously passed**, for those shapes
-  only. Shapes the scanner flags and the policy leaves alone remain, for example a URL whose path carries a
+  already had none). `verify-cassettes` can fail on a cassette it previously passed for those shapes (see
+  Upgrade notes). Shapes the scanner flags and the policy leaves alone remain, for example a URL whose path carries a
   `:` before the root (an empty port `https://host:/Users/…`, a nested `file://` or `computer://` link
   `https://h/file:///Users/…`), since `:` stays in the URL look-back so a port URL's path is not rewritten,
   and a literal `\n` or `\t` escape directly before `/Volumes/` in a string value. A `file://` host part of
   254 or more characters before `/Volumes/…` is silent in both layers; before any other root the policy
   still redacts it. A `.cowork-redact.json` copied by an earlier `init-redact` keeps the slow rules until it
-  is re-copied: re-run `init-redact --force` (after saving any tailoring).
+  is re-copied: re-run `init-redact --force` (after saving any tailoring). The warning for a policy rule
+  ordered ahead of a `(?=/mnt/)`-anchored rule it would shadow still fires when either rule uses bounded
+  repetition (`{1,1024}?`), as the bounded reference rules now do.
 
 ### Changed
 
@@ -306,6 +341,7 @@ All notable changes to this project are documented here. The format is based on
   `fingerprint.skillHash` is therefore the whole plugin's (as `--skill`'s always was), so it no longer pairs
   with critiques recorded from the skill-folder spelling before this release — a pairing-key change, which
   is why this ships in a minor release. A relative skill-folder spelling reports the plugin relative too.
+  `--corpus-only`'s JSON `skill` field now names the graded skill for that spelling; it was `null`.
   A skill folder with its own plugin manifest is still mounted as its own plugin, now with a notice; and
   `--skill` on a positional that is itself a skill folder now says to drop `--skill` or pass the plugin
   root, instead of reporting a missing skill. Critique mounts the skill
