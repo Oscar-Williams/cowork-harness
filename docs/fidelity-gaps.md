@@ -63,15 +63,19 @@ is a claim about the local lane only. And if you are probing real Cowork to comp
 harness, **turn "Only on this computer" on first** — with it off you are measuring a lane this tool
 does not model, which has already cost one wasted probe. **The remote lane's toolchain is a different
 image, not the local rootfs with extras.** Measured 2026-09-21 with the setting off: `pip list` showed
-pandas 3.0.2 and numpy 2.4.4 where the local rootfs (Desktop 2.2553.1, captured the same day into
-`baselines/provisioning/rootfs-provisioning.json`) has pandas 2.3.3 and numpy 2.2.6, plus fourteen
-packages the local rootfs does not have at all — scipy, scikit-learn, scikit-image, networkx, httpx,
-Flask, uvicorn, starlette, playwright, mediapipe, `claude-agent-sdk`, `mcp`, pydantic. So a provisioning
-observation made with the setting off says nothing about what a local session — or this harness's
-`container`/`hostloop` image — provides, and a pandas-major difference is the kind that changes a skill's
-behaviour, not just its imports.
-The interpreter differs too: Python **3.11.15** at `/usr/bin/python3` (the local rootfs ships 3.10), with
-`tesseract`, `pdftoppm`, `pdfplumber` and `soffice` preinstalled (2026-09-21; none are in the local rootfs baseline).
+pandas 3.0.2 and numpy 2.4.4 where the local rootfs manifest
+(`baselines/provisioning/rootfs-provisioning.json`) has pandas 2.3.3 and numpy 2.2.6, plus packages the
+local manifest does not list at all — scipy, scikit-learn, scikit-image, networkx, httpx, Flask, uvicorn,
+starlette, playwright, mediapipe, `claude-agent-sdk`, `mcp`, pydantic. So a provisioning observation made
+with the setting off says nothing about what a local session — or this harness's `container`/`hostloop`
+image — provides, and a pandas-major difference is the kind that changes a skill's behaviour, not just its
+imports. The remote interpreter was Python **3.11.15** at `/usr/bin/python3`; the local manifest records no
+interpreter version, but it places the local rootfs on Ubuntu 22.04 (its `python-apt` is `2.4.0+ubuntu4.1`, a
+22.04 build), whose system Python is 3.10; `docker/Dockerfile.agent` builds this harness's image on
+`ubuntu:22.04` to match. The document tools are **not** a
+remote-only difference: `tesseract`, `pdftoppm`, `soffice` and `pdfplumber` were preinstalled on the remote
+lane, and the local manifest carries them too (`tesseract-ocr`, `poppler-utils` and `libreoffice-core` in
+its apt doc stack, `pdfplumber` in pip).
 
 ### The boundary is a missing flag, not an entrypoint string
 

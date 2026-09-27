@@ -53,6 +53,11 @@ Three ways to use this project. Each row is the whole hook — follow the link f
 | **Have Claude Code drive it** for me | **[docs/companion-skill.md](./docs/companion-skill.md)**<br><br>`/plugin marketplace add yaniv-golan/cowork-harness`<br>`/plugin install cowork-harness@cowork-harness` | Claude Code. The skill self-bootstraps the CLI via `npx "cowork-harness@^3.9.0"` |
 | **Gate my skill in CI** | **[docs/ci.md](./docs/ci.md)**<br><br>`- uses: yaniv-golan/cowork-harness@v3`<br>`  with: { command: replay, path: cassettes/ }` | Nothing for the token-free gate; the live lane needs a self-hosted runner with Docker + an agent binary |
 
+**In short:** three ways in (the table above). Five `fidelity:` tiers — `protocol`, `container`, `microvm`, `hostloop`,
+`cowork` ([Fidelity tiers](#fidelity-tiers-pick-per-scenario--per-ci-job)); a scenario that omits the key runs at
+`container`, but omitting it is deprecated, so name one. Every run executes locally: `lane: remote` changes only the
+delivery contract a run is graded against, never where it runs.
+
 Not sure a harness is what you need? The next two sections are the argument.
 
 ## Why this works for skill testing
@@ -394,6 +399,12 @@ a global install has them locally too, not just on GitHub.
 |---|---|
 | [CONTRIBUTING.md](./CONTRIBUTING.md) | local gates, which CI stages block a merge, and the rule that a consumer-visible change updates the companion skill |
 | [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md) | Contributor Covenant v2.1, with a private reporting channel |
+
+## Getting help
+
+- **Questions and ideas:** [GitHub Discussions](https://github.com/yaniv-golan/cowork-harness/discussions).
+- **Bugs and feature requests:** [open an issue](https://github.com/yaniv-golan/cowork-harness/issues/new/choose) from one of the templates.
+- **Anything security or sandbox related:** report it privately, as [SECURITY.md](./SECURITY.md) describes, not in a public issue.
 
 ## Versioning
 

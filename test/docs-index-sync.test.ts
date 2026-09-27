@@ -1,13 +1,15 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync, readdirSync } from "node:fs";
 import { resolve, join } from "node:path";
+import { parse as parseYaml } from "yaml";
 import { scrapeCoworkEnvVars } from "../scripts/lib/env-scrape.js";
 import { AGENT_IMAGE_DEFAULT, PROXY_IMAGE_DEFAULT } from "../src/runtime/agent-image.js";
 
 // Anti-drift guards for the documentation *index* surfaces:
 //   1. every COWORK_* env var read anywhere in src/ is documented in README.md or docs/*.md;
 //   2. the judge-model default id and the image-tag defaults the docs name match the code's defaults;
-//   3. llms.txt links every top-level docs/*.md guide, and links nothing that doesn't exist.
+//   3. llms.txt links every top-level docs/*.md guide, and links nothing that doesn't exist;
+//   4. CONTRIBUTING.md's CI stage table has exactly one row per job in .github/workflows/ci.yml.
 // Same scrape-the-source pattern as test/action-docs-sync.test.ts — token-free text parsing.
 // The COWORK_* scraper itself lives in scripts/lib/env-scrape.ts (shared with the structured-surface
 // snapshot in scripts/lib/surface.ts) — imported here, not duplicated.
@@ -211,5 +213,51 @@ describe("llms.txt ↔ docs/*.md", () => {
     expect(referenced.length).toBeGreaterThan(5);
     const dangling = referenced.filter((f) => !docFiles.includes(f));
     expect(dangling).toEqual([]);
+  });
+});
+
+/** Bold first-cell names of a markdown table section. */
+function stageRowNames(section: string): string[] {
+  return [...section.matchAll(/^\|\s*(\*\*|__)([A-Za-z0-9_-]+)\1\s*\|/gm)].map((m) => m[2]);
+}
+
+describe("stageRowNames — the table-row reader the stage-table guard relies on", () => {
+  // A row the reader cannot see is a job the guard reports as missing for the wrong reason — or, worse,
+  // a stale row it silently ignores. Each case below is a legal spelling of a bold first cell.
+  it("reads a cell with extra whitespace around the bold name", () => {
+    expect(stageRowNames("|  **build**   | x |")).toEqual(["build"]);
+  });
+  it("reads underscore bold (`__name__`) as well as `**name**`", () => {
+    expect(stageRowNames("| __build__ | x |")).toEqual(["build"]);
+  });
+  it("reads a job id with uppercase letters or underscores", () => {
+    expect(stageRowNames("| **Build_Job** | x |")).toEqual(["Build_Job"]);
+  });
+});
+
+describe("CONTRIBUTING.md CI stage table ↔ ci.yml jobs", () => {
+  // The table named nine stages while ci.yml ran eleven jobs: two were added with no row, and the prose
+  // count ("nine-stage") went stale with them. Compare JOB IDS — `Object.keys(jobs)` — not the display
+  // `name:`s, which are long human strings (the `python` job's name is its required-context label).
+  const ci = parseYaml(readFileSync(resolve(".github/workflows/ci.yml"), "utf8")) as { jobs?: Record<string, unknown> } | null;
+  const jobIds = Object.keys(ci?.jobs ?? {}).sort();
+
+  const contributing = readFileSync(resolve("CONTRIBUTING.md"), "utf8");
+  const start = contributing.indexOf("\n## This repo's own CI pipeline");
+  const rest = start === -1 ? "" : contributing.slice(start + 1);
+  const next = rest.indexOf("\n## ");
+  const section = next === -1 ? rest : rest.slice(0, next);
+  const rows = stageRowNames(section).sort();
+
+  it("parsed both sides (an empty parse must not pass)", () => {
+    expect(start, "CONTRIBUTING.md lost its `## This repo's own CI pipeline` heading").toBeGreaterThan(-1);
+    expect(jobIds.length).toBeGreaterThan(5);
+    expect(rows.length).toBeGreaterThan(5);
+  });
+
+  it("every ci.yml job has a row, and every row names a real job", () => {
+    const missingRows = jobIds.filter((j) => !rows.includes(j));
+    const staleRows = rows.filter((r) => !jobIds.includes(r));
+    expect({ missingRows, staleRows }).toEqual({ missingRows: [], staleRows: [] });
   });
 });

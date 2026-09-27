@@ -6,6 +6,22 @@ The single source of truth for **what the harness must produce** given its input
 > author a scenario or run the harness, start at the [README](./README.md) and [docs/](./docs/README.md);
 > come here when a doc and the code disagree.
 
+**Contents**
+
+- [0. Model](#0-model)
+- [1. Loop decision](#1-loop-decision-srcloop-decisionts--exact-replica-of-cowork-f_)
+- [2. Launch plan](#2-launch-plan-buildlaunchplan--pure)
+- [3. Spawn argv + env](#3-spawn-argv--env-contract-layer--what-each-tier-must-emit)
+- [4. Control protocol](#4-control-protocol-srcagentsessionts--liveagentsession)
+- [5. Control-response envelopes](#5-control-response-envelopes-exact-shapes--golden-tested)
+- [6. MCP](#6-mcp-binary-fact)
+- [7. Golden snapshot targets](#7-golden-snapshot-targets-contract-layer)
+- [8. Live contract tests](#8-live-contract-tests-runtime-layer-tokendocker-gated)
+- [9. Invariants](#9-invariants-never-regress)
+- [10. Production gate constraints](#10-production-gate-constraints-fidelity--pinned-from-provenancegates)
+- [11. Machine output (`--output-format json`)](#11-machine-output---output-format-json)
+- [12. Versioning & the 1.0 compatibility contract](#12-versioning--the-10-compatibility-contract)
+
 ## 0. Model
 
 ```
