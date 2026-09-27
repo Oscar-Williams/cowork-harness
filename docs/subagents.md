@@ -598,7 +598,7 @@ its input) — this seeds `subagents[].dispatchAgentType` (the DISPATCH-INPUT ty
 the `TASK_EVENT_SUBTYPES` constant in `src/run/run.ts`). Only `task_started` is consumed today: joined
 strictly by `tool_use_id` (`Run.drive`'s `case "system_event"` task-event branch in `src/run/run.ts`), it
 sets `subagents[].resolvedAgentType` — "strictly better evidence than
-`dispatchAgentType` for a type-less dispatch" (`schema/run-result.json:662-664`) — and when a dispatch
+`dispatchAgentType` for a type-less dispatch" (`schema/run-result.json`, the description of `subagents[].resolvedAgentType`) — and when a dispatch
 had `dispatchTypeOmitted` and resolved to `general-purpose`, the harness warns loudly about the
 wildcard-fallback trap (see [The type-less dispatch trap](#the-type-less-dispatch-trap) above).
 
@@ -620,7 +620,7 @@ actually cut something, so `subagent_output_contains` reports "unverifiable" rat
 negative). `subagents[].toolsUsed` is **not** part of this envelope — see parent-stream attribution below.
 
 **Path denials and attempts — `permission_denied`, the PreToolUse hook, and `can_use_tool`.**
-`pathDenials[]` has exactly three filtered producers (`schema/run-result.json:97`):
+`pathDenials[]` has exactly three filtered producers (`schema/run-result.json`, `pathDenials`):
 
 1. `pretooluse` — the PreToolUse path gate's own hook callback (`HOSTLOOP_PATH_GATE_ID`) firing `block`
    (`Run.drive`'s `case "hook_event"` branch in `src/run/run.ts`); host-loop only.

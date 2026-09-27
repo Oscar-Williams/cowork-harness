@@ -582,8 +582,8 @@ debugging a run's behavior. The two are **numbered independently**: a bare "gotc
    the stochastic path flags the run `nonDeterministic`. The LLM decider is one mechanism, two
    spellings: `on_unanswered: llm` (YAML) and `--decider-llm` (CLI). The bare `--on-unanswered llm`
    is rejected (use `--decider-llm`). `agent` is **retired** — `on_unanswered: agent` is rejected by
-   the schema. (`src/types.ts` — the `on_unanswered` enum; `src/cli.ts:899` — the CLI-side
-   `--on-unanswered` value check.)
+   the schema. (`src/types.ts` — the `on_unanswered` enum; `src/cli.ts` — the CLI-side
+   `--on-unanswered` value check; grep `--on-unanswered llm is not a user flag`.)
 
 4. **`--on-unanswered first` is non-deterministic too** — it picks option 1 and is flagged
    `nonDeterministic`; not a deterministic substitute for scripted answers.
