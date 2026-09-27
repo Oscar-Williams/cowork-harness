@@ -1105,7 +1105,7 @@ authorable). Reach for this list when debugging a run's behavior, that one while
 20. **A `mode: r` connected folder's contents are recorded body-less, not excluded.** `record` captures a
     read-only folder's files as path + hash only (`truncated: true`, no `body`) — it's an input the agent
     read, not a deliverable it wrote. `file_exists`/`computer_links_resolve` still pass against it on replay
-    (the hash-only entry still materializes a placeholder); `artifact_json` reports a clear
+    (the hash-only entry still materializes a placeholder); `artifact_json`/`artifact_text` report a clear
     evidence-unavailable on every lane (live/verify-run/replay agree — no green-record/red-replay). This is
     also why a `mode: r` input never trips the `binary` privacy finding or needs `--allow` — only a
     *committed* body is scanned. `scaffold` won't emit `file_exists` for one either (it's not in

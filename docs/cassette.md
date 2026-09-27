@@ -592,8 +592,8 @@ cassettes), these are skipped.
 the same way it snapshots an over-cap file: path + `bytes` + `sha256`, `truncated: true`, **no `body`**,
 regardless of size. The entry still lands in `artifacts[]` (unlike a fully-excluded path) so
 `materializeManifest` writes a 0-byte placeholder at replay and `computer_links_resolve`/`file_exists`
-resolve identically live and on replay; only `artifact_json` (which needs the inlined body) can't target
-one. Two side benefits: no cassette bloat from a large input file, and no `binary` privacy finding (the
+resolve identically live and on replay; only `artifact_json` and `artifact_text` (which need the inlined
+body) can't target one. Two side benefits: no cassette bloat from a large input file, and no `binary` privacy finding (the
 scanner only flags a *committed* binary body) — so a `mode: r` input never needs `--allow`. A `mode: rw`/`rwd`
 folder's contents are captured with a full body exactly as `outputs/` is.
 
