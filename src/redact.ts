@@ -56,10 +56,19 @@ function csv(v: string | undefined): string[] {
  *  ordered ahead of an otherwise-identical lookahead-anchored one.
  *
  *  Deliberately CONSERVATIVE — regex subsumption is undecidable in general, so this fires only when a
- *  later pattern's source is exactly an earlier one's plus a trailing lookahead (modulo lazy quantifiers).
+ *  later pattern's source is exactly an earlier one's plus a trailing lookahead (modulo lazy quantifiers and
+ *  bounded repetition).
  *  A miss is a missed warning; a false positive would train authors to ignore it. */
 export function findShadowedPatterns(sources: string[]): { shadowed: number; by: number; base: string }[] {
-  const norm = (r: string) => r.replace(/\+\?/g, "+").replace(/\*\?/g, "*");
+  // Bounded repetition reads as its unbounded form: the reference policy bounds its anchored rules
+  // (`{1,1024}?`) to keep them linear-time, and they are just as dangerous behind a bare twin. `{0,N}` is
+  // `*`; any other `{m,N}` / `{m,}` is `+` (the same base for the purpose of ordering).
+  const norm = (r: string) =>
+    r
+      .replace(/\{0,\d*\}/g, "*")
+      .replace(/\{\d+,\d*\}/g, "+")
+      .replace(/\+\?/g, "+")
+      .replace(/\*\?/g, "*");
   const out: { shadowed: number; by: number; base: string }[] = [];
   for (let j = 0; j < sources.length; j++) {
     const b = norm(sources[j]);

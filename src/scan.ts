@@ -35,10 +35,21 @@ function normAllow(a: AllowInput): AllowPattern {
 }
 
 export const DEFAULT_SCAN_PATTERNS: { re: RegExp; cls: string }[] = [
-  { re: /[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/gi, cls: "email" },
+  {
+    // The local part is unbounded only where it starts a run of local-part characters, and at most 64 (the
+    // RFC 5321 limit) anywhere else. Unanchored, every position of a long run with no `@` was a start that
+    // scanned to the run's end — quadratic: a 100 KB tool result of zero-filled base64 or hex took ~5 s. The
+    // run-start arm keeps the old match for every address (a real one starts its run, however long); the
+    // 64-character arm only finds an address glued to the end of a previous one's domain. Kept byte-for-byte
+    // in step with the email rule in the reference .cowork-redact.json, so what this flags, the policy fixes.
+    re: /(?:(?<![a-z0-9._%+-])[a-z0-9._%+-]+|[a-z0-9._%+-]{1,64})@[a-z0-9.-]+\.[a-z]{2,}/gi,
+    cls: "email",
+  },
   { re: /\$\s?\d[\d,]*(?:\.\d+)?\s?(?:k|m|b|bn|million|billion)?/gi, cls: "currency" },
   {
-    re: /\b[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.(?:com|io|net|org|co|app|ai|dev|xyz|vc|fund|capital|tech|cloud|health|finance|us|uk|de|fr|ca|au|me|tv|info|biz|edu|gov|mil|ch|nl|se|no|it|jp|br|nz|in|sg|kr|mx|es|pt|pl|be|at|dk|fi|ie|ru|cn|tw|hu|cz|ro|il|za|ar|cl|pe|tr)\b/gi,
+    // A label is at most 63 characters (RFC 1035). Unbounded, `a-a-a-…` put a word boundary at every letter and
+    // each one scanned the run to its end — quadratic (a 100 KB run took ~4 s). A longer "label" is not a hostname.
+    re: /\b[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.(?:com|io|net|org|co|app|ai|dev|xyz|vc|fund|capital|tech|cloud|health|finance|us|uk|de|fr|ca|au|me|tv|info|biz|edu|gov|mil|ch|nl|se|no|it|jp|br|nz|in|sg|kr|mx|es|pt|pl|be|at|dk|fi|ie|ru|cn|tw|hu|cz|ro|il|za|ar|cl|pe|tr)\b/gi,
     cls: "domain",
   },
   {
@@ -69,7 +80,7 @@ export const DEFAULT_SCAN_PATTERNS: { re: RegExp; cls: string }[] = [
     // escape, since this scans raw event lines): `ls ~/.claude/projects` prints one slug per line and
     // `~/.claude.json` keys projects by slug, with no path in front. NOT a space — ` -Users-only` in prose
     // stays clean — and so, by design, does a slug after a space or tab in `ls -l`, `tree` or `du` output. A slug-shaped segment inside an http(s) URL is not a host path and is skipped (the URL ends at
-    // whitespace, a quote, `,` or `;`, so a path comma-joined after a URL is still seen). That look-back is
+    // whitespace, a quote, `,`, `;` or `=`, so a path comma-joined after a URL, or passed as a query value, is still seen). That look-back is
     // capped at 256 chars to keep the scan linear on a long unbroken run; past the cap a URL segment is
     // flagged, which fails safe. Known
     // false positive: a directory literally named `-home-…` inside the VM (clear it with `--allow-path`).
@@ -78,8 +89,9 @@ export const DEFAULT_SCAN_PATTERNS: { re: RegExp; cls: string }[] = [
     // path, slug included, so the slug arm only fires on an unlisted root such as bare `/tmp/`. Its sample
     // is just the segment, so a whole-token `--allow-path` can still clear it.
     //
-    // The root boundary is whitespace, a quote, a backtick, `(`, `[`, `=`, `:` or `>` — a model reply
-    // quotes a path in backticks ("Saved to `/Users/…`") — or a JSON-escaped `\n`/`\t`: this scans RAW
+    // The root boundary is whitespace, a quote, a backtick, `(`, `[`, `=`, `:`, `>`, `,`, `|` or `<` — a model
+    // reply quotes a path in backticks ("Saved to `/Users/…`"), a list joins paths with commas, `sed 's|/Users/…|…|'`
+    // uses pipes, and markup wraps a path in angle brackets — or a JSON-escaped `\n`/`\t`: this scans RAW
     // event lines, where a one-path-per-line tool result puts the two characters `\n` before each root.
     // For the same reason a path stops at a backslash, so each listed path is its own finding.
     //
@@ -87,13 +99,16 @@ export const DEFAULT_SCAN_PATTERNS: { re: RegExp; cls: string }[] = [
     // char before the root is the URI's own third slash, which the plain lookbehind rejects — so a host
     // path inside a link was never flagged. A `file://` URI may also carry a host part
     // (`file://localhost/Users/…`); that is accepted for `file:` only, so an http(s) URL whose path
-    // happens to start `/home/` is not a host path. `/System/Volumes/` is the macOS data-volume spelling
-    // of the same tree (`/System/Volumes/Data/Users/…`), as `df`/`mount`/`realpath` print it.
+    // happens to start `/home/` is not a host path. That host part is bounded at 253 characters (the longest
+    // hostname): unbounded, the look-behind scans back to the start of the input at every position of a long run
+    // with no `/` — quadratic on Node 22's V8 (about 5 s on a 100 KB letter run), though later engines skip it.
+    // `/System/Volumes/` is the macOS data-volume spelling of the same tree (`/System/Volumes/Data/Users/…`),
+    // as `df`/`mount`/`realpath` print it.
     //
     // The run-level `hostPathLeaked` detector (src/run/execute.ts) shares the zero-false-positive arms
     // (`/private/tmp/`, a `computer://`/`file://` prefix) but NOT the slug arm or `/System/Volumes/`: it
     // is a live verdict signal, and a slug-shaped name is a weaker signal than a root prefix.
-    re: /(?:(?<![^\s"'(=:`\[>])|(?<=:\/\/|file:\/\/[^\s\/"']*|\\[nt]))(\/Users\/|\/home\/|\/root\/|\/private\/var\/|\/private\/tmp\/|\/var\/folders\/|\/System\/Volumes\/|\/Volumes\/)[^\s"'\\)]+|(?<!https?:\/\/[^\s"',;]{0,256})(?<=^|\/|"|'|\n|\\n)-(?:Users|home|root)-[^/\s"'\\)]+/gi,
+    re: /(?:(?<![^\s"'(=:`\[>,|<])|(?<=:\/\/|file:\/\/[^\s\/"']{0,253}|\\[nt]))(\/Users\/|\/home\/|\/root\/|\/private\/var\/|\/private\/tmp\/|\/var\/folders\/|\/System\/Volumes\/|\/Volumes\/)[^\s"'\\)]+|(?<!https?:\/\/[^\s"',;=]{0,256})(?<=^|\/|"|'|\n|\\n)-(?:Users|home|root)-[^/\s"'\\)]+/gi,
     cls: "path",
   },
   {
