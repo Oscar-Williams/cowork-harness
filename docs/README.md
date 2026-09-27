@@ -89,7 +89,7 @@ Grouped by the same **author → run → debug** spine as the reading order abov
 | In-band gate answering from a driving agent (`gates` / `answer`) | [decider-dir.md](./decider-dir.md) |
 | Checking a background run's liveness (`status`) and locating a scenario's newest run (`status --latest-for`) | [run-status.md](./run-status.md) |
 | Fidelity — three isolation tiers (L0/L1/L2) + two loop overlays (`hostloop`, `cowork`) | [boundary.md](./boundary.md), [README](../README.md) |
-| Control-protocol / spawn contract | [cowork-spawn-contract-1.12603.1.md](./cowork-spawn-contract-1.12603.1.md) — **frozen historical research; the live values are `baselines/desktop-*.json` (currently `desktop-2.2553.1`)**. The version in the filename is when it was written, not an expiry. Verified on `desktop-1.12603.1`, with a mount-layout fork at ≥`1.14271.0`.<sup>1</sup> See also [SPEC.md](../SPEC.md) |
+| Control-protocol / spawn contract | [cowork-spawn-contract-1.12603.1.md](./cowork-spawn-contract-1.12603.1.md) — **frozen historical research; the live values are `baselines/desktop-*.json` (the newest is named under [README § Status](../README.md#status), or run `cowork-harness list`)**. The version in the filename is when it was written, not an expiry. Verified on `desktop-1.12603.1`, with a mount-layout fork at ≥`1.14271.0`.<sup>1</sup> See also [SPEC.md](../SPEC.md) |
 | AI agent instructions for this repo | [AGENTS.md](../AGENTS.md) |
 | Security & threat model | [../SECURITY.md](../SECURITY.md) |
 | Contributing | [../CONTRIBUTING.md](../CONTRIBUTING.md) |
