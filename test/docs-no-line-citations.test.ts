@@ -17,7 +17,8 @@ function citations(text: string): { line: number; hit: string }[] {
   const hits: { line: number; hit: string }[] = [];
   let fenced = false;
   text.split("\n").forEach((raw, i) => {
-    if (/^\s*(```|~~~)/.test(raw)) {
+    // A fence may open on a list-item line ("- ```", "1. ```").
+    if (/^\s*(?:[-*+]\s+|\d+[.)]\s+)?(```|~~~)/.test(raw)) {
       fenced = !fenced;
       return;
     }
@@ -34,6 +35,7 @@ describe("shipped docs carry no file:line citations", () => {
       { line: 1, hit: "src/cli.ts:899" },
     ]);
     expect(citations("```\nscenario.yaml:12: bad key\n```\nsee http://proxy.sh:8080/x")).toEqual([]);
+    expect(citations("- ```\n  scenario.yaml:12: bad key\n  ```\n1. ```text\n   run.yaml:3: x\n   ```")).toEqual([]);
   });
 
   it("no shipped doc cites a line number", () => {
