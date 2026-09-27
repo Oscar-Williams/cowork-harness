@@ -1018,10 +1018,13 @@ counts). Uploads and `mode:r` connected folders are hash-only, and a file over t
   `/Users/<user>/` segment at all. A URL whose path carries one of `( ) [ ] | * <`, a backtick, `,` or `;`
   before a root-like segment — a Next.js route group `…/app/(auth)/users/page.tsx`, a `[id]` segment — is
   rewritten, failing safe (a `[id]` after the root can leave a stray `]` after the token); after `,` the
-  segment (`https://x.test/a,/users/x`) is also flagged by the scanner, so the two layers agree. The exception
-  to "the policy fixes what the scanner flags" is a URL whose path carries a `:` before the root — an empty port (`https://host:/Users/…`), a nested `file://` or
-  `computer://` link (`https://h/file:///Users/…`) — flagged and left alone, since `:` must stay in the URL look-back
-  for a port URL's path to survive. Every scanner class and reference rule runs in linear time (measured on Node
+  segment (`https://x.test/a,/users/x`) is also flagged by the scanner, so the two layers agree. "The policy
+  fixes what the scanner flags" has known exceptions, flagged and left alone — for example a URL whose path
+  carries a `:` before the root (an empty port `https://host:/Users/…`, a nested `file://` or `computer://`
+  link `https://h/file:///Users/…`), since `:` must stay in the URL look-back for a port URL's path to survive,
+  and a literal two-character `\n` or `\t` escape directly before `/Volumes/` inside a string value. A
+  `file://` host part of 254 or more characters before `/Volumes/…` is silent in both layers (before any other
+  root the policy still redacts it). Every scanner class and reference rule runs in linear time (measured on Node
   22 and Node 25; a `file://` host part is capped at 253 characters for that, since Node 22 runs an unbounded
   look-behind as a backward scan at every position). A `(?=/mnt/)` rule matches at most 1024 characters between the
   root and `/mnt/` (real run dirs are far shorter); past that the bare rule redacts the whole path, so its

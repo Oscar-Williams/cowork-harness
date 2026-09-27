@@ -8,7 +8,9 @@ import { normalizeHostShapedForReplay } from "../src/run/computer-links.js";
 /**
  * The linear-time forms of the scanner's `email`/`domain` classes and the policy's `(?=/mnt/)` rules behave
  * exactly as the unbounded forms did up to a limit no real value reaches, and the tests below pin both sides of
- * each limit. Also pinned: the URL and query-value shapes the policy and the scanner now agree on.
+ * each limit, including the 253-character cap on a `file://` host part (the longest hostname), which keeps the
+ * `path` class and the `/Volumes/` rules linear on Node 22. Also pinned: the URL and query-value shapes the
+ * policy and the scanner now agree on, and the known shapes where they do not.
  * Synthetic usernames only (`alice`, `bob`).
  */
 
@@ -103,6 +105,13 @@ describe("a `file://` host part is at most 253 characters", () => {
     expect(paths(`file://${"h".repeat(253)}/Users/alice/x`)).toEqual(["/Users/alice/x"]);
     expect(paths(`file://${"h".repeat(254)}/Users/alice/x`)).toEqual([]);
   });
+  it("past 253, `/Volumes/…` is silent in both layers; any other root is still redacted by the policy", () => {
+    const vol = `file://${"h".repeat(254)}/Volumes/alice/x`;
+    expect(paths(vol)).toEqual([]);
+    expect(redactText(vol, POLICY)).toBe(vol);
+    const users = `file://${"h".repeat(254)}/Users/alice/x`;
+    expect(redactText(users, POLICY)).not.toContain("alice");
+  });
 });
 
 describe("a host path right after `http(s)://` with no host", () => {
@@ -113,7 +122,7 @@ describe("a host path right after `http(s)://` with no host", () => {
       expect(red).not.toContain("alice");
       expect(paths(red)).toEqual([]);
     });
-  // The documented exception: a `:` before the root inside an http(s) URL. The scanner's `:`, `://` and
+  // A documented exception (not the only one): a `:` before the root inside an http(s) URL. The scanner's `:`, `://` and
   // `file://` arms flag it; the policy's URL look-back keeps `:` (or a port URL's path would be rewritten).
   for (const s of [
     "at https://x.test:/Users/alice/f",
@@ -123,6 +132,13 @@ describe("a host path right after `http(s)://` with no host", () => {
   ])
     it(`a \`:\` before the root inside a URL is flagged by the scanner and left by the policy: ${s}`, () => {
       expect(paths(s).length).toBeGreaterThan(0);
+      expect(redactText(s, POLICY)).toBe(s);
+    });
+  // Another documented exception: the literal two-character `\n`/`\t` escape (as a raw event line carries it)
+  // is a scanner root boundary, and the `/Volumes/` rules have a leading boundary that does not accept it.
+  for (const s of ["a\\n/Volumes/alice/x", "a\\t/Volumes/alice/x"])
+    it(`a literal escape before /Volumes/ is flagged by the scanner and left by the policy: ${s}`, () => {
+      expect(paths(s)).toEqual(["/Volumes/alice/x"]);
       expect(redactText(s, POLICY)).toBe(s);
     });
   for (const s of ["GET https://x/users/y", "GET https://api.example.com:8443/users/octocat/repos"])

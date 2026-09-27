@@ -159,9 +159,10 @@ All notable changes to this project are documented here. The format is based on
   `/Volumes/` and any `-Users-<user>-…` / `-home-<user>-…` / `-root-…` segment — after a `/`, a quote, or at
   the start of a string or line, as `ls ~/.claude/projects` and `~/.claude.json` print them — keeping the
   `/mnt/` tail so links still resolve on replay. Its local-path rules are now case-insensitive, so every
-  path the scanner flags, the policy can fix — except a URL whose path carries a `:` before the root — an empty port (`https://host:/Users/…`), a nested
-  `file://` or `computer://` link (`https://h/file:///Users/…`) — which the scanner flags and the
-  policy leaves; its root rules skip a segment inside an http(s) URL, and
+  path the scanner flags, the policy can fix — with known exceptions the scanner flags and the policy leaves,
+  among them a URL whose path carries a `:` before the root (an empty port `https://host:/Users/…`, a nested
+  `file://` or `computer://` link `https://h/file:///Users/…`) and a literal two-character `\n` or `\t`
+  escape directly before `/Volumes/` inside a string value; its root rules skip a segment inside an http(s) URL, and
   `/Volumes/` must start a path, so `https://api.example.com/users/…` and a Docker `…/volumes/…` path are
   left alone — but not a host path passed as a URL query value (`http://localhost:3000/open?f=/Users/…` is
   still redacted). The scanner's `path` class flags the same roots and segments, and now also flags a host path
@@ -208,9 +209,12 @@ All notable changes to this project are documented here. The format is based on
   right after `,`, `|` or `<` — a comma-joined list, `sed 's|/Users/<user>|…|'`, an angle-bracketed path —
   which the reference policy redacts (its `/Volumes/` rules gain the same three boundaries; every other root
   already had none). **`verify-cassettes` can fail on a cassette it previously passed**, for those shapes
-  only. The shape the scanner flags and the policy leaves alone is a URL whose path carries a `:` before the root — an empty port (`https://host:/Users/…`), a nested
-  `file://` or `computer://` link (`https://h/file:///Users/…`) — since `:` stays in the URL
-  look-back so a port URL's path is not rewritten. A `.cowork-redact.json` copied by an earlier `init-redact` keeps the slow rules until it
+  only. Shapes the scanner flags and the policy leaves alone remain, for example a URL whose path carries a
+  `:` before the root (an empty port `https://host:/Users/…`, a nested `file://` or `computer://` link
+  `https://h/file:///Users/…`), since `:` stays in the URL look-back so a port URL's path is not rewritten,
+  and a literal `\n` or `\t` escape directly before `/Volumes/` in a string value. A `file://` host part of
+  254 or more characters before `/Volumes/…` is silent in both layers; before any other root the policy
+  still redacts it. A `.cowork-redact.json` copied by an earlier `init-redact` keeps the slow rules until it
   is re-copied: re-run `init-redact --force` (after saving any tailoring).
 
 ### Changed
