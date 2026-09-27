@@ -1,7 +1,14 @@
 import { describe, it, expect } from "vitest";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { AGENT_IMAGE_DEFAULT, pinnedDigestFor, resolveAgentImage, resolveContainerRuntime } from "../src/runtime/agent-image.js";
+import {
+  AGENT_IMAGE_DEFAULT,
+  PROXY_IMAGE_DEFAULT,
+  pinnedDigestFor,
+  resolveAgentImage,
+  resolveContainerRuntime,
+  resolveProxyImage,
+} from "../src/runtime/agent-image.js";
 
 // The agent image ref and the container runtime were each resolved by a duplicated
 // `process.env.X ?? "default"` expression at 7 and 10 call sites respectively. Duplication of a DEFAULT
@@ -26,6 +33,36 @@ describe("resolveAgentImage", () => {
     // falling back to the default.
     expect(resolveAgentImage({ COWORK_AGENT_IMAGE: "" })).toBe(AGENT_IMAGE_DEFAULT);
     expect(resolveAgentImage({ COWORK_AGENT_IMAGE: "   " })).toBe(AGENT_IMAGE_DEFAULT);
+  });
+});
+
+describe("resolveProxyImage", () => {
+  it("defaults to the exported proxy tag", () => {
+    expect(resolveProxyImage({})).toBe(PROXY_IMAGE_DEFAULT);
+    expect(PROXY_IMAGE_DEFAULT).toMatch(/^cowork-egress-proxy:\d+$/);
+  });
+
+  it("honours COWORK_PROXY_IMAGE", () => {
+    expect(resolveProxyImage({ COWORK_PROXY_IMAGE: "my-proxy:7" })).toBe("my-proxy:7");
+  });
+
+  it("treats an empty or whitespace override as unset", () => {
+    // Same rule as the agent image: a bare `COWORK_PROXY_IMAGE=` must not reach `docker image inspect ""`.
+    expect(resolveProxyImage({ COWORK_PROXY_IMAGE: "" })).toBe(PROXY_IMAGE_DEFAULT);
+    expect(resolveProxyImage({ COWORK_PROXY_IMAGE: "  " })).toBe(PROXY_IMAGE_DEFAULT);
+  });
+
+  it("reads the environment at call time, not at import time", () => {
+    // `.env` is loaded into process.env AFTER the CLI's static imports have run, so a value captured when
+    // a module loads would miss it.
+    const prev = process.env.COWORK_PROXY_IMAGE;
+    try {
+      process.env.COWORK_PROXY_IMAGE = "late-proxy:1";
+      expect(resolveProxyImage()).toBe("late-proxy:1");
+    } finally {
+      if (prev === undefined) delete process.env.COWORK_PROXY_IMAGE;
+      else process.env.COWORK_PROXY_IMAGE = prev;
+    }
   });
 });
 
@@ -57,12 +94,12 @@ function srcFiles(dir: string): string[] {
 describe("single-source guard", () => {
   const RESOLVER = join("src", "runtime", "agent-image.ts");
 
-  it("reads COWORK_AGENT_IMAGE and COWORK_CONTAINER_RUNTIME only in the resolver", () => {
+  it("reads COWORK_AGENT_IMAGE, COWORK_CONTAINER_RUNTIME and COWORK_PROXY_IMAGE only in the resolver", () => {
     // Structural, because there is no behavioural test that would catch a re-introduced literal: a copy
     // with the old `??` semantics passes every existing test while silently reviving the empty-string bug.
     const offenders = srcFiles("src")
       .filter((f) => f !== RESOLVER)
-      .filter((f) => /process\.env\.COWORK_(AGENT_IMAGE|CONTAINER_RUNTIME)\b/.test(readFileSync(f, "utf8")));
+      .filter((f) => /process\.env\.COWORK_(AGENT_IMAGE|CONTAINER_RUNTIME|PROXY_IMAGE)\b/.test(readFileSync(f, "utf8")));
     expect(offenders).toEqual([]);
   });
 });

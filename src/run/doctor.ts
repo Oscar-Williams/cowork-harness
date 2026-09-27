@@ -17,7 +17,7 @@ import { decideLoopFromBaseline } from "../loop-decision.js";
 import { limaPath, vmStatus, instanceName } from "../runtime/lima.js";
 import { fail, isJsonOutput, jsonPayloadEnvelope } from "./envelope.js";
 import { writeAllSync } from "../io.js";
-import { pinnedDigestFor, resolveAgentImage, resolveContainerRuntime } from "../runtime/agent-image.js";
+import { pinnedDigestFor, resolveAgentImage, resolveContainerRuntime, resolveProxyImage } from "../runtime/agent-image.js";
 
 // Synchronous fd writes (match cli.ts): machine→stdout, human→stderr. A `process.stdout.write` +
 // `process.exit()` pair truncates on a PIPE (async tail dropped at exit past the ~64KB buffer);
@@ -194,7 +194,7 @@ export const realProbe: DoctorProbe = {
     const r = spawnSync(this.runtimeName(), ["image", "inspect", this.imageName()], { stdio: "ignore", timeout: 5000 });
     return !r.error && r.status === 0;
   },
-  proxyImageName: () => process.env.COWORK_PROXY_IMAGE ?? "cowork-egress-proxy:5",
+  proxyImageName: () => resolveProxyImage(),
   proxyImagePresent() {
     const r = spawnSync(this.runtimeName(), ["image", "inspect", this.proxyImageName()], { stdio: "ignore", timeout: 5000 });
     return !r.error && r.status === 0;
