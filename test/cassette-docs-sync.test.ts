@@ -222,19 +222,32 @@ describe("T-G1 · each replay-class bucket is guarded on its own, not as a union
     });
   }
 
+  // A count written into either passage. Neither passage needs one, and once neither carries one the
+  // passage check below is vacuous by design — keep it anyway: it exists to catch a count being
+  // reintroduced ("all seven" and "five need the manifest" once sat next to a list of eight). Do not "fix"
+  // it for never firing. The only count it can verify is the total, computed from the constant, so any
+  // other number in these forms fails too: name the keys instead of counting them.
+  const NUMBER_WORDS = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve"];
+  const wrongCounts = (text: string): string[] => {
+    const ok = [NUMBER_WORDS[MANIFEST_KEYS.length], String(MANIFEST_KEYS.length)];
+    const forms = /\b(?:all (\w+)|(?<!\b(?:every|each|any) )(\w+) (?:need|needs|are|of these|of them)\b)/gi;
+    return [...text.matchAll(forms)]
+      .filter((m) => {
+        const word = (m[1] ?? m[2]).toLowerCase();
+        return (NUMBER_WORDS.includes(word) || /^\d+$/.test(word)) && !ok.includes(word);
+      })
+      .map((m) => m[0]);
+  };
+
+  it("the count matcher catches each count form (a dead matcher would pass everything)", () => {
+    expect(wrongCounts("Without a manifest, all seven are skipped — five need the manifest.")).toEqual(["all seven", "five need"]);
+    expect(wrongCounts("six of these read the body, and two are gated; 3 need it")).toEqual(["six of these", "two are", "3 need"]);
+    expect(wrongCounts(`all ${NUMBER_WORDS[MANIFEST_KEYS.length]} are skipped; every one of these is a key`)).toEqual([]);
+  });
+
   it("a filesystem-assertion passage that counts the keys counts MANIFEST_KEYS", () => {
-    // Neither passage needs a count, and once neither carries one this check is vacuous by design — keep
-    // it anyway: it exists to catch a count being reintroduced ("all seven" once sat next to a list of
-    // eight). Do not "fix" it for never firing. The expected word is
-    // computed from the constant, so the check cannot be satisfied by copying a number into the prose.
-    const WORDS = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve"];
-    const expected = WORDS[MANIFEST_KEYS.length];
     for (const passage of [fsParagraph, scenarioParagraph])
-      for (const m of passage.matchAll(/\ball (\w+)\b/gi)) {
-        const word = m[1].toLowerCase();
-        if (WORDS.includes(word) || /^\d+$/.test(word))
-          expect([expected, String(MANIFEST_KEYS.length)], `"${m[0]}" — MANIFEST_KEYS has ${MANIFEST_KEYS.length}`).toContain(word);
-      }
+      expect(wrongCounts(passage), `MANIFEST_KEYS has ${MANIFEST_KEYS.length}; name the keys rather than counting them`).toEqual([]);
   });
 
   it("scenario.py's scaffold does not file a manifest-backed key under its LIVE-only heading", () => {
