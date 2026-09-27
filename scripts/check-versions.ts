@@ -505,13 +505,14 @@ export function checkCassetteVersionClaims(opts: {
  *  moment the next baseline ships, so the check bans the FORM rather than comparing the value: a correct
  *  pin would pass a value check today and fail silently tomorrow.
  *
- *  The spawn-contract doc itself is exempt for the reason invariant 7 gives. */
+ *  The spawn-contract doc itself is exempt for the reason invariant 7 gives, and so are the dated decision
+ *  records under docs/decisions/: like CHANGELOG.md, they record what was true when they were written. */
 export function checkBaselinePinClaims(files: { path: string; text: string }[]): string[] {
   const errors: string[] = [];
   const lineOf = (text: string, i: number) => text.slice(0, i).split("\n").length;
   let templates = 0;
   for (const { path, text } of files) {
-    if (/^docs\/cowork-spawn-contract-[^/]*\.md$/.test(path)) continue;
+    if (/^docs\/cowork-spawn-contract-[^/]*\.md$/.test(path) || path.startsWith("docs/decisions/")) continue;
     for (const m of text.matchAll(/currently\s+`?desktop-\d/g))
       errors.push(
         `${path}:${lineOf(text, m.index)} pins the current baseline in prose ("${m[0]}…") — it goes stale at the next sync; ` +

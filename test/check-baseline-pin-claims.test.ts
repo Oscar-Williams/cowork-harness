@@ -51,6 +51,12 @@ describe("checkBaselinePinClaims", () => {
     expect(checkBaselinePinClaims([TEMPLATE_OK, { path: "docs/cowork-spawn-contract-notes/x.md", text: pin }])).toHaveLength(1);
   });
 
+  it("exempts dated decision records under docs/decisions/, which are history like CHANGELOG.md", () => {
+    const pin = "At the time of this decision the baseline was currently `desktop-2.2553.1`.";
+    expect(checkBaselinePinClaims([TEMPLATE_OK, { path: "docs/decisions/2026-07-07-some-decision.md", text: pin }])).toEqual([]);
+    expect(checkBaselinePinClaims([TEMPLATE_OK, { path: "docs/decisions-notes.md", text: pin }])).toHaveLength(1);
+  });
+
   it("rejects the real historical template placeholders", () => {
     const errors = checkBaselinePinClaims([
       {
