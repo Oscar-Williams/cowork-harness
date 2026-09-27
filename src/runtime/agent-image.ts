@@ -3,7 +3,8 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { warn } from "../io.js";
 
-/** Single source of truth for WHICH agent image the harness runs and WHICH container runtime runs it.
+/** Single source of truth for WHICH agent image the harness runs, WHICH container runtime runs it, and
+ *  WHICH egress proxy image the per-run sidecar starts.
  *
  *  Both were previously resolved by a duplicated `process.env.X ?? "default"` expression — the image at 7
  *  call sites, the runtime at 10. Duplicating a default is a slow leak: the default value and the override
@@ -13,6 +14,20 @@ import { warn } from "../io.js";
 /** The unqualified LOCAL tag the harness runs. Deliberately not a `ghcr.io/...` ref: `README.md`
  *  documents building this tag locally, and resolving a registry ref here would bypass that path. */
 export const AGENT_IMAGE_DEFAULT = "cowork-agent-base:2";
+
+/** The egress proxy image the per-run sidecar runs (and doctor probes for).
+ *
+ *  The tag is part of the CONTRACT, not decoration: the sidecar reuses an image on tag existence alone, so
+ *  ANY change to Dockerfile.proxy or to the dist/egress code it bakes in reaches nobody who already built
+ *  the old tag — a stale image keeps serving, and doctor keeps calling it healthy. Bump this whenever a
+ *  change must actually reach existing installs (a decision-log format change was the original such case;
+ *  the base-image move to node:22-slim is another). :3 = the node:22-slim base; :4 = the explicit
+ *  `host:'0.0.0.0'` bind (the proxy now defaults to loopback, so the sidecar — which the agent container
+ *  reaches ACROSS the docker network — must ask for a non-loopback bind by name); :5 = CONNECT answers 502
+ *  + logs a structured `upstream_error` when the upstream fails before the tunnel is established (it used
+ *  to destroy the socket silently, leaving an intermittent with no artifact — see the error handler in
+ *  proxy.ts). `test/egress-proxy-image-tag.test.ts` pins this tag to Dockerfile.proxy's digest. */
+export const PROXY_IMAGE_DEFAULT = "cowork-egress-proxy:5";
 
 /** The container runtime used for the agent image and the egress sidecar. */
 export const CONTAINER_RUNTIME_DEFAULT = "docker";
@@ -26,6 +41,12 @@ function override(value: string | undefined, fallback: string): string {
 
 export function resolveAgentImage(env: NodeJS.ProcessEnv = process.env): string {
   return override(env.COWORK_AGENT_IMAGE, AGENT_IMAGE_DEFAULT);
+}
+
+/** Resolved at CALL time, never captured at module load: the CLI statically imports the sidecar and only
+ *  then loads `.env` into process.env, so a load-time read would miss a `.env` value that doctor sees. */
+export function resolveProxyImage(env: NodeJS.ProcessEnv = process.env): string {
+  return override(env.COWORK_PROXY_IMAGE, PROXY_IMAGE_DEFAULT);
 }
 
 export function resolveContainerRuntime(env: NodeJS.ProcessEnv = process.env): string {

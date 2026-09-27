@@ -2,10 +2,11 @@ import { describe, it, expect } from "vitest";
 import { readFileSync, readdirSync } from "node:fs";
 import { resolve, join } from "node:path";
 import { scrapeCoworkEnvVars } from "../scripts/lib/env-scrape.js";
+import { AGENT_IMAGE_DEFAULT, PROXY_IMAGE_DEFAULT } from "../src/runtime/agent-image.js";
 
 // Anti-drift guards for the documentation *index* surfaces:
 //   1. every COWORK_* env var read anywhere in src/ is documented in README.md or docs/*.md;
-//   2. the judge-model default id the docs name matches the code's actual default;
+//   2. the judge-model default id and the image-tag defaults the docs name match the code's defaults;
 //   3. llms.txt links every top-level docs/*.md guide, and links nothing that doesn't exist.
 // Same scrape-the-source pattern as test/action-docs-sync.test.ts — token-free text parsing.
 // The COWORK_* scraper itself lives in scripts/lib/env-scrape.ts (shared with the structured-surface
@@ -67,6 +68,49 @@ describe("semantic-judge default model ↔ docs", () => {
     expect(readFileSync(resolve("docs/cli.md"), "utf8")).toContain(id);
     expect(readFileSync(resolve("docs/scenario.md"), "utf8")).toContain(id);
     expect(readFileSync(resolve(".claude/skills/cowork-harness/references/scenario-schema.md"), "utf8")).toContain(id);
+  });
+});
+
+describe("image-tag defaults ↔ docs", () => {
+  // The image tag is the cache key: the sidecar and the agent spawn reuse a local image on tag existence
+  // alone, so a doc that names an older tag tells an operator to build or pin an image that no longer
+  // carries the shipped code. Scoped to the pages that state the CURRENT default — the CLI reference, the
+  // Python helper's setup, the cassette prerequisites and SPEC § 3's spawn argv. Dated records (DESIGN.md's
+  // live-pass note names the image a past pass ran on) are deliberately out of scope: they may lag.
+  const tagOf = (ref: string) => ref.slice(ref.lastIndexOf(":") + 1);
+  const spec = readFileSync(resolve("SPEC.md"), "utf8");
+  const s3 = spec.indexOf("\n## 3. ");
+  const s4 = spec.indexOf("\n## 4. ", s3 + 1);
+  const pages: Array<[string, string]> = [
+    ["docs/cli.md", readFileSync(resolve("docs/cli.md"), "utf8")],
+    ["python/README.md", readFileSync(resolve("python/README.md"), "utf8")],
+    ["docs/cassette.md", readFileSync(resolve("docs/cassette.md"), "utf8")],
+    ["SPEC.md § 3", s3 >= 0 && s4 > s3 ? spec.slice(s3, s4) : ""],
+  ];
+
+  function sites(re: RegExp): Array<{ page: string; ref: string; tag: string }> {
+    return pages.flatMap(([page, text]) => [...text.matchAll(re)].map((m) => ({ page, ref: m[0], tag: m[1] })));
+  }
+
+  it("SPEC § 3 was found — a moved heading must not empty the scan", () => {
+    expect(s3, "SPEC.md `## 3.` heading").toBeGreaterThanOrEqual(0);
+    expect(s4, "SPEC.md `## 4.` heading").toBeGreaterThan(s3);
+  });
+
+  it("every agent-image tag the docs name equals AGENT_IMAGE_DEFAULT's tag", () => {
+    // Both variants (base and full-parity) are built from the one Dockerfile and share the tag number; a
+    // ghcr ref's `-rN` rebuild suffix is not part of the local tag.
+    const found = sites(/cowork-agent-(?:base|full):(\d+)(?:-r\d+)?/g);
+    expect(found.length, "no agent-image tag found — the scan is vacuous").toBeGreaterThan(0);
+    const want = tagOf(AGENT_IMAGE_DEFAULT);
+    expect(found.filter((f) => f.tag !== want).map((f) => `${f.page}: ${f.ref}`)).toEqual([]);
+  });
+
+  it("every egress-proxy tag the docs name equals PROXY_IMAGE_DEFAULT's tag", () => {
+    const found = sites(/cowork-egress-proxy:(\d+)/g);
+    expect(found.length, "no egress-proxy tag found — the scan is vacuous").toBeGreaterThan(0);
+    const want = tagOf(PROXY_IMAGE_DEFAULT);
+    expect(found.filter((f) => f.tag !== want).map((f) => `${f.page}: ${f.ref}`)).toEqual([]);
   });
 });
 

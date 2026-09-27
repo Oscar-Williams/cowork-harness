@@ -5,7 +5,7 @@ import { mkdirSync, readFileSync, existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { RunResult } from "../types.js";
-import { resolveContainerRuntime } from "../runtime/agent-image.js";
+import { resolveContainerRuntime, resolveProxyImage } from "../runtime/agent-image.js";
 
 type EgressEntry = RunResult["egress"][number];
 
@@ -38,17 +38,8 @@ export interface EgressSidecar {
   readonly fatalError?: string;
 }
 
-// Tag is part of the CONTRACT, not decoration: ensureProxyImage below reuses an image on tag existence
-// alone, so ANY change to Dockerfile.proxy or to the dist/egress code it bakes in reaches nobody who
-// already built the old tag — a stale image keeps serving, and doctor keeps calling it healthy. Bump
-// this whenever a change must actually reach existing installs (a decision-log format change was the
-// original such case; the base-image move to node:22-slim is another). :3 = the node:22-slim base;
-// :4 = the explicit `host:'0.0.0.0'` bind (the proxy now defaults to loopback, so the sidecar — which
-// the agent container reaches ACROSS the docker network — must ask for a non-loopback bind by name);
-// :5 = CONNECT answers 502 + logs a structured `upstream_error` when the upstream fails before the
-// tunnel is established (it used to destroy the socket silently, leaving an intermittent with no
-// artifact — see the error handler in proxy.ts).
-const PROXY_IMAGE = process.env.COWORK_PROXY_IMAGE ?? "cowork-egress-proxy:5";
+// The proxy image (and why its tag is the cache key) is defined in runtime/agent-image.ts. It is resolved
+// per call rather than captured here: this module is statically imported before the CLI loads `.env`.
 
 // A process-level cleanup registry so a Ctrl-C (SIGINT/SIGTERM) mid-run reaps in-flight egress resources
 // instead of orphaning them (the per-run `finally` paths don't run when the process is killed by a signal).
@@ -106,6 +97,7 @@ function tryRun(fn: () => void) {
 
 export function startEgressSidecar(allow: string[], outDir: string, runId: string): EgressSidecar {
   const runner = resolveContainerRuntime();
+  const proxyImage = resolveProxyImage();
   const intNet = `cowork-int-${runId}`;
   const outNet = `cowork-out-${runId}`;
   const proxyName = `cowork-proxy-${runId}`;
@@ -113,7 +105,7 @@ export function startEgressSidecar(allow: string[], outDir: string, runId: strin
   mkdirSync(logDir, { recursive: true });
   const logFileHost = join(logDir, "egress.log");
 
-  ensureProxyImage(runner);
+  ensureProxyImage(runner, proxyImage);
 
   // Create the two networks and the proxy container in sequence, tracking each created
   // resource so a mid-sequence failure (image start, network connect) rolls back the rest
@@ -140,7 +132,7 @@ export function startEgressSidecar(allow: string[], outDir: string, runId: strin
       "COWORK_PROXY_LOG=/log/egress.log",
       "-v",
       `${logDir}:/log`,
-      PROXY_IMAGE,
+      proxyImage,
     ]);
     rollback.push(() => d(runner, ["rm", "-f", proxyName], true));
     d(runner, ["network", "connect", outNet, proxyName]);
@@ -244,8 +236,8 @@ export function parseEgressLine(line: string): EgressEntry | null {
   return out;
 }
 
-function ensureProxyImage(runner: string) {
-  const have = spawnSync(runner, ["image", "inspect", PROXY_IMAGE], { stdio: "ignore" });
+function ensureProxyImage(runner: string, proxyImage: string) {
+  const have = spawnSync(runner, ["image", "inspect", proxyImage], { stdio: "ignore" });
   if (have.status === 0) return;
   // Build from the repo (Dockerfile.proxy). Context is the repo root. Use fileURLToPath, not
   // `.pathname`, so an install path with spaces / URL-escaped chars yields a valid build context.
@@ -259,10 +251,10 @@ function ensureProxyImage(runner: string) {
         "source. Run `npm run build` first, then re-run.",
     );
   }
-  const build = spawnSync(runner, ["build", "-t", PROXY_IMAGE, "-f", join(repoRoot, "docker", "Dockerfile.proxy"), repoRoot], {
+  const build = spawnSync(runner, ["build", "-t", proxyImage, "-f", join(repoRoot, "docker", "Dockerfile.proxy"), repoRoot], {
     stdio: "inherit",
   });
-  if (build.status !== 0) throw new Error(`failed to build ${PROXY_IMAGE}`);
+  if (build.status !== 0) throw new Error(`failed to build ${proxyImage}`);
 }
 
 /** Turn Docker's `all predefined address pools have been fully subnetted` (and its connect/run
