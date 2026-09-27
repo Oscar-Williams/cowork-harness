@@ -562,7 +562,7 @@ Most runs need **none** of these — the defaults are correct. They're grouped b
 
 - `COWORK_HARNESS_DECIDER_MODEL` — the default `--decider-llm` answering model (overridden by the `--decider-model` flag; falls back to the Sonnet default — pin a cheaper model for simple gates to cut cost).
 - `COWORK_HARNESS_DECIDER_DIR_POLL_MS` — the `--decider-dir` rendezvous poll interval (defaults: 300 ms for the run-side rendezvous, 500 ms for `gates --follow`; see [decider-dir.md](./decider-dir.md#notes-and-tuning)).
-- `COWORK_HARNESS_DECIDER_DIR_TIMEOUT_MS` — the `--decider-dir` per-gate backstop (see [decider-dir.md](./decider-dir.md#notes-and-tuning)). A `--decider-dir` timeout ends the run as an unanswered-gate partial with `errorSource: "decider_timeout"`, `result.json` written, exit 2.
+- `COWORK_HARNESS_DECIDER_DIR_TIMEOUT_MS` — the `--decider-dir` per-gate backstop (default 600 s; see [decider-dir.md](./decider-dir.md#notes-and-tuning)). A `--decider-dir` timeout ends the run as an unanswered-gate partial with `errorSource: "decider_timeout"`, `result.json` written, exit 2.
 - `COWORK_HARNESS_DECIDER_CMD_TIMEOUT_MS` — backstop a hung `--decider-cmd` helper (default 600 s, fail loud). A timeout ends the run as an unanswered-gate partial with `errorSource: "decider_timeout"`, `result.json` written, exit 2.
 - `COWORK_HARNESS_LLM_TIMEOUT_MS` — backstop a hung `--decider-llm` model call (default 600 s, fail loud).
 - `COWORK_HARNESS_LLM_RETRIES` — bounded retries for a transient non-zero `claude -p` exit in the `--decider-llm` transport (default 2, clamped to 0–10; set `0` to disable, e.g. deterministic CI; a usage/quota-limit exit is treated as non-retryable and bypasses this budget — retrying a spent quota is futile).
@@ -599,7 +599,7 @@ Most runs need **none** of these — the defaults are correct. They're grouped b
 - `COWORK_HARNESS_STATUS_INTERVAL_MS` — how often `status.json` is refreshed during a run (default 5000ms).
 - `COWORK_HARNESS_STATUS_POLL_MS` — how often `status --follow` polls (see [run-status.md](./run-status.md) for this and the next three).
 - `COWORK_HARNESS_STATUS_FIRST_SEEN_TIMEOUT_MS` — how long `status --follow` waits for `status.json` to appear.
-- `COWORK_HARNESS_STATUS_STALE_MS` — the staleness threshold `status --follow` applies to a `"running"` status.
+- `COWORK_HARNESS_STATUS_STALE_MS` — how old a `"running"` status may get before `status` reports it stale, on a one-shot call and under `--follow` alike (default 3× `COWORK_HARNESS_STATUS_INTERVAL_MS`, so 15 s at the defaults).
 - `COWORK_HARNESS_STATUS_CORRUPT_TIMEOUT_MS` — how long `status --follow` tolerates a `status.json` that exists but never parses.
 - `COWORK_HARNESS_RESOURCE_INTERVAL_MS` — the resource sampler's polling cadence (default 1000ms; an invalid value warns and falls back to
   the default rather than silently sampling on the wrong cadence — see
