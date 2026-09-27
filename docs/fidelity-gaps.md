@@ -69,8 +69,10 @@ local manifest does not list at all — scipy, scikit-learn, scikit-image, netwo
 starlette, playwright, mediapipe, `claude-agent-sdk`, `mcp`, pydantic. So a provisioning observation made
 with the setting off says nothing about what a local session — or this harness's `container`/`hostloop`
 image — provides, and a pandas-major difference is the kind that changes a skill's behaviour, not just its
-imports. The remote interpreter was Python **3.11.15** at `/usr/bin/python3`; the local manifest does not
-record an interpreter version, so it cannot say whether the local one differs. The document tools are **not** a
+imports. The remote interpreter was Python **3.11.15** at `/usr/bin/python3`; the local manifest records no
+interpreter version, but it places the local rootfs on Ubuntu 22.04 (its `python-apt` is `2.4.0+ubuntu4.1`, a
+22.04 build), whose system Python is 3.10; `docker/Dockerfile.agent` builds this harness's image on
+`ubuntu:22.04` to match. The document tools are **not** a
 remote-only difference: `tesseract`, `pdftoppm`, `soffice` and `pdfplumber` were preinstalled on the remote
 lane, and the local manifest carries them too (`tesseract-ocr`, `poppler-utils` and `libreoffice-core` in
 its apt doc stack, `pdfplumber` in pip).
