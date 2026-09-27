@@ -190,6 +190,53 @@ describe("T-G1 · each replay-class bucket is guarded on its own, not as a union
     expect(wrong, `the skill's live-only list wrongly includes: ${wrong.join(", ")}`).toEqual([]);
   });
 
+  // The filesystem-assertion passages. The whole-file check at the top of this file let one through: the
+  // cassette.md subsection opener listed six of the eight manifest keys, and the file still named all
+  // eight two paragraphs earlier. Each passage is therefore checked on its own list, both directions.
+  const OTHER_BUCKETS = [...ALWAYS_CONTENT_KEYS, ...QUESTION_GATE_KEYS, ...LIVE_ONLY_KEYS];
+  const fsHeading = "### Filesystem assertions — replay-checkable WITH an artifact manifest";
+  const fsParagraph = section(cassetteMd, fsHeading, /^#{2,3} /m)
+    .trimStart()
+    .split(/\n\s*\n/)[0];
+  // The opener is the paragraph's first sentence — the list itself, before the body explains single keys.
+  const cassetteOpener = fsParagraph.slice(0, fsParagraph.search(/\.\s/) + 1);
+  const scenarioMd = readFileSync(resolve("docs/scenario.md"), "utf8");
+  const scenarioParagraph = section(scenarioMd, "**Filesystem assertions**", /\n\s*\n/);
+  const scenarioList = section(scenarioParagraph, "(", /\)/);
+
+  it("located both filesystem-assertion passages (an empty passage would pass vacuously)", () => {
+    expect(cassetteOpener.length, `docs/cassette.md "${fsHeading}" opener not found`).toBeGreaterThan(100);
+    expect(scenarioList.length, 'docs/scenario.md "**Filesystem assertions** (…)" list not found').toBeGreaterThan(100);
+    expect(MANIFEST_KEYS.length).toBeGreaterThan(5);
+  });
+
+  for (const [name, list] of [
+    ["docs/cassette.md's filesystem-assertions opener", () => cassetteOpener],
+    ["docs/scenario.md's **Filesystem assertions** list", () => scenarioList],
+  ] as const) {
+    it(`${name} names every MANIFEST_KEYS member AND no other bucket's`, () => {
+      const missing = MANIFEST_KEYS.filter((k) => !list().includes(`\`${k}\``));
+      expect(missing, `${name} omits: ${missing.join(", ")}`).toEqual([]);
+      const wrong = OTHER_BUCKETS.filter((k) => list().includes(`\`${k}\``));
+      expect(wrong, `${name} lists these, which are not manifest keys: ${wrong.join(", ")}`).toEqual([]);
+    });
+  }
+
+  it("a filesystem-assertion passage that counts the keys counts MANIFEST_KEYS", () => {
+    // Neither passage needs a count, and once neither carries one this check is vacuous by design — keep
+    // it anyway: it exists to catch a count being reintroduced ("all seven" once sat next to a list of
+    // eight). Do not "fix" it for never firing. The expected word is
+    // computed from the constant, so the check cannot be satisfied by copying a number into the prose.
+    const WORDS = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve"];
+    const expected = WORDS[MANIFEST_KEYS.length];
+    for (const passage of [fsParagraph, scenarioParagraph])
+      for (const m of passage.matchAll(/\ball (\w+)\b/gi)) {
+        const word = m[1].toLowerCase();
+        if (WORDS.includes(word) || /^\d+$/.test(word))
+          expect([expected, String(MANIFEST_KEYS.length)], `"${m[0]}" — MANIFEST_KEYS has ${MANIFEST_KEYS.length}`).toContain(word);
+      }
+  });
+
   it("scenario.py's scaffold does not file a manifest-backed key under its LIVE-only heading", () => {
     // Self-consistency: `scenario.py` declares its own MANIFEST_KEYS set, and the scaffold must agree
     // with it. Parsed from the file so the check cannot drift from the set it is checking against.
