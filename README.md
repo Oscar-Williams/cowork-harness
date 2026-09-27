@@ -53,6 +53,11 @@ Three ways to use this project. Each row is the whole hook — follow the link f
 | **Have Claude Code drive it** for me | **[docs/companion-skill.md](./docs/companion-skill.md)**<br><br>`/plugin marketplace add yaniv-golan/cowork-harness`<br>`/plugin install cowork-harness@cowork-harness` | Claude Code. The skill self-bootstraps the CLI via `npx "cowork-harness@^3.9.0"` |
 | **Gate my skill in CI** | **[docs/ci.md](./docs/ci.md)**<br><br>`- uses: yaniv-golan/cowork-harness@v3`<br>`  with: { command: replay, path: cassettes/ }` | Nothing for the token-free gate; the live lane needs a self-hosted runner with Docker + an agent binary |
 
+**In short:** three ways in (the table above). Five `fidelity:` tiers — `protocol`, `container`, `microvm`, `hostloop`,
+`cowork` ([Fidelity tiers](#fidelity-tiers-pick-per-scenario--per-ci-job)); a scenario that omits the key runs at
+`container`, but omitting it is deprecated, so name one. Every run executes locally: `lane: remote` changes only the
+delivery contract a run is graded against, never where it runs.
+
 Not sure a harness is what you need? The next two sections are the argument.
 
 ## Why this works for skill testing
