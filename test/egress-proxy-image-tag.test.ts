@@ -41,9 +41,15 @@ describe("egress proxy image", () => {
 
   it("no src/ file other than the resolver spells a proxy tag", () => {
     // A second quoted `cowork-egress-proxy:<n>` literal is a second default that the digest guard below
-    // would not move — the exact split this constant exists to prevent.
+    // would not move — the exact split this constant exists to prevent. Comments are stripped first, so a
+    // doc comment naming a tag is not code. (Crude but sufficient: a `//` preceded by whitespace or at line
+    // start, and block comments; a URL's `://` has no whitespace before it.)
     const literal = /["'`]cowork-egress-proxy:\d+/g;
-    const hits = srcFiles("src").flatMap((f) => (readFileSync(f, "utf8").match(literal) ?? []).map(() => f));
+    const code = (f: string) =>
+      readFileSync(f, "utf8")
+        .replace(/\/\*[\s\S]*?\*\//g, "")
+        .replace(/(^|\s)\/\/.*$/gm, "$1");
+    const hits = srcFiles("src").flatMap((f) => (code(f).match(literal) ?? []).map(() => f));
     expect(hits).toEqual([RESOLVER]);
   });
 
