@@ -54,6 +54,15 @@ describe("COWORK_* env vars ↔ docs", () => {
     const undocumented = [...names].filter((n) => !ALLOWLIST.has(n) && !documented(n)).sort();
     expect(undocumented).toEqual([]);
   });
+
+  it("every COWORK_* env var read in src/ is named in docs/cli.md itself, which claims to be the full list", () => {
+    // The check above accepts a mention on any page, so a var documented only on its feature page passed it
+    // while cli.md's Reproducibility knobs — where AGENTS.md sends readers for the full list — lacked it. A
+    // `_SUFFIX` shorthand after a sibling var does not count: nobody searching for the full name finds it.
+    const cliMd = readFileSync(join(docsDir, "cli.md"), "utf8");
+    const missing = [...names].filter((n) => !ALLOWLIST.has(n) && !new RegExp(`${n}(?![A-Z0-9_])`).test(cliMd)).sort();
+    expect(missing, "add a line to docs/cli.md § Reproducibility knobs (it may link to the feature page)").toEqual([]);
+  });
 });
 
 describe("semantic-judge default model ↔ docs", () => {
