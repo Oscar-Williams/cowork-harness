@@ -17,8 +17,8 @@ All notable changes to this project are documented here. The format is based on
     already passes `--strict --min-severity WARN` behaves exactly as before.
   - *To keep the old behaviour:* add `--min-severity INFO` (for the Action, `extra-args: --min-severity
     INFO`).
-- **`record` exits 1, not 2, when `--max-budget-usd` refuses**, on `--dry-run` and the real command, for
-  a single file and a directory. A refusal of a scenario that loaded now always exits 1, so 2 no longer
+- **`record` exits 1, not 2, when `--max-budget-usd` refuses**, on `--dry-run` and the real command, on
+  every `record` path (a single file, a directory, `--rerecord-stale`). A refusal of a scenario that loaded now always exits 1, so 2 no longer
   means "over budget"; it means the scenario did not load, or a usage or setup error. On a directory,
   broken files beside a loadable scenario over the cap now exit 1 too. The error category (`runtime`) and
   message are unchanged. `skill` and `run` are unchanged: their `--max-budget-usd` refusal still exits 2.

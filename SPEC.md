@@ -868,7 +868,8 @@ Covered-surface changes follow semver as of `1.0.0` — see [RELEASING.md](./REL
   major for these reasons: under `lint --strict` the default `--min-severity` became WARN, so INFO no
   longer fails or prints unless `--min-severity INFO` is passed; and `record`'s `--max-budget-usd`
   refusal now exits `1` like its other pre-spend refusals, instead of `2` (§11). `skill`/`run` still
-  exit `2` on that refusal.
+  exit `2` on that refusal: on `run`/`skill`, a `runtime`-category pre-spend refusal also exits `2`,
+  alongside usage errors.
 - **Scenario & session schemas** — `schema/scenario.schema.json`, `schema/session.schema.json` (the
   authored-input contract). Tightening validation on a previously-valid document is breaking.
 - **Baseline JSON shape** — the `baselines/desktop-*.json` field structure (CI's committed source of

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve, join } from "node:path";
 import { batchBudgetTracker } from "../src/run/budget.js";
@@ -328,5 +328,30 @@ describe.skipIf(!can)("record --max-budget-usd — a refusal exits 1, not 2", ()
     const r = cliWith(["skill", skillDir, "do the thing", "--max-budget-usd", "0.0001"], root, work);
     expect(r.all).toMatch(/refused before spending/);
     expect(r.code).toBe(2);
+  });
+
+  it("`run --max-budget-usd` is unchanged: its refusal still exits 2", () => {
+    const root = tmpRoot();
+    const work = tmpWork();
+    seedRun(root, "pricey", "local_1", 0.5);
+    cli(["stats", "--reindex"], root);
+    writeFileSync(join(work, "pricey.yaml"), scenarioYaml("pricey"));
+    const r = cliWith(["run", join(work, "pricey.yaml"), "--max-budget-usd", "0.0001"], root, work);
+    expect(r.all).toMatch(/refused before spending/);
+    expect(r.code).toBe(2);
+  });
+
+  it("`record --rerecord-stale` over the cap: exit 1 (it shares the batch gate)", () => {
+    const root = tmpRoot();
+    const work = tmpWork();
+    // A committed cassette made stale by baseline drift: a free way to put one in the re-record set.
+    const cassette = JSON.parse(readFileSync(resolve("examples/replays/example-multiselect-gate.cassette.json"), "utf8"));
+    cassette.fingerprint.baseline = "desktop-0.0.1";
+    writeFileSync(join(work, "s.cassette.json"), JSON.stringify(cassette));
+    seedRun(root, cassette.scenario.name, "local_1", 0.5);
+    cli(["stats", "--reindex"], root);
+    const r = cliWith(["record", work, "--rerecord-stale", "--max-budget-usd", "0.0001"], root, work);
+    expect(r.all, "the budget gate must be what refused").toMatch(/refused before spending/);
+    expect(r.code).toBe(1);
   });
 });
