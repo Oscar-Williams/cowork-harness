@@ -49,9 +49,11 @@ const FROZEN_NUMBERED_ITEMS = [
   "5. **For image-only / scanned PDFs, use the full-parity image.** The default agent image omits OCR and",
   "6. **Iterate across fixes — verify before you trust, and don't cross-pair generations.** A green run is",
   "1. **Pin the model.** With no `model:` in the session (or `--model` on the `skill` lane) the run uses",
-  "2. **Commit the skill first.** `fingerprint.skillHash` is content-exact, so an edit mid-batch silently",
+  // Reworded after the split: "commit the skill" became one way to freeze a recoverable source.
+  "2. **Freeze a recoverable source first**: commit it, or snapshot the skill folder next to the run dir.",
   "3. **Check which arm you actually ran** before analysing anything: `ablated` and",
-  "4. **Read `skillsInvoked`.** A rep where the skill never triggered is a measurement of the model, not",
+  // Reworded after the split: "not invoked" no longer means "answered from priors" (see Recipe 5, step 3).
+  "4. **Classify each rep three ways**: invocation (`skillsInvoked`), observed source access (did it read",
   "1. **An assertion passed but tested nothing on the PR gate.** *Why:* on a manifest-less cassette",
   "2. **A steered gate answer never reached the model.** *Why:* `serializeDecision` must emit",
   "3. **A multi-key `assert:` item is an AND.** A single list item with more than one key passes iff",

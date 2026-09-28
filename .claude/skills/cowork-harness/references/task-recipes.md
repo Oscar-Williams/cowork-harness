@@ -180,9 +180,19 @@ degrade the advice. It is real work to calibrate; these steps are the traps that
    contradicts how the tool actually behaves can *never* pass (the correct skill will contradict it), and
    it silently poisons the gate. Check each claim against the code/docs. Decompose into single,
    independently-checkable statements; prefer facts only your skill supplies.
-3. **Verify the skill was actually invoked.** A rep whose `RunResult.skillsInvoked` does NOT include your
-   skill answered from the model's priors, not your skill — it is not a valid measurement. Check it
-   (`trace <run-id>` / `result.json`) and discard or re-run invalid reps.
+3. **Record which of three things each rep shows** before you keep or discard it:
+   - *Invocation*: was the skill invoked? `skillsInvoked` / `skillActivity` in `result.json`.
+   - *Observed source access*: did the agent read the mounted `SKILL.md` or a reference directly?
+     Assert it with the object form, `tool_called: {tool: [Read, Grep, Bash, mcp__workspace__bash],
+     input_any: 'SKILL\.md', scope: any}`, plus `reference_read` for the references. `input_any` also
+     matches a Grep *pattern* that names `SKILL.md`, which is fine for "observed access" but is not
+     proof the file was read.
+   - *Answer quality*: the semantic claims.
+
+   In a non-ablated rep, "not invoked" does **not** mean the answer came from the model's priors. The
+   skill's source is mounted and readable there, in production too, so the model may read it and answer
+   directly (gotcha 26 in `gotchas.md`). An `--ablate-skill` control rep has no skill mounted, so this does not apply to
+   it. Classify the rep before discarding it.
 4. **Run N≥3 reps; read the per-claim PROFILE, not a single verdict.** Agent answers vary run to run, so a
    correct claim can pass one rep and miss the next. A claim's baseline is its pass *rate* (3/3, 2/3), read
    from `RunResult.assertions[].semanticClaims`. Do **not** chase single-run all-pass — set `min_pass` to
@@ -199,9 +209,11 @@ degrade the advice. It is real work to calibrate; these steps are the traps that
    drop it. Everything past "run both arms" — scrubbing giveaways, shuffling, judging blind, unblinding
    after grading — is yours to build; the harness supplies the runs and the control.
 6. **Gate a change on the profile diff.** Capture the per-claim profile before your edit (the baseline),
-   make the edit, re-capture, and compare per claim: a claim that DROPPED (e.g. 3/3 → 0/3) is a regression
-   your edit caused; a claim already at 0/3 (a known gap) cannot regress. That turns "did my SKILL.md
-   refactor quietly make the advice worse?" into a checkable gate.
+   make the edit, re-capture, and compare per claim. A claim that DROPPED (e.g. 3/3 → 0/3) is a
+   **regression signal to investigate**, not proof your edit caused it: at a small number of reps one
+   observation can move by chance. Re-run that claim and read the reps' transcripts before attributing
+   it. A claim already at 0/3 (a known gap) cannot regress. That turns "did my SKILL.md refactor quietly
+   make the advice worse?" into a checkable signal.
 
 **Lane note:** `semantic_matches` is **live-only** (the judge is a live model call), so these scenarios
 run on the `run` lane, never token-free `replay` — the linter's "all assertions live-only" warning is
@@ -248,11 +260,12 @@ Hardening a skill is a loop: run → read what it did → fix → run again. Two
    - `cowork-harness inspect <run-dir>` → what the run produced, plus the run's `label` and `skillHash`.
    - In-run alternative: dispatch a checker **sub-agent** (maker/checker) whose result folds into the
      verdict.
-2. **Commit the skill before a measurement batch, and pin the model.** Two cheap disciplines that are
-   unrecoverable if skipped. `skillHash` is content-exact, so an edit mid-batch silently splits the
-   dataset into two generations — `stats --group-by skill-hash` separates them afterwards, but a hash
-   whose source was never committed names a generation that is unrecoverable, which makes the
-   comparison uninterpretable rather than merely noisy. And with no `model:` in the session and no
+2. **Freeze a recoverable source before a measurement batch, and pin the model.** Two cheap
+   disciplines that are unrecoverable if skipped. Freeze the source by committing it, or by
+   snapshotting the skill folder next to the run dir. `skillHash` is content-exact but one-way, so an
+   edit mid-batch silently splits the dataset into two generations — `stats --group-by skill-hash`
+   separates them afterwards, but a hash whose source was never frozen names a generation that is
+   unrecoverable, which makes the comparison uninterpretable rather than merely noisy. And with no `model:` in the session and no
    `--model` on the command (every lane takes it), each run uses whatever the staged agent binary
    defaults to, so a before/after can silently straddle two models — the run warns when nothing pinned
    one. Read `result.json` back to confirm: `modelSource` says whether anything pinned the model at all,

@@ -23,6 +23,17 @@ Every ablated run is stamped `ablated: true` in `result.json` and carries `ablat
 What the harness gives you here is the run execution and the control arm — designing the comparison
 (scrubbing giveaways, shuffling, judging blind, unblinding only after grading) is still yours.
 
+### Tool timing — what `toolDurations` measures
+
+`result.json`'s `toolDurations` and `trace <run> --view tool-durations` report, per tool, the **wall gap
+from `tool_use` to `tool_result`** as the harness saw them (`toolDurationsBasis: "wall_gap"`). That gap
+includes model/transport and permission latency, and an `Agent`/`Task` entry spans its whole sub-agent
+run, so it is not execution time and summing it across tools double-counts. `calls`, `totalMs` and
+`maxMs` cover paired calls only; `unpaired` counts calls that never got a result, which have no duration.
+The fold covers main-agent and sub-agent calls alike. Narrow the trace view with `--scope main|subagent`,
+which reads the run's own classification from `result.json`, and add `--per-call` for one row per call.
+Compare timings between runs of the same tier and model only.
+
 **Measurement hygiene — four things that silently invalidate a batch:**
 
 1. **Pin the model.** With no `model:` in the session (or `--model` on the `skill` lane) the run uses
@@ -31,11 +42,13 @@ What the harness gives you here is the run execution and the control arm — des
    you do, **ignore any entry wrapped in angle brackets**: `<synthetic>` is the agent marking a turn it
    fabricated locally (no API call), not a model, so two runs of the same pinned model can differ on this
    array purely by whether such a turn occurred.
-2. **Commit the skill first.** `fingerprint.skillHash` is content-exact, so an edit mid-batch silently
-   splits your dataset into two generations — and a hash whose source was never committed identifies a
-   generation that is unrecoverable. `stats --group-by skill-hash` separates them after the fact;
-   nothing recovers the source.
+2. **Freeze a recoverable source first**: commit it, or snapshot the skill folder next to the run dir.
+   `fingerprint.skillHash` is content-exact but one-way, so an edit mid-batch silently splits your
+   dataset into two generations — and a hash whose source was never frozen identifies a generation that
+   is unrecoverable. `stats --group-by skill-hash` separates them after the fact; nothing recovers the
+   source.
 3. **Check which arm you actually ran** before analysing anything: `ablated` and
    `context.availableSkills` in each `result.json`.
-4. **Read `skillsInvoked`.** A rep where the skill never triggered is a measurement of the model, not
-   of your skill — discard or re-run it.
+4. **Classify each rep three ways**: invocation (`skillsInvoked`), observed source access (did it read
+   `SKILL.md` directly?) and answer quality. "Not invoked" is not "answered from priors" outside the
+   ablated arm — see [Recipe 5](./task-recipes.md), step 3.
