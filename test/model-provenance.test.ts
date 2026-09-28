@@ -237,7 +237,7 @@ describe("--model reaches the launch plan and the argv", () => {
   const out = () => mkdtempSync(join(tmpdir(), "mp-out-"));
   const planFor = (session: Parameters<typeof buildLaunchPlan>[0]) => buildLaunchPlan(session, baseline, out(), "container", false);
 
-  it("a session with no model produces a plan with no model — the state that warns", () => {
+  it("a session with no model produces a plan with no model — the state executeScenario refuses", () => {
     expect(planFor(loadSession({})).model).toBeUndefined();
   });
 
@@ -358,7 +358,7 @@ describe("resolvePinnedModel — precedence", () => {
     expect(resolvePinnedModel("claude-opus-5", undefined, "claude-haiku-4-5")).toBe("claude-opus-5");
   });
 
-  it("nothing pinned anywhere → undefined, the state that warns", () => {
+  it("nothing pinned anywhere → undefined, the state that is refused", () => {
     expect(resolvePinnedModel(undefined, undefined, undefined)).toBeUndefined();
   });
 });

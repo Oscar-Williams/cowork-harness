@@ -366,7 +366,7 @@
       "items": {
         "type": "string"
       },
-      "description": "the model ids the GRADED (task) turn actually ran on, read back from its own result.json `models` and filtered of the agent's `<…>`-wrapped locally-fabricated entries. The turns are a SUBPROCESS and inherit no model from the caller, so an omitted --model grades whatever the spawned agent defaults to — this is the only field that records which model produced the graded behaviour. Absent when no result.json was readable or it recorded no live id."
+      "description": "the model ids the GRADED (task) turn actually ran on, read back from its own result.json `models` and filtered of the agent's `<…>`-wrapped locally-fabricated entries. The turns are a SUBPROCESS and inherit no model from the caller; they take --model or COWORK_HARNESS_MODEL (critique refuses with neither), and this is the only field that records which model produced the graded behaviour. Absent when no result.json was readable or it recorded no live id."
     },
     "infraFailurePhase": {
       "type": "string",

@@ -36,9 +36,9 @@ Compare timings between runs of the same tier and model only.
 
 **Measurement hygiene — four things that silently invalidate a batch:**
 
-1. **Pin the model.** With no `model:` in the session (or `--model` on the `skill` lane) the run uses
-   whatever the staged agent binary defaults to — not a harness constant, and it can move under a
-   baseline bump. Read `result.json`'s `models` back before believing any cross-run comparison — and when
+1. **Pin the model in the session.** A run that resolves no model is refused, but one pinned only by
+   `COWORK_HARNESS_MODEL` takes its model from the machine, so two shells can run two models. Set
+   `model:` in the session (or pass the same `--model` on every `skill` run). Read `result.json`'s `models` back before believing any cross-run comparison — and when
    you do, **ignore any entry wrapped in angle brackets**: `<synthetic>` is the agent marking a turn it
    fabricated locally (no API call), not a model, so two runs of the same pinned model can differ on this
    array purely by whether such a turn occurred.

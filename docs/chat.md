@@ -143,7 +143,11 @@ sample, so no `resources.jsonl` is written there.
 
 ## Example
 
+Every example below needs a model: `--model <id>` or `COWORK_HARNESS_MODEL`. A session that resolves none
+is refused.
+
 ```bash
+export COWORK_HARNESS_MODEL=claude-sonnet-5   # a run must name its model (or pass --model <id>)
 cowork-harness chat skills/my-skill \
   --upload ~/data/report.pdf \
   --folder ~/code/myproject \

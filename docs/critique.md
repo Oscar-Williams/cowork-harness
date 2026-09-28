@@ -10,8 +10,11 @@ answer**. Agent self-reports confabulate routinely ("there was no documentation 
 it read the docs). This grades every claim against a frozen record of what actually happened.
 
 ```bash
-cowork-harness critique ./my-skill --prompt "<a task that exercises the skill>"
+cowork-harness critique ./my-skill --prompt "<a task that exercises the skill>" --model claude-sonnet-5
 ```
+
+Both turns need a model: `--model <id>` (forwarded to both) or `COWORK_HARNESS_MODEL`. With neither,
+critique refuses before its task turn. The examples below assume the variable is set.
 
 ## On this page
 

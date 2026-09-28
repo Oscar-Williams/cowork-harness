@@ -63,8 +63,8 @@ and **debug** a run that misbehaved or greened when it shouldn't ([`references/d
 Pick the entry point you need. The first three are the everyday path — a quick liveness check, the
 CI-grade scenario, and the post-hoc debug loop; the rest are narrower tools that hang off them:
 
-- **"Is it even alive?"** (inner loop) → `cowork-harness skill <folder> "<prompt>"`. Fastest; no
-  scenario file.
+- **"Is it even alive?"** (inner loop) → `cowork-harness skill <folder> "<prompt>" --model <id>`. Fastest;
+  no scenario file.
 - **Repeatable, asserted regression** → author a `scenarios/*.yaml` and run `cowork-harness run`.
   This is the CI-grade path and most of this skill.
 - **A run failed — or greened and you don't trust it** (the debugging loop) → don't re-run and hope.

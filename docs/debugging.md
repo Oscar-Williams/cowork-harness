@@ -225,6 +225,9 @@ SKILL=./my-skill
 # to BOTH step 1 and step 3 — critique forwards them to its own two turns, and step 3 must reproduce
 # with the same inputs the harvest used. See critique.md → "Skills that need an attached file".
 
+# Every run below needs a model; set it once so all generations use the same one.
+export COWORK_HARNESS_MODEL=claude-sonnet-5   # a run must name its model (or pass --model <id>)
+
 # 1. HARVEST — run the skill against a real input and grade what confused the agent.
 #    `critique` runs the task, asks the agent what was unclear, then verifies every claim against a
 #    frozen record of the run. Findings never gate; exit 2 only if no critique was produced.

@@ -512,24 +512,23 @@ resolved model selects which *communicating with the user* section the system pr
 models can be handed materially different instructions about how much to narrate their work. The
 capability map that decides it is delivered with the account, not built into the app.
 
-**Harness behaviour:** `--model` is emitted only when something pins it — a session `model:`, a `--model`
-flag, a matrix `models:` axis, or `COWORK_HARNESS_MODEL`. With nothing pinned the harness passes no model
-flag at all and the agent binary falls back to whatever the local CLI would pick — a function of the
-machine and the account running the test, not of the baseline. `--effort` is not symmetric: it is always
-emitted, resolving to the baseline's synced `spawn.effortDefault`. An unpinned run therefore pins the
-effort and leaves the model it applies to floating.
+**Harness behaviour:** a run must resolve a model — a `--model` flag or a matrix `models:` axis, a session
+`model:`, or `COWORK_HARNESS_MODEL`, in that order — and it is passed as `--model`. A run that resolves
+none is refused before it spends. Without one the agent binary would fall back to whatever the local CLI
+picks, a function of the machine and the account running the test, not of the baseline. `--effort` is
+always emitted, resolving to the baseline's synced `spawn.effortDefault`.
 
-**Why it isn't defaulted:** there is nothing to default it *to*. Production does not choose a model
+**Why it is refused rather than defaulted:** there is nothing to default it *to*. Production does not choose a model
 either — where a Cowork session pins none, Desktop forwards the literal sentinel `default` and the agent
 resolves it against the account. A baseline records per-model effort configuration for the models it has
 seen; it records neither the set Cowork offers nor which one a session gets, because the app decides
 neither. Hardcoding a model id would be the harness asserting a fact it cannot re-derive at sync time,
 and it would go stale silently on the first server-side change, which is the failure mode baselines exist
-to prevent. The one divergence this leaves is shape, not outcome: production sends a sentinel the agent
-resolves away, the harness sends nothing and the agent resolves its own default — both end at
-"the account decides", which is why the harness warns rather than inventing a value.
+to prevent. Production can let the account decide because its model list comes from that account; a
+test run cannot, because "the account decides" makes the result a property of whoever ran it. So the
+harness asks the author to name the model instead of inventing one.
 
-**What this means for a test result:** an unpinned model is not just a quality variable. Because the
+**Why it matters for a test result:** the model is not just a quality variable. Because the
 prompt section is model-selected, it moves the *instructions* the agent is given — a scenario that
 asserts on how much the agent narrates, or that runs `semantic_matches` over its prose, can flip between
 two machines running the same harness, the same baseline and the same skill. Cost and latency

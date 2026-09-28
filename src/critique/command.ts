@@ -1348,8 +1348,8 @@ interface ReportState {
    *  filtered through `isLiveModelId`. The report already named the EVALUATOR's resolved model and named
    *  no other, so the one number a reader must not get wrong — which model produced the behaviour being
    *  graded — was absent from every critique. It cannot be inferred from the caller's context either: the
-   *  turns are a SUBPROCESS and inherit nothing from the session that invoked `critique`, so an omitted
-   *  `--model` grades whatever the spawned agent defaults to, silently and without a trace in the report.
+   *  turns are a SUBPROCESS and inherit nothing from the session that invoked `critique`: they take
+   *  `--model` or COWORK_HARNESS_MODEL (critique refuses with neither), and only this field records which.
    *  Absent when no result.json was readable or it recorded no live id. */
   gradedModels?: string[];
   /** WHY a graded turn that ended in `result:"error"` errored — the run's own `resultErrorKind` plus its
