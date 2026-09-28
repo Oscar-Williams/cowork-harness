@@ -49,3 +49,21 @@ describe("diffSurfaces: a list of names is a set, not a positional array", () =>
     expect(diffSurfaces({ env: { coworkVars: ["A", "B"] } }, { env: { coworkVars: ["A"] } }).removed).toEqual(["env.coworkVars[B]"]);
   });
 });
+
+describe("diffSurfaces: an arm that NARROWS the old scalar is not a widening", () => {
+  it("the review's case: the kept arm adds minLength and an enum → changed, not widened", () => {
+    const d = diffSurfaces(
+      { a: { x: { type: "string" } } },
+      { a: { "x<anyOf:0>": { type: "string", minLength: 5, enum: ["only-this"] } } },
+    );
+    expect(d.widened).toEqual([]);
+    expect(d.ok).toBe(false);
+    expect([...d.changed, ...d.removed]).toContain("a.x.type");
+  });
+
+  it("a true widening does not double-count the kept arm's leaf as an addition", () => {
+    const d = diffSurfaces({ a: { x: { type: "string" } } }, { a: { "x<anyOf:0>": { type: "string" }, "x<anyOf:1>": { type: "object" } } });
+    expect(d.widened).toEqual(["a.x.type"]);
+    expect(d.added).toEqual(["a.x<anyOf:1>.type"]);
+  });
+});
