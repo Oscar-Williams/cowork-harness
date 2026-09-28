@@ -1735,7 +1735,7 @@ def cmd_lint(args):
     # print "0 findings" and still exit 1 (because --strict keys off the unfiltered set), which is
     # indistinguishable from a bug. Applied identically to --json so the two output modes never disagree.
     # The DEFAULT floor depends on --strict: WARN under --strict (it fails on ERROR and WARN and hides INFO,
-    # the same rule `lint-skill --strict` has), INFO otherwise. An explicit --min-severity always wins, so
+    # so it fails on the same classes as `lint-skill --strict`, which still prints INFO), INFO otherwise. An explicit --min-severity always wins, so
     # `--strict --min-severity INFO` still prints and fails on INFO.
     min_severity = getattr(args, "min_severity", None) or ("WARN" if args.strict else "INFO")
     floor = SEV_ORDER[min_severity]
@@ -3051,8 +3051,9 @@ def main(argv=None):
         "--strict",
         action="store_true",
         help="exit non-zero on WARN too, not just ERROR. Under --strict the default --min-severity is "
-        "WARN, so INFO findings are neither printed nor failing — the same rule as `lint-skill "
-        "--strict`, which never fails on INFO. Pass `--min-severity INFO` to see and fail on INFO too.",
+        "WARN, so INFO findings are neither printed nor failing. It fails on the same classes as "
+        "`lint-skill --strict` (which still prints INFO). Pass `--min-severity INFO` to see and fail on "
+        "INFO too.",
     )
     lp.add_argument(
         "--min-severity",

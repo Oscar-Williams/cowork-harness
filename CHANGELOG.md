@@ -17,6 +17,8 @@ All notable changes to this project are documented here. The format is based on
     already passes `--strict --min-severity WARN` behaves exactly as before.
   - *To keep the old behaviour:* add `--min-severity INFO` (for the Action, `extra-args: --min-severity
     INFO`).
+  - *Action users:* a workflow that leaves `version:` at its `latest` default picks up 4.0.0, and both
+    changes here, as soon as it is promoted. Pin `version: "^3"` to defer it.
 - **`record` exits 1, not 2, when `--max-budget-usd` refuses**, on `--dry-run` and the real command, on
   every `record` path (a single file, a directory, `--rerecord-stale`). A refusal of a scenario that loaded now always exits 1, so 2 no longer
   means "over budget"; it means the scenario did not load, or a usage or setup error. On a directory,

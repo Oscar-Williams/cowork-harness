@@ -135,6 +135,7 @@ you have a reason:
     command: lint
     path: scenarios/
     version: "^3"                       # holds the major
+    strict: true                        # without it, only ERROR fails the step
     extra-args: --min-severity WARN     # needs a CLI >= 1.11.0; any 3.x satisfies that
 ```
 
