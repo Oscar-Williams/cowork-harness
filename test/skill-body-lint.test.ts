@@ -354,7 +354,7 @@ describe.skipIf(!havePython)("lint-skill — corpus vs the critique evidence cei
     const head = "# t\n";
     writeFileSync(join(d, "SKILL.md"), head);
     mkdirSync(join(d, "references"), { recursive: true });
-    const PART = 80_000;
+    const PART = 50_000;
     let left = Math.max(0, bytes - head.length);
     for (let i = 0; left > 0 || i === 0; i++) {
       const n = Math.min(PART, left);

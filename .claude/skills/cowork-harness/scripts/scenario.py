@@ -51,7 +51,8 @@ lint-skill flags (skill bodies + any sibling hooks.json):
   W  `${CLAUDE_PLUGIN_ROOT}` in a VM bash step / host-side hook seeding (host-loop footguns)
   W  `skill-body-over-reattach-cap`   SKILL.md body (frontmatter excluded) over 19,000 B — after a
                                compaction the agent re-attaches only the first ~19,900 chars (INFO from 80%)
-  W  `skill-reference-over-read-cap` a references/**.md over 90,000 B — a whole-file Read throws past it
+  W  `skill-reference-over-read-cap` a references/**.md over 60,000 B — a whole-file Read past 25,000 real
+                               tokens returns only a partial view with a paging notice
 
 Through the `cowork-harness lint` CLI wrapper (not when this script is run directly), lint ALSO reports
 every file the harness's own scenario loader rejects -- the check `run`/`record` apply before anything
@@ -2715,14 +2716,21 @@ def _lint_skill_corpus_size(md_path):
 #     the content to 5000*4 - len(sentinel) characters of the JS string (about 19,900) and appending a
 #     "[... skill content truncated for compaction; use Read on the skill path ...]" sentinel. All re-attached
 #     skills together are capped at 25,000 tokens, and a skill over that combined cap is dropped.
-#   * The Read tool is capped at 25,000 tokens (about 100,000 characters at the agent's 4-chars-per-token
-#     estimate) and THROWS past it, so a whole-file read of a larger reference fails and must page.
+#   * The Read tool is capped at 25,000 tokens. A whole-file Read past it returns only a partial view with a
+#     paging notice ("showing lines 1-N of M total (T tokens, cap 25000). Call Read with offset=…"), so the
+#     agent must page; only an offset/limit read that is itself over the cap throws. Above ~6,250 ESTIMATED
+#     tokens the gate asks the API's count_tokens for the REAL count, so the cap is in real tokens, not in
+#     chars/4. Measured 2026-09-28 with count_tokens (model claude-sonnet-5) on this skill's own references:
+#     scenario-schema.md 88,487 B = 33,130 tokens, ci-recipe.md 36,216 B = 13,656, run-record-replay.md
+#     28,649 B = 10,603, gotchas.md 24,756 B = 9,226 — about 2.65-2.70 B per token for this markdown, so
+#     25,000 tokens is about 66,000 B. The WARN sits at 60,000 B (2.4 B per token), a margin for denser text.
 #
-# The estimate counts UTF-16 units; these rules count UTF-8 BYTES, which are never fewer, so they err early.
+# Body cap only: the re-attach estimate counts UTF-16 units and the rule counts UTF-8 BYTES, which are never
+# fewer, so it errs early. The reference cap has no such guarantee — it rests on the measured ratio above.
 _SKILL_SIZE_CAPS_VERIFIED = "binary-verified against agent 2.1.281 (VM ELF and native, both read)"
 _SKILL_BODY_REATTACH_CAP = 19_000
 _SKILL_BODY_NOTICE_RATIO = 0.8
-_SKILL_REFERENCE_READ_CAP = 90_000
+_SKILL_REFERENCE_READ_CAP = 60_000
 
 
 def _skill_body_bytes(text):
@@ -2784,8 +2792,8 @@ def _lint_skill_sizes(md_path):
                     Finding(
                         "WARN",
                         "skill-reference-over-read-cap",
-                        f"{p.name} is {size:,} B, over the {_SKILL_REFERENCE_READ_CAP:,} B cap — a whole-file Read "
-                        "past ~25,000 tokens throws, so the agent has to page through it.",
+                        f"{p.name} is {size:,} B, over the {_SKILL_REFERENCE_READ_CAP:,} B cap — a whole-file Read past "
+                        "25,000 real tokens returns only a partial view with a paging notice; the agent must page.",
                         f"Split the file by topic and link the parts from SKILL.md. Cap {_SKILL_SIZE_CAPS_VERIFIED}.",
                         str(p),
                     )
@@ -3072,9 +3080,11 @@ def main(argv=None):
             "Also sizes the skill against two agent caps: a SKILL.md body (frontmatter excluded) over "
             "19,000 B is `skill-body-over-reattach-cap` (WARN; INFO from 80%) — after a context compaction "
             "the agent re-attaches only the first ~19,900 characters of an invoked skill — and a "
-            "references/**.md over 90,000 B is `skill-reference-over-read-cap` (WARN) — a whole-file Read "
-            "past ~25,000 tokens throws. Both count UTF-8 bytes, which are never fewer than the UTF-16 "
-            "units the agent estimates from, so they warn early rather than late.\n\n"
+            "references/**.md over 60,000 B is `skill-reference-over-read-cap` (WARN) — a whole-file Read "
+            "past 25,000 real tokens returns only a partial view with a paging notice, so the agent must "
+            "page. The body cap counts UTF-8 bytes, never fewer than the UTF-16 units the agent estimates "
+            "from, so it warns early; the reference cap rests on a measured ~2.65 B per real token for "
+            "markdown, with a margin.\n\n"
             "Plain `lint-skill` (no `--strict`) is ADVISORY — it prints findings but exits 0 on "
             "WARN/INFO. CI should invoke `lint-skill --strict` to actually gate on the WARN-class "
             "findings above (the two host-loop footguns, the provable subagent_type typo and the two "

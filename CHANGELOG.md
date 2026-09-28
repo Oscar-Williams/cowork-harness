@@ -19,7 +19,7 @@ All notable changes to this project are documented here. The format is based on
   `replay` refuses a newer-format cassette before evaluating any assertion, so the next format bump cannot
   crash it the same way.
 - **`lint-skill --strict` can newly fail on a skill's size:** a `SKILL.md` body over 19,000 B, or a
-  `references/**.md` file over 90,000 B. Move detail out of the body into `references/`, and split an
+  `references/**.md` file over 60,000 B. Move detail out of the body into `references/`, and split an
   oversized reference by topic.
 
 ### Added
@@ -51,10 +51,12 @@ All notable changes to this project are documented here. The format is based on
   - `skill-body-over-reattach-cap` (WARN) fires on a `SKILL.md` body over 19,000 B, with the frontmatter
     excluded. After a context compaction the agent re-attaches only the first ~19,900 characters of an
     invoked skill, so anything past that is lost. It reports INFO `skill-body-near-reattach-cap` from 80%.
-  - `skill-reference-over-read-cap` (WARN) fires on a `references/**.md` file over 90,000 B, because a
-    whole-file Read past ~25,000 tokens throws.
-  - Both caps were read from agent 2.1.281 (VM ELF and native). Both count UTF-8 bytes, which are never
-    fewer than the characters the agent counts, so they warn early rather than late.
+  - `skill-reference-over-read-cap` (WARN) fires on a `references/**.md` file over 60,000 B. A whole-file
+    Read past 25,000 real tokens returns only a partial view with a paging notice, so the agent must page.
+  - Both caps were read from agent 2.1.281 (VM ELF and native). The body cap counts UTF-8 bytes, which are
+    never fewer than the characters the agent counts, so it warns early. The reference cap is in real
+    tokens (the agent asks the API's `count_tokens` above a size threshold); 60,000 B leaves a margin under
+    the ~2.65 B per token measured on this skill's own markdown.
 
 ### Changed
 

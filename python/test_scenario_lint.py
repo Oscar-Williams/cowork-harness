@@ -1752,8 +1752,24 @@ def test_reference_95k_warns_over_read_cap(tmp_path):
 
 
 def test_reference_under_read_cap_is_clean(tmp_path):
-    _, rules = _size_rules(_size_skill(tmp_path, 1_000, ref_bytes=85_000))
+    _, rules = _size_rules(_size_skill(tmp_path, 1_000, ref_bytes=55_000))
     assert "skill-reference-over-read-cap" not in rules
+
+
+def test_reference_65k_warns_before_25k_real_tokens(tmp_path):
+    # Measured on this repo's markdown: ~2.65 B per real token (count_tokens), so 25,000 real tokens is
+    # ~66 KB. A 65 KB reference sits just under that and must already warn — a cap in chars/4 terms
+    # (100 KB) would stay silent on a file the Read gate truncates.
+    _, rules = _size_rules(_size_skill(tmp_path, 1_000, ref_bytes=65_000))
+    assert "skill-reference-over-read-cap" in rules
+
+
+def test_reference_cap_message_says_partial_view_not_throw(tmp_path):
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        scenario.main(["lint-skill", "--json", str(_size_skill(tmp_path, 1_000, ref_bytes=95_000))])
+    msgs = [f["message"] for f in json.loads(buf.getvalue()) if f["rule"] == "skill-reference-over-read-cap"]
+    assert msgs and "partial view" in msgs[0] and "throw" not in msgs[0]
 
 
 def test_nested_reference_is_checked(tmp_path):

@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { collectStamps } from "../scripts/check-claims.js";
 
-// The lint-skill size caps (a SKILL.md body over 19,000 B; a reference over 90,000 B) come from reading one
+// The lint-skill size caps (a SKILL.md body over 19,000 B; a reference over 60,000 B) come from reading one
 // agent build, not from an observed truncation. They live ONCE, in scenario.py — no TS consumer exists, so
 // there is deliberately no mirror to sync. What keeps them honest is the adjacent stamp naming the build
 // they were read from, and `check:claims` reporting that stamp's age. This pins both halves: a stamp that
@@ -23,7 +23,7 @@ describe("lint-skill size caps: single source + binary-verification stamp", () =
     const lines = py.split("\n");
     const at = (re: RegExp) => lines.findIndex((l) => re.test(l));
     const s = at(/^_SKILL_SIZE_CAPS_VERIFIED = /);
-    for (const c of [/^_SKILL_BODY_REATTACH_CAP = 19_000$/, /^_SKILL_REFERENCE_READ_CAP = 90_000$/]) {
+    for (const c of [/^_SKILL_BODY_REATTACH_CAP = 19_000$/, /^_SKILL_REFERENCE_READ_CAP = 60_000$/]) {
       const i = at(c);
       expect(i, `${c} not found`).toBeGreaterThan(-1);
       expect(Math.abs(i - s), `${c} is not adjacent to the stamp`).toBeLessThanOrEqual(4);
