@@ -1526,12 +1526,18 @@ export interface RunResult {
     egressParse?: number;
     protocolMalformed?: number;
   };
-  // per-tool call-count/timing aggregate, folded from the timeline. Absent only when no
-  // timeline data exists for this run (replayErrorResult — no run ever happened). Populated for
-  // buildPartialResult too, when the salvaged run made at least one tool call. Wall-gap between
-  // tool_use and tool_result, NOT isolated script CPU time — see foldToolDurations's doc comment
-  // (src/run/timeline-fold.ts) for the honesty caveat.
-  toolDurations?: Record<string, { calls: number; totalMs: number; maxMs: number }>;
+  // per-tool call-count/timing aggregate, folded from the timeline. Absent when no clean timeline
+  // exists for this run (replayErrorResult — no run ever happened; a corrupt timeline; a cassette with
+  // none). Populated for buildPartialResult too. Wall gap between tool_use and tool_result, NOT isolated
+  // execution time — see foldToolDurations's doc comment (src/run/timeline-fold.ts). `calls`/`totalMs`/
+  // `maxMs` are over PAIRED calls (0 when calls is 0); `unpaired` counts calls that never got a result.
+  // Covers main agent AND sub-agent calls. Result files written before `unpaired` existed lack it.
+  toolDurations?: Record<string, { calls: number; totalMs: number; maxMs: number; unpaired: number }>;
+  /** What `toolDurations` measures — present exactly when `toolDurations` is. `"wall_gap"`: harness-
+   *  observed wall time from tool_use to tool_result, including model/transport and permission latency;
+   *  an Agent/Task entry spans its whole sub-agent run. On replay, the record-time gaps. Absent on a
+   *  result file written before this field existed (the measure was the same wall gap then). */
+  toolDurationsBasis?: "wall_gap";
   // distinct model ids seen across assistant_text/tool_use/thinking events, in first-seen order.
   // Absent only when replayErrorResult (no run ever happened). Populated for buildPartialResult too,
   // when the salvaged run had at least one assistant message.

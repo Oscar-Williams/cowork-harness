@@ -42,6 +42,7 @@ function fullyExplicitFixture(): CompleteRunResult {
     infraErrors: undefined,
     evidenceErrors: undefined,
     toolDurations: undefined,
+    toolDurationsBasis: undefined,
     models: undefined,
     thinking: undefined,
     thinkingElided: undefined,

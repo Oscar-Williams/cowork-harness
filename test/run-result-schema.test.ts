@@ -69,7 +69,8 @@ const full: RunResult = {
   infraErrors: [{ source: "egress-sidecar", message: "sidecar exited 1" }],
   evidenceErrors: { taskTracking: 1, webSearchParse: 0, presentFilesMalformed: 0, egressParse: 0, protocolMalformed: 0 },
   webSearches: [{ toolUseId: "toolu_1", query: "market size", results: [{ title: "Example Report", url: "https://example.com" }] }],
-  toolDurations: { Bash: { calls: 1, totalMs: 240, maxMs: 240 } },
+  toolDurations: { Bash: { calls: 1, totalMs: 240, maxMs: 240, unpaired: 1 }, Read: { calls: 0, totalMs: 0, maxMs: 0, unpaired: 2 } },
+  toolDurationsBasis: "wall_gap",
   models: ["claude-sonnet-4-5"],
   thinking: [{ text: "considering the approach" }, { text: "", redacted: true }],
   thinkingElided: 2,
@@ -253,5 +254,15 @@ describe("docs ↔ schema/run-result.json verdict-shape sync", () => {
         .filter(Boolean),
     );
     expect(keys).toEqual(verdictRequired);
+  });
+});
+
+describe("toolDurations basis + unpaired (schema)", () => {
+  const props = (schema as { properties: Record<string, any> }).properties;
+  it("every per-tool entry must carry `unpaired` — the writer always emits it, so its absence is not a 0", () => {
+    expect(props.toolDurations.additionalProperties.required).toContain("unpaired");
+  });
+  it("toolDurationsBasis is a closed enum naming the one basis the fold measures", () => {
+    expect(props.toolDurationsBasis.enum).toEqual(["wall_gap"]);
   });
 });

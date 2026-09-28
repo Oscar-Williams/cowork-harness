@@ -75,7 +75,7 @@ import { makeDisplayTranslator, vmPathContextFromPlan } from "./display-translat
 import { writeVmPathContextFile } from "./vm-path-ctx-file.js";
 import { LiveAgentSession, type SdkMcp, type HookBundle } from "../agent/session.js";
 import { readTimeline } from "../agent/timeline.js";
-import { foldToolDurations, foldSkillActivity, attributeSubagentSkills } from "./timeline-fold.js";
+import { toolDurationFields, foldSkillActivity, attributeSubagentSkills } from "./timeline-fold.js";
 import { captureSubagentReasoning } from "./subagent-reasoning.js";
 import { buildDecider, Chain, ExternalDecider, LlmDecider, type Decider, type OnUnanswered, UnansweredError } from "../decide/decider.js";
 import { type DecisionChannel } from "../decide/external-channel.js";
@@ -1757,7 +1757,7 @@ export async function executeScenario(scenario: Scenario, opts: ExecuteOptions =
       webSearches: record.webSearches.length ? record.webSearches : undefined,
       infraErrors: infraErrorsForResult(record),
       evidenceErrors: evidenceErrorsForResult(record),
-      toolDurations: timelineEvents ? foldToolDurations(timelineEvents) : undefined,
+      ...toolDurationFields(timelineEvents), // toolDurations + toolDurationsBasis, derived together
       skillActivity: timelineEvents ? foldSkillActivity(timelineEvents) : undefined,
       models: record.models.length ? record.models : undefined,
       ...deriveModelProvenance(plan.model, record.models.length ? record.models : undefined, record.modelFallbacks),
@@ -2389,7 +2389,7 @@ export function buildPartialResult(args: {
     webSearches: record.webSearches.length ? record.webSearches : undefined,
     infraErrors: infraErrorsForResult(record),
     evidenceErrors: evidenceErrorsForResult(record),
-    toolDurations: timelineEvents ? foldToolDurations(timelineEvents) : undefined,
+    ...toolDurationFields(timelineEvents), // toolDurations + toolDurationsBasis, derived together
     skillActivity: timelineEvents ? foldSkillActivity(timelineEvents) : undefined,
     models: record.models.length ? record.models : undefined,
     ...deriveModelProvenance(args.pinnedModel, record.models.length ? record.models : undefined, record.modelFallbacks),

@@ -407,6 +407,7 @@
     },
     "toolDurations": {
       "type": "object",
+      "description": "Per-tool timing folded from the run's timeline, over main-agent AND sub-agent calls. What the numbers measure is named by toolDurationsBasis. calls/totalMs/maxMs are over PAIRED calls (a tool_use whose tool_result arrived); totalMs and maxMs are 0 when calls is 0. unpaired counts the tool's calls that never got a result (e.g. the run ended mid-call), so a tool can appear with calls 0.",
       "additionalProperties": {
         "type": "object",
         "properties": {
@@ -418,11 +419,20 @@
           },
           "maxMs": {
             "type": "number"
+          },
+          "unpaired": {
+            "type": "number",
+            "description": "calls to this tool that carried an id but never paired with a tool_result, so they have no duration. The synthetic MCP round-trip echo (no id) is not counted."
           }
         },
-        "required": ["calls", "totalMs", "maxMs"],
+        "required": ["calls", "totalMs", "maxMs", "unpaired"],
         "additionalProperties": false
       }
+    },
+    "toolDurationsBasis": {
+      "type": "string",
+      "enum": ["wall_gap"],
+      "description": "What toolDurations measures; present exactly when toolDurations is. wall_gap: harness-observed wall time from tool_use to tool_result, including model/transport and permission/decider latency; an Agent/Task entry spans its whole sub-agent run. It is not isolated execution time. On replay these are the record-time gaps frozen in the cassette."
     },
     "models": {
       "type": "array",

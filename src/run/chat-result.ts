@@ -6,7 +6,7 @@ import { infraErrorsForResult, evidenceErrorsForResult, type RunRecord } from ".
 import { assembleRunResult } from "./assemble-run-result.js";
 import { classifyWorkspaceFilesWithHealth, trustedWorkspaceFiles } from "./artifacts.js";
 import { readTimeline } from "../agent/timeline.js";
-import { foldToolDurations, foldSkillActivity, attributeSubagentSkills } from "./timeline-fold.js";
+import { toolDurationFields, foldSkillActivity, attributeSubagentSkills } from "./timeline-fold.js";
 import { foldResources, resolveIntervalMs } from "../runtime/resource-sampler.js";
 
 const RUN_RESULT_SCHEMA_URL = "https://raw.githubusercontent.com/yaniv-golan/cowork-harness/main/schema/run-result.json";
@@ -111,7 +111,7 @@ export function buildChatResult(record: RunRecord, opts: ChatResultOpts): RunRes
     webSearches: record.webSearches.length ? record.webSearches : undefined,
     infraErrors: infraErrorsForResult(record),
     evidenceErrors: evidenceErrorsForResult(record),
-    toolDurations: timeline ? foldToolDurations(timeline.events) : undefined,
+    ...toolDurationFields(timeline?.events), // toolDurations + toolDurationsBasis, derived together
     skillActivity: timeline ? foldSkillActivity(timeline.events) : undefined,
     models: record.models.length ? record.models : undefined,
     ...deriveModelProvenance(opts.pinnedModel, record.models.length ? record.models : undefined, record.modelFallbacks),

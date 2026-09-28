@@ -483,7 +483,7 @@ describe("buildToolDurations / formatToolDurations", () => {
       JSON.stringify({ seq: 1, ts: 120, line: 1, type: "tool_result", toolUseId: "t1", isError: false }),
     ];
     writeFileSync(join(f, "..", "timeline.jsonl"), lines.join("\n") + "\n");
-    expect(buildToolDurations(f)).toEqual({ Bash: { calls: 1, totalMs: 120, maxMs: 120 } });
+    expect(buildToolDurations(f)).toEqual({ Bash: { calls: 1, totalMs: 120, maxMs: 120, unpaired: 0 } });
   });
 
   it("returns {} when no sibling timeline.jsonl exists (a pre-M1 run dir)", () => {

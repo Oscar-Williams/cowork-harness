@@ -1,35 +1,91 @@
 import type { TimelineEvent } from "../agent/timeline.js";
 
+/** One tool's entry in `RunResult.toolDurations`. `calls`/`totalMs`/`maxMs` are over PAIRED calls only
+ *  (a `tool_use` whose `tool_result` arrived in this timeline); both are 0 when `calls` is 0. `unpaired`
+ *  counts this tool's calls that carried an id but never paired, so they have no duration. */
+export interface ToolDurationEntry {
+  calls: number;
+  totalMs: number;
+  maxMs: number;
+  unpaired: number;
+}
+
+/** What `toolDurations` measures. One value today; the field exists so a consumer never has to infer it. */
+export type ToolDurationsBasis = "wall_gap";
+
 /**
- * Pairs each `tool_use` with its `tool_result` by `toolUseId` and aggregates the wall-gap between them
- * per tool name. A `tool_use` with no `toolUseId`, or one with no matching `tool_result` in this
- * timeline (e.g. the run ended mid-call), contributes no duration data — it's silently excluded, not
- * an error; the tool's call is still visible via `RunResult.toolCounts`.
+ * Pairs each `tool_use` with its `tool_result` by `toolUseId` and aggregates the wall gap between them
+ * per tool name.
  *
- * Honesty caveat: this includes
- * model latency between the tool_use emission and the result being observed — a wall gap, not isolated
- * script CPU time. The SDK stream carries no runtime-side exec start/end stamp, so this is the best
- * available signal, not a truer one.
+ * What the number is (the basis, `"wall_gap"`): harness-observed wall time from the moment the
+ * `tool_use` was seen on the stream to the moment its `tool_result` was seen. It includes model and
+ * transport latency and any permission/decider round-trip, and an `Agent`/`Task` entry spans its whole
+ * sub-agent run. It is not isolated execution time: the SDK stream carries no runtime-side exec
+ * start/end stamp. On replay these are the record-time timestamps, frozen in the cassette.
+ *
+ * Scope: every call in the timeline — main agent and sub-agents alike. `trace --view tool-durations
+ * --scope` narrows it.
+ *
+ * Unpaired: a `tool_use` WITH an id and no matching `tool_result` (e.g. the run ended mid-call) is
+ * counted in `unpaired`, so a tool is listed even when none of its calls paired. A `tool_use` with NO id
+ * is not counted anywhere: on a real stream it is the synthetic MCP round-trip echo of a call that
+ * already arrived with an id (session.ts marks it `synthetic`; the timeline keeps no flag), and counting
+ * it would report every paired `mcp__*` call as unpaired too. A `tool_result` with no matching
+ * `tool_use` pairs nothing and is ignored.
  */
-export function foldToolDurations(timeline: TimelineEvent[]): Record<string, { calls: number; totalMs: number; maxMs: number }> {
-  const pending = new Map<string, { name: string; ts: number }>();
-  const out: Record<string, { calls: number; totalMs: number; maxMs: number }> = {};
-  for (const ev of timeline) {
-    if (ev.type === "tool_use" && ev.toolUseId) {
-      pending.set(ev.toolUseId, { name: ev.name, ts: ev.ts });
-    } else if (ev.type === "tool_result" && ev.toolUseId) {
-      const start = pending.get(ev.toolUseId);
-      if (!start) continue;
-      pending.delete(ev.toolUseId);
-      const callMs = ev.ts - start.ts;
-      const bucket = out[start.name] ?? { calls: 0, totalMs: 0, maxMs: 0 };
-      bucket.calls += 1;
-      bucket.totalMs += callMs;
-      bucket.maxMs = Math.max(bucket.maxMs, callMs);
-      out[start.name] = bucket;
+export function foldToolDurations(timeline: TimelineEvent[]): Record<string, ToolDurationEntry> {
+  const out: Record<string, ToolDurationEntry> = {};
+  for (const c of pairToolCalls(timeline)) {
+    const bucket = (out[c.name] ??= { calls: 0, totalMs: 0, maxMs: 0, unpaired: 0 });
+    if (c.endTs === undefined) {
+      bucket.unpaired += 1;
+      continue;
     }
+    const callMs = c.endTs - c.startTs;
+    bucket.calls += 1;
+    bucket.totalMs += callMs;
+    bucket.maxMs = Math.max(bucket.maxMs, callMs);
   }
   return out;
+}
+
+/** One `tool_use` that carried an id, with its paired `tool_result` time when one arrived. In stream
+ *  order of the `tool_use`. The single pairing rule behind both `foldToolDurations` and the per-call
+ *  trace view, so the aggregate and the rows can never disagree. */
+export interface PairedToolCall {
+  toolUseId: string;
+  name: string;
+  parentToolUseId?: string;
+  startTs: number;
+  endTs?: number;
+}
+
+export function pairToolCalls(timeline: TimelineEvent[]): PairedToolCall[] {
+  const calls: PairedToolCall[] = [];
+  const pending = new Map<string, PairedToolCall>();
+  for (const ev of timeline) {
+    if (ev.type === "tool_use" && ev.toolUseId) {
+      const c: PairedToolCall = { toolUseId: ev.toolUseId, name: ev.name, parentToolUseId: ev.parentToolUseId, startTs: ev.ts };
+      calls.push(c);
+      pending.set(ev.toolUseId, c);
+    } else if (ev.type === "tool_result" && ev.toolUseId) {
+      const c = pending.get(ev.toolUseId);
+      if (!c) continue;
+      pending.delete(ev.toolUseId);
+      c.endTs = ev.ts;
+    }
+  }
+  return calls;
+}
+
+/** `toolDurations` and its basis, derived together so a RunResult can never carry one without the
+ *  other. Every RunResult assembly site spreads this. `undefined` in = no usable timeline = neither. */
+export function toolDurationFields(timeline: TimelineEvent[] | undefined): {
+  toolDurations: Record<string, ToolDurationEntry> | undefined;
+  toolDurationsBasis: ToolDurationsBasis | undefined;
+} {
+  if (!timeline) return { toolDurations: undefined, toolDurationsBasis: undefined };
+  return { toolDurations: foldToolDurations(timeline), toolDurationsBasis: "wall_gap" };
 }
 
 export interface SkillActivityEntry {
