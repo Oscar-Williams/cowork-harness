@@ -2547,6 +2547,10 @@ const VM_SUB_HELP: Record<string, string> = {
 };
 
 function cmdVm(args: string[]) {
+  // --dotenv / --run-dir anywhere after `vm` — before its own subcommand too (`vm --run-dir x status`), so
+  // `vm` matches "every command takes them after the subcommand". Applied before the platform guard, like
+  // every other command's parse.
+  args = stripCommandGlobals("vm", args, ["--output-format"], isJsonOutput(args));
   // macOS arm64 guard — Lima VMs are macOS-only.
   if (process.platform !== "darwin") {
     fail(

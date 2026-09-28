@@ -44,10 +44,13 @@ const MATRIX: Array<[string, string[]]> = [
   ["decide", ["decide", "--question", "q?"]],
   ["gates", ["gates", "some-dir"]],
   ["answer", ["answer", "some-dir", "--choose", "A"]],
-  ["sync", ["sync"]],
+  // sync refuses a non-macOS host before it parses anything (an environment error, by design), so off macOS
+  // the flag is never reached; the case only runs where sync can.
+  ...(process.platform === "darwin" ? ([["sync", ["sync"]]] as Array<[string, string[]]>) : []),
   ["list", ["list"]],
   ["boundary-check", ["boundary-check"]],
   ["vm", ["vm", "status"]],
+  ["vm (flag before the vm subcommand)", ["vm"]],
   ["lint", ["lint", "x.yaml"]],
   ["lint-skill", ["lint-skill", "SKILL.md"]],
   ["analyze-skill", ["analyze-skill", "SKILL.md"]],
