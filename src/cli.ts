@@ -59,7 +59,7 @@ import { cmdRunsGc } from "./run/runs-gc.js";
 import { captureAuthoredFilesWithHealth, authoredFilesHealthNonEmpty } from "./run/artifacts.js";
 import { readPreRunManifestOrigin, readPreRunManifestStats } from "./run/pre-run-manifest.js";
 import { resolveInputs } from "./run/inputs.js";
-import { cmdLint, cmdLintSkill } from "./run/scenario-tool.js";
+import { cmdLint, cmdLintSkill, cmdScaffoldFlagBuilt, isFlagBuiltScaffold } from "./run/scenario-tool.js";
 import { cmdAnalyzeSkill } from "./run/analyze-skill.js";
 import { projectDispatchProbe, formatDispatchProbe } from "./run/probe-dispatch.js";
 import { cmdDoctor } from "./run/doctor.js";
@@ -273,6 +273,9 @@ const HELP = `cowork-harness <command>   (v${"$VERSION"})
       [--output-format json]   exit codes: 0 identical · 1 differing · 2 usage
   scaffold <run-id | run-dir>  turn a kept run into a starter scenario YAML (gates→answers, artifacts→file_exists)
       [--out <file.yaml>]      write to a file (default: stdout)
+  scaffold --name <n> --prompt "<p>" [--skill <dir>] [--tier …] [--tool …]… [--out <file.yaml>]
+                               build a starter scenario from flags alone, no run needed (the bundled scenario.py
+                               scaffold; 'scaffold --help' lists its flags)
   status <run-id | run-dir>    check whether a background run is alive (state/elapsed/tool counts) — no ps aux needed
       [--follow]               stream one line per status change until done/error; arm a Monitor here
       [--output-format json]   structured status (--follow always emits raw JSON lines, format flag N/A there)
@@ -574,7 +577,11 @@ const SUBCOMMAND_USAGE: Record<string, string> = {
        (for what the run PRODUCED — artifacts — use \`inspect\`)`,
   assertions: "usage: assertions --list [--output-format json]",
   scaffold:
-    "usage: scaffold <run-id | run-dir> [--out <file.yaml>] [--output-format text|json]\n       Turns a kept run into a starter scenario YAML (gates→answers, artifacts→file_exists).\n       Positional <run-id | run-dir> is the canonical form.",
+    "usage: scaffold <run-id | run-dir> [--out <file.yaml>] [--output-format text|json]\n" +
+    "       Turns a kept run into a starter scenario YAML (gates→answers, artifacts→file_exists).\n" +
+    '   or: scaffold --name <n> --prompt "<p>" [--skill <dir>] [--tier <tier>] [--session <file>] [--content <regex>]… [--tool <name>]… [--subagent <regex>]… [--gate <regex=choice>]… [--web-fetch <domain>]… [--file <path>]… [--artifact <path>]… [--no-delete] [--egress-allowed <host>]… [--egress-denied <host>]… [--no-validate] [--out <file.yaml>]\n' +
+    "       Builds a starter scenario from flags alone, no run needed (the bundled scenario.py scaffold; self-linted; YAML only).\n" +
+    "       Any of the second form's flags selects it; a <run-id | run-dir> cannot be combined with them.",
   status:
     "usage: status <run-id | run-dir> [--follow] [--output-format text|json]   (check whether a background run is alive, without ps aux — see docs/run-status.md)\n" +
     "       --follow: stream one line per status change until the run reaches a terminal state (done/error); arm a Monitor here\n" +
@@ -3917,9 +3924,16 @@ function cmdAnswer(args: string[]) {
   else log(`✓ answered gate ${seq}: ${JSON.stringify(answers)}`);
 }
 
+const SCAFFOLD_USAGE_LINE =
+  'usage: scaffold <run-id | run-dir> [--out <file.yaml>]   or   scaffold --name <n> --prompt "<p>" [--skill <dir>] … [--out <file.yaml>]  (scaffold --help for both forms)';
+
 /** `scaffold <run-id | run-dir>` — turn a kept run into a starter scenario YAML (observed gates → answers,
  *  artifacts → file_exists, the prompt). Authoring becomes explore→lock instead of guess-and-re-run. */
 function cmdScaffold(args: string[]) {
+  // ONE scaffold command, two forms. Any flag only the bundled script knows (--name, --prompt, --skill, …)
+  // selects the flag-built form, delegated to `scenario.py scaffold` the way `lint` delegates; everything
+  // else is the native run-id form below, unchanged.
+  if (isFlagBuiltScaffold(args)) return cmdScaffoldFlagBuilt(args);
   const json = isJsonOutput(args);
   // validate --output-format is text|json — an invalid value was a silent text degrade (only
   // isJsonOutput was consulted), unlike decide/gates/trace.
@@ -3952,7 +3966,7 @@ function cmdScaffold(args: string[]) {
   // Positional is the only (canonical) form for the run id/dir.
   const pos = positionals(args, ["--out", "--output-format"]);
   const target = pos[0];
-  if (!target) return void fail("scaffold", "usage", "usage: scaffold <run-id | run-dir> [--out <file.yaml>]", undefined, json);
+  if (!target) return void fail("scaffold", "usage", SCAFFOLD_USAGE_LINE, undefined, json);
   if (pos.length > 1) {
     return void fail(
       "scaffold",

@@ -3131,7 +3131,7 @@ def main(argv=None):
     rap.add_argument("--json", action="store_true", help="emit the resolved types as a JSON array instead of one per line")
     rap.set_defaults(func=cmd_resolve_agent_types)
 
-    sp = sub.add_parser("scaffold", help="emit a valid scenario skeleton (self-linted)")
+    sp = sub.add_parser("scaffold", prog=f"{prog} scaffold" if prog else None, help="emit a valid scenario skeleton (self-linted)")
     sp.add_argument("--name", default="my-scenario", help="scenario name (default: my-scenario)")
     sp.add_argument("--prompt", help="the user turn (the prompt: block)")
     sp.add_argument("--tier", choices=VALID_TIERS, default="container", help="fidelity tier (default: container)")
