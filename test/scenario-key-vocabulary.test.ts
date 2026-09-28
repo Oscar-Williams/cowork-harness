@@ -48,6 +48,7 @@ const SCANNED = [
   "CHANGELOG.md",
   "llms.txt",
   ".claude/skills/cowork-harness/references/scenario-schema.md",
+  ".claude/skills/cowork-harness/references/assertion-catalog.md",
   ".claude/skills/cowork-harness/references/task-recipes.md",
   ".claude/skills/cowork-harness/references/fidelity-and-answers.md",
 ];

@@ -49,6 +49,10 @@ lint-skill flags (skill bodies + any sibling hooks.json):
   I  `hook-event-not-served`   a real hook event that DOES fire (plugin hooks are executed by the agent,
                                live-verified) but has no assertion key, so a scenario can't gate on it
   W  `${CLAUDE_PLUGIN_ROOT}` in a VM bash step / host-side hook seeding (host-loop footguns)
+  W  `skill-body-over-reattach-cap`   SKILL.md body (frontmatter excluded) over 19,000 B — after a
+                               compaction the agent re-attaches only the first ~19,900 chars (INFO from 80%)
+  W  `skill-reference-over-read-cap` a references/**.md over 60,000 B — a whole-file Read past 25,000 real
+                               tokens returns only a partial view with a paging notice
 
 Through the `cowork-harness lint` CLI wrapper (not when this script is run directly), lint ALSO reports
 every file the harness's own scenario loader rejects -- the check `run`/`record` apply before anything
@@ -2703,6 +2707,100 @@ def _lint_skill_corpus_size(md_path):
     return []
 
 
+# Skill size caps. SINGLE SOURCE: nothing in the TypeScript side consumes these, so there is deliberately
+# no mirror to keep in sync (a mirror plus a sync test would be satisfiable by copy-paste). The numbers come
+# from reading the agent binary, not from an observed truncation; the stamp below names the build, and
+# `npm run check:claims` reports its age against the pinned agent.
+#
+#   * After a context compaction the agent re-attaches each invoked skill capped at 5,000 tokens, cutting
+#     the content to 5000*4 - len(sentinel) characters of the JS string (about 19,900) and appending a
+#     "[... skill content truncated for compaction; use Read on the skill path ...]" sentinel. All re-attached
+#     skills together are capped at 25,000 tokens, and a skill over that combined cap is dropped.
+#   * The Read tool is capped at 25,000 tokens. A whole-file Read past it returns only a partial view with a
+#     paging notice ("showing lines 1-N of M total (T tokens, cap 25000). Call Read with offset=…"), so the
+#     agent must page; only an offset/limit read that is itself over the cap throws. Above ~6,250 ESTIMATED
+#     tokens the gate asks the API's count_tokens for the REAL count, so the cap is in real tokens, not in
+#     chars/4. Measured 2026-09-28 with count_tokens (model claude-sonnet-5) on this skill's own references:
+#     scenario-schema.md 88,487 B = 33,130 tokens, ci-recipe.md 36,216 B = 13,656, run-record-replay.md
+#     28,649 B = 10,603, gotchas.md 24,756 B = 9,226 — about 2.65-2.70 B per token for this markdown, so
+#     25,000 tokens is about 66,000 B. The WARN sits at 60,000 B (2.4 B per token), a margin for denser text.
+#
+# Body cap only: the re-attach estimate counts UTF-16 units and the rule counts UTF-8 BYTES, which are never
+# fewer, so it errs early. The reference cap has no such guarantee — it rests on the measured ratio above.
+_SKILL_SIZE_CAPS_VERIFIED = "binary-verified against agent 2.1.281 (VM ELF and native, both read)"
+_SKILL_BODY_REATTACH_CAP = 19_000
+_SKILL_BODY_NOTICE_RATIO = 0.8
+_SKILL_REFERENCE_READ_CAP = 60_000
+
+
+def _skill_body_bytes(text):
+    """UTF-8 size of a SKILL.md with its YAML frontmatter stripped. The frontmatter (name + description) is
+    billed to the skill LISTING, not to the body the agent re-attaches after a compaction."""
+    body = text
+    if text.startswith("---\n") or text.startswith("---\r\n"):
+        lines = text.splitlines(keepends=True)
+        for i in range(1, len(lines)):
+            if lines[i].rstrip("\r\n") == "---":
+                body = "".join(lines[i + 1:])
+                break
+    return len(body.encode("utf-8"))
+
+
+def _lint_skill_sizes(md_path):
+    """The SKILL.md body against the post-compaction re-attach cap, and each references/**.md file against
+    the Read tool's cap. See the constants above for where both numbers come from."""
+    findings = []
+    md = Path(md_path)
+    try:
+        body = _skill_body_bytes(md.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError):
+        body = None
+    if body is not None:
+        cap = _SKILL_BODY_REATTACH_CAP
+        if body > cap:
+            findings.append(
+                Finding(
+                    "WARN",
+                    "skill-body-over-reattach-cap",
+                    f"SKILL.md body is {body:,} B, over the {cap:,} B cap — after a context compaction the agent "
+                    "re-attaches only the first ~19,900 characters of an invoked skill; move detail to references/.",
+                    "Keep SKILL.md to routing, the invariants whose absence causes a false green, and short "
+                    "workflows; link the detail from references/*.md, which the agent reads on demand. The "
+                    f"frontmatter is not counted. Cap {_SKILL_SIZE_CAPS_VERIFIED}.",
+                    str(md),
+                )
+            )
+        elif body >= cap * _SKILL_BODY_NOTICE_RATIO:
+            findings.append(
+                Finding(
+                    "INFO",
+                    "skill-body-near-reattach-cap",
+                    f"SKILL.md body is {body:,} B ({body * 100.0 / cap:.0f}% of the {cap:,} B re-attach cap).",
+                    "No action needed yet; growing the body past the cap means a compaction cuts its tail.",
+                    str(md),
+                )
+            )
+    refs = md.parent / "references"
+    if refs.is_dir():
+        for p in sorted(refs.rglob("*.md")):
+            try:
+                size = p.stat().st_size
+            except OSError:
+                continue
+            if p.is_file() and size > _SKILL_REFERENCE_READ_CAP:
+                findings.append(
+                    Finding(
+                        "WARN",
+                        "skill-reference-over-read-cap",
+                        f"{p.name} is {size:,} B, over the {_SKILL_REFERENCE_READ_CAP:,} B cap — a whole-file Read past "
+                        "25,000 real tokens returns only a partial view with a paging notice; the agent must page.",
+                        f"Split the file by topic and link the parts from SKILL.md. Cap {_SKILL_SIZE_CAPS_VERIFIED}.",
+                        str(p),
+                    )
+                )
+    return findings
+
+
 def cmd_lint_skill(args):
     all_findings = []
     n_files = 0
@@ -2725,6 +2823,7 @@ def cmd_lint_skill(args):
             all_findings.extend(_lint_skill_text(md, md_lines))
             all_findings.extend(_lint_subagent_types(md, md_lines))
             all_findings.extend(_lint_skill_corpus_size(md))
+            all_findings.extend(_lint_skill_sizes(md))
         for hp in hooks:
             n_files += 1
             all_findings.extend(
@@ -2978,9 +3077,18 @@ def main(argv=None):
             "prefix the linter couldn't enumerate) is `subagent-type-unknown` (INFO) — those two stay "
             "INFO, never WARN, since there is no harness registry of built-in agent types to disprove "
             "an unknown value against.\n\n"
+            "Also sizes the skill against two agent caps: a SKILL.md body (frontmatter excluded) over "
+            "19,000 B is `skill-body-over-reattach-cap` (WARN; INFO from 80%) — after a context compaction "
+            "the agent re-attaches only the first ~19,900 characters of an invoked skill — and a "
+            "references/**.md over 60,000 B is `skill-reference-over-read-cap` (WARN) — a whole-file Read "
+            "past 25,000 real tokens returns only a partial view with a paging notice, so the agent must "
+            "page. The body cap counts UTF-8 bytes, never fewer than the UTF-16 units the agent estimates "
+            "from, so it warns early; the reference cap rests on a measured ~2.65 B per real token for "
+            "markdown, with a margin.\n\n"
             "Plain `lint-skill` (no `--strict`) is ADVISORY — it prints findings but exits 0 on "
             "WARN/INFO. CI should invoke `lint-skill --strict` to actually gate on the WARN-class "
-            "findings above (the two host-loop footguns and the provable subagent_type typo)."
+            "findings above (the two host-loop footguns, the provable subagent_type typo and the two "
+            "size caps)."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )

@@ -132,7 +132,13 @@ describe("gotchas.md index blurbs don't claim non-existent content", () => {
 });
 
 describe("verdict-signals docs ↔ code", () => {
-  const scenarioSchemaText = readFileSync(resolve(".claude/skills/cowork-harness/references/scenario-schema.md"), "utf8");
+  // The signal table moved to assertion-catalog.md; scan both skill references so the check keeps its reach.
+  const scenarioSchemaText = [
+    ".claude/skills/cowork-harness/references/scenario-schema.md",
+    ".claude/skills/cowork-harness/references/assertion-catalog.md",
+  ]
+    .map((f) => readFileSync(resolve(f), "utf8"))
+    .join("\n");
   const scenarioMdText = readFileSync(resolve("docs/scenario.md"), "utf8");
 
   it("neither doc uses the bare (wrong) `result.signals` JSON path — it's nested under `result.verdict.signals`", () => {

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { resolve } from "node:path";
 import { computeVerdict } from "../src/run/verdict.js";
 import { evaluate, type AssertContext } from "../src/assert.js";
@@ -186,13 +186,21 @@ describe("scan_unavailable no longer claims the whole outputs-delete guard did n
     expect(msg).not.toMatch(/outputs-delete guards did not run/);
   });
 
-  it.each(["docs/scenario.md", ".claude/skills/cowork-harness/SKILL.md", ".claude/skills/cowork-harness/references/scenario-schema.md"])(
-    "%s does not say the outputs-delete guard did not run",
-    (rel) => {
-      const text = readFileSync(resolve(rel), "utf8").replace(/\*\*/g, "").replace(/\s+/g, " ");
-      expect(text).not.toMatch(/outputs-delete guards did not run/);
-    },
-  );
+  // Every shipped skill file, enumerated rather than listed: a negative check over a named file goes
+  // silently vacuous the moment the sentence it watches moves to another file.
+  const skillFiles = [
+    ".claude/skills/cowork-harness/SKILL.md",
+    ...readdirSync(resolve(".claude/skills/cowork-harness/references"))
+      .filter((f) => f.endsWith(".md"))
+      .map((f) => `.claude/skills/cowork-harness/references/${f}`),
+  ];
+  it("enumerated the skill payload (guards a vacuous pass)", () => {
+    expect(skillFiles.length).toBeGreaterThan(6);
+  });
+  it.each(["docs/scenario.md", ...skillFiles])("%s does not say the outputs-delete guard did not run", (rel) => {
+    const text = readFileSync(resolve(rel), "utf8").replace(/\*\*/g, "").replace(/\s+/g, " ");
+    expect(text).not.toMatch(/outputs-delete guards did not run/);
+  });
 });
 
 describe("outputs-delete: the authored key on the diff's own evidence states", () => {

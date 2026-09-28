@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { rewriteFileContent, parseArgs, TARGET_FILES } from "../scripts/bump-version.js";
+import { rewriteFileContent, parseArgs, TARGET_FILES, FILE_REWRITERS } from "../scripts/bump-version.js";
 
 describe("parseArgs", () => {
   it("accepts a bare X.Y.Z version and defaults to dry-run", () => {
@@ -60,20 +60,18 @@ describe("rewriteFileContent — floors", () => {
     expect(after).not.toContain("0.33.0");
   });
 
-  it("bumps a bare `@^X.Y.Z` floor in README.md (no cowork-harness prefix)", () => {
-    const before = "The companion skill's `@^0.33.0` floor guidance applies to ad-hoc CLI installs, not this input.";
-    const after = rewriteFileContent("README.md", before, "0.34.0");
+  it("bumps both a cowork-harness@^X.Y.Z floor and a bare @^X.Y.Z floor in the same SKILL.md content", () => {
+    const before = 'prefix with `npx "cowork-harness@^0.33.0" <cmd>`. **Pin `@^0.33.0`, never `@latest`**.';
+    const after = rewriteFileContent(".claude/skills/cowork-harness/SKILL.md", before, "0.34.0");
+    expect(after).toContain("cowork-harness@^0.34.0");
     expect(after).toContain("`@^0.34.0`");
     expect(after).not.toContain("0.33.0");
   });
 
-  it("bumps both a cowork-harness@^X.Y.Z floor and a bare @^X.Y.Z floor in the same README.md content", () => {
-    const before =
-      'From a global install (`npm i -g "cowork-harness@^0.33.0"`)... ' +
-      "the companion skill's `@^0.33.0` floor guidance applies to ad-hoc CLI installs.";
+  it("README.md gets the cowork-harness@^X.Y.Z rule only — it carries no bare floor to register a rewriter for", () => {
+    const before = 'From a global install (`npm i -g "cowork-harness@^0.33.0"`).';
     const after = rewriteFileContent("README.md", before, "0.34.0");
     expect(after).toContain("cowork-harness@^0.34.0");
-    expect(after).toContain("`@^0.34.0`");
     expect(after).not.toContain("0.33.0");
   });
 
@@ -137,11 +135,6 @@ describe("rewriteFileContent — SKILL.md", () => {
   it("bumps the needs **≥ X.Y.Z** sentence", () => {
     const after = rewriteFileContent(SKILL_MD, fixture(), "0.34.0");
     expect(after).toContain("needs **≥ 0.34.0**");
-  });
-
-  it("bumps the What the ≥ X.Y.Z floor gates heading", () => {
-    const after = rewriteFileContent(SKILL_MD, fixture(), "0.34.0");
-    expect(after).toContain("What the ≥ 0.34.0 floor gates");
   });
 
   it("bumps every cowork-harness@^X.Y.Z floor", () => {
@@ -231,10 +224,18 @@ describe("TARGET_FILES", () => {
       ".claude-plugin/marketplace.json",
       ".claude/skills/cowork-harness/.claude-plugin/plugin.json",
       ".claude/skills/cowork-harness/SKILL.md",
-      ".claude/skills/cowork-harness/references/scenario-schema.md",
-      ".claude/skills/cowork-harness/references/fidelity-and-answers.md",
-      ".claude/skills/cowork-harness/references/task-recipes.md",
+      // Every references/*.md except ci-recipe.md, sorted — enumerated from the directory.
+      ".claude/skills/cowork-harness/references/assertion-catalog.md",
+      ".claude/skills/cowork-harness/references/assertions-guide.md",
+      ".claude/skills/cowork-harness/references/authoring.md",
       ".claude/skills/cowork-harness/references/critique.md",
+      ".claude/skills/cowork-harness/references/debugging.md",
+      ".claude/skills/cowork-harness/references/fidelity-and-answers.md",
+      ".claude/skills/cowork-harness/references/gotchas.md",
+      ".claude/skills/cowork-harness/references/measurement.md",
+      ".claude/skills/cowork-harness/references/run-record-replay.md",
+      ".claude/skills/cowork-harness/references/scenario-schema.md",
+      ".claude/skills/cowork-harness/references/task-recipes.md",
       ".claude/skills/cowork-harness/references/ci-recipe.md",
       "examples/replays/README.md",
       // Router-split pages (3.0.1). These carry `cowork-harness@^X.Y.Z` install floors that
@@ -254,13 +255,8 @@ describe("TARGET_FILES", () => {
   });
 
   it("bumps the Tracks stamp in each reference file's REAL committed content — synthetic fixtures once hid a line-wrapped stamp the space-literal regex could not match", () => {
-    const stampRefs = [
-      ".claude/skills/cowork-harness/references/scenario-schema.md",
-      ".claude/skills/cowork-harness/references/fidelity-and-answers.md",
-      ".claude/skills/cowork-harness/references/task-recipes.md",
-      ".claude/skills/cowork-harness/references/critique.md",
-      ".claude/skills/cowork-harness/references/ci-recipe.md",
-    ];
+    const stampRefs = TARGET_FILES.filter((f) => f.startsWith(".claude/skills/cowork-harness/references/"));
+    expect(stampRefs.length).toBeGreaterThanOrEqual(11);
     for (const file of stampRefs) {
       const real = readFileSync(resolve(file), "utf8");
       const next = rewriteFileContent(file, real, "9.9.9");
@@ -268,4 +264,27 @@ describe("TARGET_FILES", () => {
       expect(next).not.toMatch(/Tracks `cowork-harness \d+\.\d+\.\d+`.*Tracks `cowork-harness (?!9\.9\.9)/s);
     }
   });
+});
+
+// The fixture-based suites above prove each rewriter does the right thing to a string that CONTAINS its
+// target. They cannot notice that the real file no longer does: a SKILL.md heading rewriter kept passing
+// its fixture test for releases after the heading itself was deleted, a silent no-op at every bump. This
+// runs every live rewriter against the committed file it is registered for. A pattern without the `g` flag
+// rewrites only its first match, so it must match exactly once — a second occurrence would stay stale.
+describe("every live rewriter matches the REAL file it is registered for", () => {
+  it("covers every target file (a file with no rewriters would be a silent no-op)", () => {
+    expect(Object.keys(FILE_REWRITERS).sort()).toEqual([...TARGET_FILES].sort());
+  });
+
+  for (const file of TARGET_FILES) {
+    for (const rw of FILE_REWRITERS[file]) {
+      const global = rw.pattern.flags.includes("g");
+      it(`${file}: ${rw.name} matches ${global ? "at least once" : "exactly once"}`, () => {
+        const real = readFileSync(resolve(file), "utf8");
+        const count = [...real.matchAll(new RegExp(rw.pattern.source, global ? rw.pattern.flags : rw.pattern.flags + "g"))].length;
+        if (global) expect(count, `${rw.name} matches nothing in ${file} — the bump would skip it`).toBeGreaterThan(0);
+        else expect(count, `${rw.name} must match exactly once in ${file}`).toBe(1);
+      });
+    }
+  }
 });

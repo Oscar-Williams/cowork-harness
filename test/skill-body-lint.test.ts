@@ -346,13 +346,21 @@ describe.skipIf(!havePython)("scenario.py lint-skill — Cowork host-loop footgu
 // entirely — so without these cases the feature could be gutted and nothing would notice.
 describe.skipIf(!havePython)("lint-skill — corpus vs the critique evidence ceiling", () => {
   const CEILING = 512 * 1024;
-  /** A skill dir whose SKILL.md + references/big.md total ~`bytes`. */
+  /** A skill dir whose SKILL.md + references/part-N.md total ~`bytes`. Split into parts under the
+   *  per-reference read cap, so these cases exercise the corpus ceiling alone rather than also tripping
+   *  `skill-reference-over-read-cap` (a separate WARN, which would fail `--strict` on its own). */
   function skillOfSize(bytes: number): string {
     const d = mkdtempSync(join(tmpdir(), "corpus-lint-"));
     const head = "# t\n";
     writeFileSync(join(d, "SKILL.md"), head);
     mkdirSync(join(d, "references"), { recursive: true });
-    writeFileSync(join(d, "references", "big.md"), "x".repeat(Math.max(0, bytes - head.length)));
+    const PART = 50_000;
+    let left = Math.max(0, bytes - head.length);
+    for (let i = 0; left > 0 || i === 0; i++) {
+      const n = Math.min(PART, left);
+      writeFileSync(join(d, "references", `part-${i}.md`), "x".repeat(n));
+      left -= n;
+    }
     return d;
   }
   const rules = (dir: string): string[] => lintSkill(dir).findings.map((f) => f.rule);

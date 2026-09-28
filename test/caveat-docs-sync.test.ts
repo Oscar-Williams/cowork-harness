@@ -18,7 +18,10 @@ import { Assertion } from "../src/types.js";
 // caveat at all — and an enumerable set catches exactly that.
 
 const scenarioDoc = readFileSync("docs/scenario.md", "utf8");
-const skillRef = readFileSync(".claude/skills/cowork-harness/references/scenario-schema.md", "utf8");
+// The per-key table moved from scenario-schema.md into its own reference. `row()` returning undefined is
+// tolerated below (the table covers a subset), so a wrong file here would skip every key silently — the
+// "found at least one row" test pins that.
+const skillRef = readFileSync(".claude/skills/cowork-harness/references/assertion-catalog.md", "utf8");
 const cassetteDoc = readFileSync("docs/cassette.md", "utf8");
 
 const TOOL_USE_SENTINEL = "excludes every `tool_use`/`tool_result`";
@@ -113,7 +116,11 @@ describe("keys blind to tool_use carry the exclusion in their docs row", () => {
   it.each(TOOL_USE_BLIND_KEYS)("the packaged skill reference documents %s with the exclusion", (key) => {
     const r = row(skillRef, key as string);
     if (r === undefined) return; // that table covers a subset; where it describes the key, the caveat travels
-    expect(carries(r, TOOL_USE_SENTINEL), `references/scenario-schema.md's ${key} row must say it ${TOOL_USE_SENTINEL}`).toBe(true);
+    expect(carries(r, TOOL_USE_SENTINEL), `references/assertion-catalog.md's ${key} row must say it ${TOOL_USE_SENTINEL}`).toBe(true);
+  });
+
+  it("the packaged skill reference has rows for these keys at all (the tolerated-undefined above is not every key)", () => {
+    expect((TOOL_USE_BLIND_KEYS as string[]).filter((k) => row(skillRef, k) !== undefined).length).toBeGreaterThan(0);
   });
 
   // THE DIRECTION THAT ACTUALLY ROTS. Everything above runs set → docs: it catches a member whose row lost

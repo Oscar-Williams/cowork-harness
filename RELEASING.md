@@ -153,10 +153,8 @@ tagging `1.0.0`, deliberately review and freeze the surfaces with no machine-rea
    `npx "cowork-harness@^X.Y.Z"`).
 5. `.claude/skills/cowork-harness/references/scenario-schema.md` → the
    "Tracks `cowork-harness X.Y.Z`" line.
-6. `.claude/skills/cowork-harness/references/fidelity-and-answers.md`,
-   `.claude/skills/cowork-harness/references/task-recipes.md` and
-   `.claude/skills/cowork-harness/references/critique.md` → the
-   "Tracks `cowork-harness X.Y.Z`" line in each.
+6. Every other `.claude/skills/cowork-harness/references/*.md` → the "Tracks `cowork-harness X.Y.Z`"
+   line in each (`check:versions` enumerates the directory, so a new reference without one fails).
 7. The baseline these track (`tracks-harness … (baseline desktop-<ver>)`) — keep in sync with the
    newest `baselines/desktop-*.json`. The `check:versions` guard enforces this for SKILL.md, every
    `references/*.md` baseline pin, and DESIGN.md's current-state sentence — a lagging pin reds CI.

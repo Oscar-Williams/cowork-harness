@@ -89,7 +89,7 @@ regressions.
 | **Spawned helper** | `--decider-cmd '<helper>'` | depends on the helper |
 | **In-band (driving agent)** | `--decider-dir <FRESH, EMPTY dir>` + `gates`/`answer` (arm a Monitor on the dir) | ❌ flags `nonDeterministic` |
 
-Pick with the decision tree in SKILL.md's *Choose an answer path* — the discriminator is **"will this run
+Pick with the decision tree in `authoring.md`'s *Choose an answer path* — the discriminator is **"will this run
 be re-executed unattended?"**, not "which row looks closest". `--decider-dir`'s one unique property is that
 it needs no advance knowledge of the option **set**; drifting label *text* alone is still a scripted
 problem (substring anchor / positional `choose`). Rehearse the channel in ~2s with
@@ -289,7 +289,7 @@ up often enough to spell out:
 - **`present_files` assertions can't verify off the tiers that serve the tool.** `no_scratchpad_leak` and
   `present_files_called` check the `present_files` delivery path — the desktop-local lane's tool; remote
   Cowork delivers via the agent-native `SendUserFile` instead, so never hardcode a delivery tool name in
-  a SKILL.md (SKILL.md Gotcha 24). **The harness** serves `present_files` on `container` **and `hostloop`**
+  a SKILL.md (Gotcha 24 in `gotchas.md`). **The harness** serves `present_files` on `container` **and `hostloop`**
   — not `microvm`/`protocol`. `present_files_called` works at both; `no_scratchpad_leak` stays
   `container`-only, because hostloop's handler passes a validated path through without promoting, so
   there is no scratch→outputs copy to leak. Asserting either key off the tiers that serve it hard-fails at

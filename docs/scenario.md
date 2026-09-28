@@ -729,7 +729,7 @@ Only eleven codes are **warn**-severity (informational, never flip pass/fail):
   unanswerable. It is mutually exclusive with `undelivered_deliverables` by construction, and stays quiet
   on a run that produced nothing to deliver.
 
-See the skill reference [`scenario-schema.md`](../.claude/skills/cowork-harness/references/scenario-schema.md) for the full signal list.
+See the skill reference [`assertion-catalog.md`](../.claude/skills/cowork-harness/references/assertion-catalog.md) for the full signal list.
 
 ##### False negatives — signals that are tier/image artifacts, not skill defects
 

@@ -13,9 +13,10 @@
 //                              can publish (else the skill ships ahead of npm).
 //   5. README floor === floor: every `cowork-harness@>=X.Y.Z` in README.md matches the SKILL.md floor
 //                              (README is not version-controlled by the package; it drifts silently otherwise).
-//   5b. SKILL floors === floor: every `@>=X.Y.Z` in SKILL.md (incl. a BARE `Pin `@>=X`` with no
-//                              `cowork-harness` prefix) matches the floor — invariant 3 reads only the
-//                              first prefixed match, so a bare floor drifted silently (stale 0.33.0→1.0.0).
+//   5b. skill floors === floor: every `@^X.Y.Z` in SKILL.md AND in every references/*.md (incl. a BARE
+//                              `Pin `@^X`` with no `cowork-harness` prefix) matches the floor — invariant 3
+//                              reads only the first prefixed match in SKILL.md, so a bare floor drifts silently
+//                              without this.
 //   6. ref stamps === tracks:  each `references/*.md` "Tracks `cowork-harness X.Y.Z`" matches tracks-harness,
 //                              and any `(baseline desktop-X.Y.Z)` pin next to that stamp matches SKILL.md's
 //                              tracks-harness baseline (the refs lagged two Desktop syncs before this check).
@@ -614,9 +615,9 @@ export function checkVersions(): { ok: boolean; errors: string[]; values: Record
     for (const f of readmeFloors) if (f !== floor) errors.push(`README.md floor "@^${f}" != SKILL.md floor "@^${floor}"`);
   }
 
-  // 5b. EVERY `@>=X.Y.Z` inside SKILL.md must equal the floor — including a BARE `Pin `@>=X`` with no
-  //     `cowork-harness` prefix. Invariant 3 reads only the FIRST `cowork-harness@>=` match, so a bare
-  //     floor drifted silently (it shipped stale from 0.33.0 through 1.0.0). This catches all of them.
+  // 5b. EVERY `@^X.Y.Z` inside SKILL.md must equal the floor — including a BARE `Pin `@^X`` with no
+  //     `cowork-harness` prefix. Invariant 3 reads only the FIRST `cowork-harness@^` match, so a bare
+  //     floor would drift silently. The references/*.md half of 5b runs in the invariant-6 loop below.
   if (floor) {
     const skillFloors = [...skillMd.matchAll(/@\^(\d+\.\d+\.\d+)/g)].map((m) => m[1]);
     for (const f of skillFloors)
@@ -627,15 +628,20 @@ export function checkVersions(): { ok: boolean; errors: string[]; values: Record
   //    `(baseline desktop-X.Y.Z)` pin in the doc must match SKILL.md's tracks-harness baseline. The
   //    baseline half is what caught the refs pinning desktop-1.20186.1 two Desktop syncs after
   //    SKILL.md moved on — RELEASING's checklist alone didn't hold.
-  const refFiles = [
-    ".claude/skills/cowork-harness/references/ci-recipe.md",
-    ".claude/skills/cowork-harness/references/scenario-schema.md",
-    ".claude/skills/cowork-harness/references/fidelity-and-answers.md",
-    ".claude/skills/cowork-harness/references/task-recipes.md",
-    ".claude/skills/cowork-harness/references/critique.md",
-  ];
+  //    Enumerated from the directory, not a hand list: a reference added without a stamp fails by RULE,
+  //    where a hardcoded list silently skipped it.
+  const refFiles = readdirSync(join(REPO_ROOT, ".claude/skills/cowork-harness/references"))
+    .filter((f) => f.endsWith(".md"))
+    .sort()
+    .map((f) => `.claude/skills/cowork-harness/references/${f}`);
+  if (refFiles.length < 5) errors.push(`only ${refFiles.length} references/*.md found — invariant 6 would pass vacuously`);
   for (const f of refFiles) {
     const refText = r(f);
+    // 5b, extended to every reference: a bare or prefixed `@^X` floor anywhere in the payload must equal
+    // SKILL.md's bootstrap floor, so moving a floor out of SKILL.md cannot take it out of the check.
+    if (floor)
+      for (const m of refText.matchAll(/@\^(\d+\.\d+\.\d+)/g))
+        if (m[1] !== floor) errors.push(`${f} floor "@^${m[1]}" != SKILL.md bootstrap floor "@^${floor}"`);
     if (tracks) {
       const stamp = refText.match(/Tracks\s+`cowork-harness\s+(\d+\.\d+\.\d+)`/)?.[1];
       if (!stamp) errors.push(`${f} has no "Tracks \`cowork-harness X.Y.Z\`" stamp`);
@@ -921,7 +927,7 @@ export function checkVersions(): { ok: boolean; errors: string[]; values: Record
     // The claim must be cited where the false-negative message is explained — the skill and docs/scenario.md.
     if (sites < 2)
       errors.push(
-        `expected at least 2 shipped-doc citations of the form "rootfs manifest captured at Desktop \`X\`" (SKILL.md + docs/scenario.md), found ${sites}`,
+        `expected at least 2 shipped-doc citations of the form "rootfs manifest captured at Desktop \`X\`" (the skill payload + docs/scenario.md), found ${sites}`,
       );
   }
 

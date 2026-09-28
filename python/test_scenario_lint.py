@@ -1667,3 +1667,124 @@ def test_count_min_zero_without_max_is_flagged_as_always_passing(tmp_path):
     body = "assert:\n  - tool_called: { tool: Bash, count: { min: 0 } }\n"
     assert "tool-called-always-passes" in _rules(body, tmp_path)
     assert "tool-called-always-passes" not in _rules("assert:\n  - tool_called: { tool: Bash, count: { min: 0, max: 2 } }\n", tmp_path)
+
+
+# --------------------------------------------------------------------------- #
+# lint-skill size caps: the SKILL.md body the agent re-attaches after a compaction, and a reference
+# file a whole-file Read can return. Behaviour, not just the constants — a sync test on the numbers
+# stays green with the rule deleted.
+# --------------------------------------------------------------------------- #
+
+def _size_skill(tmp_path, body_bytes, ref_bytes=None, frontmatter="---\nname: t\ndescription: d\n---\n"):
+    d = tmp_path / "sk"
+    d.mkdir()
+    (d / "SKILL.md").write_text(frontmatter + "x" * body_bytes, encoding="utf-8")
+    if ref_bytes is not None:
+        (d / "references").mkdir()
+        (d / "references" / "big.md").write_text("y" * ref_bytes, encoding="utf-8")
+    return d
+
+
+def _size_rules(d):
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        code = scenario.main(["lint-skill", "--json", str(d)])
+    return code, {f["rule"] for f in json.loads(buf.getvalue())}
+
+
+def _strict_exit(d):
+    with contextlib.redirect_stdout(io.StringIO()):
+        return scenario.main(["lint-skill", "--strict", str(d)])
+
+
+def test_skill_body_25k_warns_over_reattach_cap(tmp_path):
+    _, rules = _size_rules(_size_skill(tmp_path, 25_000))
+    assert "skill-body-over-reattach-cap" in rules
+
+
+def test_skill_body_15k_is_clean(tmp_path):
+    _, rules = _size_rules(_size_skill(tmp_path, 15_000))
+    assert not any(r.startswith("skill-body-") for r in rules)
+
+
+def test_skill_body_cap_counts_the_body_not_the_frontmatter(tmp_path):
+    # A long description is billed to the listing budget, not the re-attached body.
+    big_fm = "---\nname: t\ndescription: " + "d" * 8_000 + "\n---\n"
+    _, rules = _size_rules(_size_skill(tmp_path, 15_000, frontmatter=big_fm))
+    assert not any(r.startswith("skill-body-") for r in rules)
+
+
+def test_skill_body_notice_band_is_info_and_never_fails_strict(tmp_path):
+    cap = scenario._SKILL_BODY_REATTACH_CAP
+    d = _size_skill(tmp_path, int(cap * scenario._SKILL_BODY_NOTICE_RATIO) + 1)
+    _, rules = _size_rules(d)
+    assert "skill-body-near-reattach-cap" in rules
+    assert "skill-body-over-reattach-cap" not in rules
+    assert _strict_exit(d) == 0
+
+
+def test_skill_body_boundary_exactly_at_cap_is_not_over(tmp_path):
+    cap = scenario._SKILL_BODY_REATTACH_CAP
+    _, at = _size_rules(_size_skill(tmp_path, cap))
+    assert "skill-body-over-reattach-cap" not in at
+    (tmp_path / "sk").rename(tmp_path / "sk-at")
+    _, over = _size_rules(_size_skill(tmp_path, cap + 1))
+    assert "skill-body-over-reattach-cap" in over
+
+
+def test_skill_body_over_cap_fails_strict(tmp_path):
+    assert _strict_exit(_size_skill(tmp_path, 25_000)) == 1
+
+
+def test_skill_body_cap_counts_utf8_bytes(tmp_path):
+    # 7,000 three-byte characters = 21,000 B but only 7,000 UTF-16 units. Bytes >= units, so the WARN
+    # errs early — never late — against the agent's character-based cut.
+    d = tmp_path / "sk"
+    d.mkdir()
+    (d / "SKILL.md").write_text("---\nname: t\ndescription: d\n---\n" + "—" * 7_000, encoding="utf-8")
+    _, rules = _size_rules(d)
+    assert "skill-body-over-reattach-cap" in rules
+
+
+def test_reference_95k_warns_over_read_cap(tmp_path):
+    _, rules = _size_rules(_size_skill(tmp_path, 1_000, ref_bytes=95_000))
+    assert "skill-reference-over-read-cap" in rules
+
+
+def test_reference_under_read_cap_is_clean(tmp_path):
+    _, rules = _size_rules(_size_skill(tmp_path, 1_000, ref_bytes=55_000))
+    assert "skill-reference-over-read-cap" not in rules
+
+
+def test_reference_65k_warns_before_25k_real_tokens(tmp_path):
+    # Measured on this repo's markdown: ~2.65 B per real token (count_tokens), so 25,000 real tokens is
+    # ~66 KB. A 65 KB reference sits just under that and must already warn — a cap in chars/4 terms
+    # (100 KB) would stay silent on a file the Read gate truncates.
+    _, rules = _size_rules(_size_skill(tmp_path, 1_000, ref_bytes=65_000))
+    assert "skill-reference-over-read-cap" in rules
+
+
+def test_reference_cap_message_says_partial_view_not_throw(tmp_path):
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        scenario.main(["lint-skill", "--json", str(_size_skill(tmp_path, 1_000, ref_bytes=95_000))])
+    msgs = [f["message"] for f in json.loads(buf.getvalue()) if f["rule"] == "skill-reference-over-read-cap"]
+    assert msgs and "partial view" in msgs[0] and "throw" not in msgs[0]
+
+
+def test_nested_reference_is_checked(tmp_path):
+    d = _size_skill(tmp_path, 1_000)
+    (d / "references" / "deep").mkdir(parents=True)
+    (d / "references" / "deep" / "huge.md").write_text("z" * 95_000, encoding="utf-8")
+    _, rules = _size_rules(d)
+    assert "skill-reference-over-read-cap" in rules
+
+
+def test_size_caps_carry_a_binary_verification_stamp():
+    # The caps come from reading one agent build; the stamp names it, so check:claims can report its age.
+    import re as _re
+
+    assert _re.fullmatch(
+        r"binary-verified against agent \d+\.\d+\.\d+ \(VM ELF and native, both read\)",
+        scenario._SKILL_SIZE_CAPS_VERIFIED,
+    )

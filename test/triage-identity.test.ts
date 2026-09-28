@@ -5,7 +5,7 @@ import { resolve } from "node:path";
 // Single-source guard for the debug triage block.
 //
 // The triage decision-table is authored ONCE and must stay byte-identical between the shipping skill
-// (.claude/skills/cowork-harness/SKILL.md, Debug part) and the human doc (docs/debugging.md), so the
+// (.claude/skills/cowork-harness/references/debugging.md) and the human doc (docs/debugging.md), so the
 // two surfaces cannot drift. Same contract as test/schema.test.ts: divergence fails CI and the author
 // reconciles by copy — no generator writes into either hand-authored file.
 //
@@ -25,10 +25,10 @@ function extractBlock(relPath: string): string {
 }
 
 describe("debug triage block is single-sourced", () => {
-  const skill = extractBlock(".claude/skills/cowork-harness/SKILL.md");
+  const skill = extractBlock(".claude/skills/cowork-harness/references/debugging.md");
   const docs = extractBlock("docs/debugging.md");
 
-  it("the triage-canonical block is byte-identical in SKILL.md and docs/debugging.md", () => {
+  it("the triage-canonical block is byte-identical in the skill's references/debugging.md and docs/debugging.md", () => {
     expect(skill).toEqual(docs);
   });
 

@@ -80,7 +80,7 @@ const NOT_HISTORY: { file: string; needle: string; why: string }[] = [
     needle: "previously dispatched child",
     why: "temporal WITHIN a run (a child dispatched earlier), not product history",
   },
-  { file: ".claude/skills/cowork-harness/SKILL.md", needle: "body no longer matches", why: "recording-vs-live drift" },
+  { file: ".claude/skills/cowork-harness/references/gotchas.md", needle: "body no longer matches", why: "recording-vs-live drift" },
   {
     file: ".claude/skills/cowork-harness/references/ci-recipe.md",
     needle: "no longer matches what the baseline resolves to",

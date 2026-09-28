@@ -236,8 +236,8 @@ Hardening a skill is a loop: run → read what it did → fix → run again. Two
    (blinded evaluator + mechanical citation checking). **Critiquing a document-analysis skill?** The probe
    attaches nothing on its own — pass `--upload <path>` (repeatable) or `--folder <dir>` exactly as you
    would to `skill`, or the graded run has no file and "there was no file attached" is the correct finding,
-   not a skill defect. Source flags reach both spawned turns automatically — see SKILL.md's
-   floor list. See [docs/critique.md](https://github.com/yaniv-golan/cowork-harness/blob/main/docs/critique.md) for the full flag table, cost and limits (or the shipped
+   not a skill defect. Source flags reach both spawned turns automatically, on a CLI at or above the
+   floor in SKILL.md's version note. See [docs/critique.md](https://github.com/yaniv-golan/cowork-harness/blob/main/docs/critique.md) for the full flag table, cost and limits (or the shipped
    [`references/critique.md`](./critique.md) for the report/evidence-package shapes without leaving the plugin payload). If you
    prefer to build your own grader, the substrate is still here:
    - `result.json` → `finalMessage` (the skill's own answer/critique) + `toolResults[]` (tool outputs).

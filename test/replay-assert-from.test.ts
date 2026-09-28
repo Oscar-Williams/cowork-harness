@@ -521,10 +521,10 @@ describe("P6 — recording-shaping drift enumeration derives from RECORDING_SHAP
   // reads. It went stale exactly the way the three in-repo copies had — listing six fields while the guard
   // compared seven — so a reader would not learn that a lane flip is caught. Consolidating the code copies
   // without pinning this one would have left the drift live in the highest-traffic surface.
-  it("the shipped skill's gotcha-17 drift list names every field (SKILL.md is a fourth copy)", () => {
-    const skill = readFileSync(resolve(".claude/skills/cowork-harness/SKILL.md"), "utf8");
+  it("the shipped skill's gotcha-17 drift list names every field (references/gotchas.md is a fourth copy)", () => {
+    const skill = readFileSync(resolve(".claude/skills/cowork-harness/references/gotchas.md"), "utf8");
     const start = skill.indexOf("17. **Editing `scenarios/*.yaml`");
-    expect(start, "could not locate gotcha 17 in SKILL.md").toBeGreaterThan(-1);
+    expect(start, "could not locate gotcha 17 in references/gotchas.md").toBeGreaterThan(-1);
     const gotcha = skill.slice(start, skill.indexOf("\n18. ", start));
     // Bound to the DRIFT-LIST sentence, not the whole gotcha. Scoping only to gotcha 17 makes this test
     // decoration: its "*Why:*" sentence already names `lane:` among the frozen keys, so a `toContain("lane")`
@@ -532,8 +532,7 @@ describe("P6 — recording-shaping drift enumeration derives from RECORDING_SHAP
     // slash-delimited run of backticked field names is the thing that must stay in sync.
     const list = /hard-fails\*\* if\s+([^]*?)\s+or the skill content/.exec(gotcha)?.[1];
     expect(list, "could not locate gotcha 17's drift-field list").toBeTruthy();
-    for (const field of RECORDING_SHAPING_FIELDS)
-      expect(list, `SKILL.md gotcha 17's drift list should name ${field}`).toContain(`\`${field}\``);
+    for (const field of RECORDING_SHAPING_FIELDS) expect(list, `gotcha 17's drift list should name ${field}`).toContain(`\`${field}\``);
   });
 });
 

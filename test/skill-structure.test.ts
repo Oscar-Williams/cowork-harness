@@ -1,8 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { readFileSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
 
-// Structural tripwire for .claude/skills/cowork-harness/SKILL.md.
+// Structural tripwire for the companion skill: .claude/skills/cowork-harness/SKILL.md (the entrypoint)
+// and the references/ files its detail lives in.
 //
 // This is a TRIPWIRE, not a semantic gate: it checks a COUNT (are there still ~as many gotcha
 // items as before) and the PRESENCE of a few load-bearing section markers, matched as substrings
@@ -11,37 +12,64 @@ import { resolve } from "node:path";
 // reworded into nonsense — only that a restructure/edit pass didn't silently delete the section or
 // drop items wholesale. A real content review still needs a human (or a semantic diff) on top of
 // this.
-const SKILL_PATH = resolve(".claude/skills/cowork-harness/SKILL.md");
+const SKILL_DIR = ".claude/skills/cowork-harness";
+const read = (rel: string) => readFileSync(resolve(SKILL_DIR, rel), "utf8");
+
+/** The files the entrypoint was split into. Each must exist AND be linked from SKILL.md — a reference
+ *  nothing routes to is one the agent never reads. */
+const SPLIT_REFERENCES = [
+  "references/authoring.md",
+  "references/assertions-guide.md",
+  "references/run-record-replay.md",
+  "references/measurement.md",
+  "references/debugging.md",
+  "references/gotchas.md",
+];
 
 describe("cowork-harness SKILL.md structural tripwire", () => {
-  const doc = readFileSync(SKILL_PATH, "utf8");
+  const doc = read("SKILL.md");
+  const gotchas = read("references/gotchas.md");
 
-  it("has a Gotchas section", () => {
-    expect(doc).toContain("## Gotchas");
+  it("has a Gotchas section (in references/gotchas.md)", () => {
+    expect(gotchas).toContain("## Gotchas");
   });
 
-  it("the Gotchas section still has at least 21 numbered gotcha items", () => {
-    const start = doc.indexOf("## Gotchas");
+  it("the Gotchas section still has all 27 numbered gotcha items", () => {
+    const start = gotchas.indexOf("## Gotchas");
     expect(start).toBeGreaterThanOrEqual(0);
-    const nextHeading = doc.indexOf("\n## ", start + 1);
-    const section = doc.slice(start, nextHeading === -1 ? undefined : nextHeading);
+    const nextHeading = gotchas.indexOf("\n## ", start + 1);
+    const section = gotchas.slice(start, nextHeading === -1 ? undefined : nextHeading);
     const items = section.match(/^\d+\. \*\*/gm) ?? [];
-    expect(items.length).toBeGreaterThanOrEqual(21);
+    // The floor was 21 while the list lived in SKILL.md; the split moved all 27 verbatim, so the floor is
+    // now the real count — a move that dropped one would otherwise stay green.
+    expect(items.length).toBeGreaterThanOrEqual(27);
   });
 
   it("the orientation router offers critique, and states the skill-vs-critique routing rule", () => {
-    const router = doc.slice(doc.indexOf("## Orient — the three loops"), doc.indexOf("## Part I"));
+    // Bounded by the NEXT `## ` heading, not by a named one: the slice used to end at "## Part I", and
+    // indexOf returning -1 there (the heading moved out of SKILL.md) silently widened it to the rest of the
+    // file — green, while checking the wrong region. Both ends are asserted found.
+    const start = doc.indexOf("## Orient — the three loops");
+    expect(start, "the Orient router heading is gone").toBeGreaterThan(-1);
+    const end = doc.indexOf("\n## ", start + 1);
+    expect(end, "no heading follows the Orient router, so its end is unbounded").toBeGreaterThan(start);
+    const router = doc.slice(start, end);
     expect(router).toContain("cowork-harness critique");
     // \s+ not a literal space: the bullet wraps across lines at exactly this phrase.
     expect(router).toMatch(/what does this skill\s+\*\*DO\*\*/i);
     expect(router).toMatch(/use `skill`/i);
   });
 
-  it("retains the two-axes assertions model marker", () => {
-    expect(doc).toContain("Assertions: two orthogonal axes");
+  it("retains the two-axes assertions model marker (in references/assertions-guide.md)", () => {
+    expect(read("references/assertions-guide.md")).toContain("Assertions: two orthogonal axes");
   });
 
-  it("retains the web_fetch provenance section marker", () => {
-    expect(doc).toContain("web_fetch");
+  it("retains the web_fetch provenance section marker (in references/authoring.md)", () => {
+    expect(read("references/authoring.md")).toContain("### web_fetch (fail-closed, two-path)");
+  });
+
+  it.each(SPLIT_REFERENCES)("%s exists and SKILL.md links it", (rel) => {
+    expect(existsSync(resolve(SKILL_DIR, rel)), `${rel} is missing`).toBe(true);
+    expect(doc, `SKILL.md does not link ${rel}`).toContain(`](${rel})`);
   });
 });

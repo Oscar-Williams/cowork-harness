@@ -1,6 +1,6 @@
 # Troubleshooting FAQ
 
-> **Start here when stuck:** a run misbehaved, or CI is green and you don't trust it → [debugging.md](./debugging.md) (the investigation loop + the false-green hunt). Skill-*authoring* landmines → the companion skill's gotchas catalog ([SKILL.md](../.claude/skills/cowork-harness/SKILL.md)). This page is the setup + authoring FAQ — symptom-keyed, skimmable.
+> **Start here when stuck:** a run misbehaved, or CI is green and you don't trust it → [debugging.md](./debugging.md) (the investigation loop + the false-green hunt). Skill-*authoring* landmines → the companion skill's gotchas catalog ([references/gotchas.md](../.claude/skills/cowork-harness/references/gotchas.md)). This page is the setup + authoring FAQ — symptom-keyed, skimmable.
 
 ## Setup & environment
 
@@ -101,5 +101,5 @@
   [debugging.md → Iterating a skill across fixes](./debugging.md#iterating-a-skill-across-fixes--the-verification-loop).
 
 For the false-green ("✓ passed ≠ correct") landmine catalog, see
-[SKILL.md → Gotchas](../.claude/skills/cowork-harness/SKILL.md#gotchas--the--passed--correct-landmines) or
+[the skill's gotchas catalog](../.claude/skills/cowork-harness/references/gotchas.md#gotchas--the--passed--correct-landmines) or
 [debugging.md](./debugging.md#the-run-was-green-but-you-dont-trust-it--hunt-the-false-green).
