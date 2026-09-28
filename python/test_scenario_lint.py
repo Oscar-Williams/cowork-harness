@@ -1596,3 +1596,36 @@ def test_an_untranslatable_policy_pattern_warns_instead_of_staying_silent(tmp_pa
 def test_untranslatable_pattern_is_quiet_without_a_negative_input_regex(tmp_path):
     (tmp_path / ".cowork-redact.json").write_text(json.dumps({"patterns": [{"regex": "\\p{Lu}{3,}Corp", "flags": "gu"}]}))
     assert RED_RULE not in _rules("assert:\n  - tool_called: { tool: Bash, input: { command: 'deploy' } }\n", tmp_path)
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "Node\\.js",
+        "uses Next\\.js",
+        "python 3\\.12",
+        "python 3\\.11 or newer",
+        "node v22\\.1 is installed",
+        "the \\.ts files",
+        "make sure the totals match",  # `make` is deliberately NOT a command verb: prose starts with it
+        "node count",
+    ],
+)
+def test_prose_about_tools_is_not_command_shaped(value, tmp_path):
+    assert CMD_RULE not in _rules(f"assert:\n  - transcript_matches: '{value}'\n", tmp_path)
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "npm test",
+        "npx tsc --noEmit",
+        "git push origin main",
+        "pip install requests",
+        "curl https://example\\.com/x",
+        "bash deploy",
+        "ran npm test and it passed; then git push origin main",
+    ],
+)
+def test_tool_invocations_are_command_shaped(value, tmp_path):
+    assert CMD_RULE in _rules(f"assert:\n  - transcript_matches: '{value}'\n", tmp_path)
