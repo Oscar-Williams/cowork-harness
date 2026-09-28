@@ -3733,7 +3733,7 @@ export async function cmdRecord(args: string[]) {
         // consts above — do not fork this list back into a local literal (that's the drift P3 fixed).
         booleans: [...RECORD_BOOLEAN_FLAGS],
         values: [...RECORD_VALUE_FLAGS],
-        noDashValue: ["--out", "--decider-dir"],
+        noDashValue: ["--out", "--decider-dir", "--model"],
         enums: { "--output-format": ["text", "json"], "--on-unanswered": ["fail", "first"] },
         // no `-V`: verbose is long-only everywhere (`-v` is version at the top level; the A3 shift-key-typo fix).
         aliases: { "-q": "--quiet" },

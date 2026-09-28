@@ -1102,6 +1102,9 @@ function takeCommonFlags(args: string[], commandName: string = "skill"): { rest:
       flags.deciderDir = v;
     } else if (name === "--label") {
       const v = readVal();
+      // A spaced flag-looking value is a forgotten value, not a label (the equals form is the escape).
+      if (eqVal === undefined && v.startsWith("-"))
+        fail(commandName, "usage", `--label: missing value (got flag-looking "${v}")`, undefined, isJsonOutput(args));
       // A generation tag, not free text: reject newlines and cap length so it stays a clean, index-scannable key.
       if (v.includes("\n") || v.includes("\r"))
         fail(commandName, "usage", "--label must be a single line (no newlines)", undefined, isJsonOutput(args));
