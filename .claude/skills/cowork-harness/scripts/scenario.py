@@ -643,15 +643,76 @@ _REDACTABLE_SHAPES = [
     re.compile(r"/var/folders/"),
     re.compile(r"/Volumes/[^/\s]"),
     re.compile(r"/System/Volumes/"),
+    re.compile(r"(?:^|[/\"'\s])-(?:Users|home|root)-[^/\s]"),  # a Claude project slug (-Users-acme-repo)
     re.compile(r"[A-Za-z0-9._%+-]@[A-Za-z0-9.-]+\.[A-Za-z]{2,}"),
 ]
 
 
+def _strip_lookbehinds(src):
+    """Drop every `(?<=…)` / `(?<!…)` group, honouring escapes, character classes and nested parens.
+    Python's `re` needs fixed-width lookbehind; the shipped policy's are variable-width. A lookbehind only
+    NARROWS a match, so dropping it makes the pattern match MORE — the safe direction for a warning."""
+    out = []
+    i, n = 0, len(src)
+    while i < n:
+        if src.startswith("(?<=", i) or src.startswith("(?<!", i):
+            depth, j, in_class = 0, i, False
+            while j < n:
+                c = src[j]
+                if c == "\\":
+                    j += 2
+                    continue
+                if in_class:
+                    if c == "]":
+                        in_class = False
+                elif c == "[":
+                    in_class = True
+                elif c == "(":
+                    depth += 1
+                elif c == ")":
+                    depth -= 1
+                    if depth == 0:
+                        break
+                j += 1
+            i = j + 1
+            continue
+        if src[i] == "\\" and i + 1 < n:
+            out.append(src[i : i + 2])
+            i += 2
+            continue
+        out.append(src[i])
+        i += 1
+    return "".join(out)
+
+
+def _compile_js_redaction_pattern(src, flags=""):
+    """Compile a `.cowork-redact.json` (JavaScript) pattern with Python `re`, translating what can be
+    translated: variable-width lookbehinds are dropped (see _strip_lookbehinds), `(?<name>` becomes
+    `(?P<name>`, and the i/s/m flags map across (g/u/y have no Python meaning here). Returns None when the
+    result still does not compile (e.g. a `\\p{…}` property escape) — the caller must say so, not skip it."""
+    py = _strip_lookbehinds(src)
+    py = re.sub(r"\(\?<(?![=!])([A-Za-z_][A-Za-z0-9_]*)>", r"(?P<\1>", py)
+    fl = 0
+    if "i" in flags:
+        fl |= re.IGNORECASE
+    if "s" in flags:
+        fl |= re.DOTALL
+    if "m" in flags:
+        fl |= re.MULTILINE
+    try:
+        return re.compile(py, fl)
+    except re.error:
+        return None
+
+
 def _redaction_policy_patterns(path):
-    """Compiled patterns from `.cowork-redact.json` in the dirs `record` searches (cwd, the scenario's own
-    dir), plus COWORK_HARNESS_REDACT_PATTERNS. A pattern Python cannot compile is skipped — the built-in
-    shapes still apply — since this is a warning heuristic, not the guard (`record` checks exactly)."""
+    """`(compiled, uncheckable)` for `.cowork-redact.json` in cwd and the scenario's own dir, plus
+    COWORK_HARNESS_REDACT_PATTERNS. `record` searches cwd, the scenario dir AND the cassette's dir, so this
+    can miss a policy that sits only next to the cassette; the record-time comparison is the exact guard.
+    JS-only syntax is translated (_compile_js_redaction_pattern); a pattern that still will not compile
+    is returned in `uncheckable`, so the caller can say so instead of silently skipping it."""
     pats = []
+    bad = []
     seen = set()
     for d in (Path.cwd(), Path(path).resolve().parent):
         f = d / ".cowork-redact.json"
@@ -666,17 +727,18 @@ def _redaction_policy_patterns(path):
             src = p.get("regex") if isinstance(p, dict) else None
             if not isinstance(src, str):
                 continue
-            flags = re.IGNORECASE if "i" in str(p.get("flags", "")) else 0
-            try:
-                pats.append(re.compile(src, flags))
-            except re.error:
-                continue
+            c = _compile_js_redaction_pattern(src, str(p.get("flags", "g")))
+            if c is not None:
+                pats.append(c)
+            else:
+                bad.append(src)
     for src in [x.strip() for x in os.environ.get("COWORK_HARNESS_REDACT_PATTERNS", "").split(",") if x.strip()]:
-        try:
-            pats.append(re.compile(src))
-        except re.error:
-            continue
-    return pats
+        c = _compile_js_redaction_pattern(src, "g")
+        if c is not None:
+            pats.append(c)
+        else:
+            bad.append(src)
+    return pats, bad
 
 
 def _lint_tool_call_object_form(items, fidelity, path):
@@ -694,7 +756,21 @@ def _lint_tool_call_object_form(items, fidelity, path):
             # inputs are rewritten, so a regex naming a rewritten literal finds nothing and PASSES on replay.
             if key == "tool_not_called" and regexes:
                 if policy is None:
-                    policy = _redaction_policy_patterns(path)
+                    policy, uncheckable = _redaction_policy_patterns(path)
+                    if uncheckable:
+                        out.append(
+                            Finding(
+                                "WARN",
+                                "tool-input-regex-redactable",
+                                f"{len(uncheckable)} redaction policy pattern(s) could not be checked offline "
+                                f"(not compilable by Python even after translation: {uncheckable[0]!r}"
+                                f"{', …' if len(uncheckable) > 1 else ''}), so this scenario's negative "
+                                "tool-input regexes were not checked against them.",
+                                "`record` checks exactly and refuses a cassette whose negative check the "
+                                "policy rewrote; or simplify the pattern to syntax Python also accepts.",
+                                path,
+                            )
+                        )
                 for where, src in regexes:
                     lit = re.sub(r"\\(.)", r"\1", src)
                     if any(p.search(lit) for p in _REDACTABLE_SHAPES + policy):
