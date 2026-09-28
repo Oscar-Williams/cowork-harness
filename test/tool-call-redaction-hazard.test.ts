@@ -192,3 +192,27 @@ describe("--assert-from over a redacted stream: negative-direction misses on red
     expect(v.evidence ?? "").not.toContain("[REDACTED:");
   });
 });
+
+describe("record-time guard: the common hostloop case", () => {
+  // A host path in every command is redacted, so a negative check whose regex has nothing to do with the
+  // path (`git\s+push`) still becomes evidence-unavailable on replay. The guard must SAY so — before, it
+  // returned [] and the generic verdict-divergence refusal was all the author saw.
+  it("names the tokened candidate and the fix options", () => {
+    const neg = { tool_not_called: { tool: "Bash", input: { command: "git\\s+push" } } };
+    const base = { ...cassette([neg]), events: streamWith("cd /Users/acme/proj/mnt/outputs && git status", "ok") } as Cassette;
+    const findings = redactionRewroteNegativeToolInputs(base, redactCassette(base, POLICY));
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatch(/Bash call.*carr(y|ies) a redaction token in `command`/);
+    expect(findings[0]).toMatch(/evidence-unavailable/);
+    expect(findings[0]).toMatch(/scope/);
+    expect(findings[0]).toMatch(/string form/);
+    expect(findings[0]).toMatch(/live/);
+  });
+
+  it("covers a negative result.matches over a redacted result", () => {
+    const neg = { tool_not_called: { tool: "Bash", result: { matches: "FATAL" } } };
+    const base = { ...cassette([neg]), events: streamWith("ls", "listing /Users/acme/proj/mnt/outputs") } as Cassette;
+    const findings = redactionRewroteNegativeToolInputs(base, redactCassette(base, POLICY));
+    expect(findings.join("\n")).toMatch(/redaction token in the paired result/);
+  });
+});
