@@ -175,7 +175,9 @@ different algorithm and reports drift that is not there, so the stamp floors at 
 (v12). Above that floor it is *value-aware*: `record` reads a field's actual VALUE rather than its
 presence, so `lane: "local"`/omitted lifts nothing (a pre-`lane` reader already gives exactly the
 local-delivery semantics it asks for) while `lane: "remote"` would. The epoch floor dominates that
-differential today, so cassettes stamp **v12**. A stamped version newer than a given build understands is refused loudly by both `replay` and
+differential for most scenarios, so cassettes stamp **v12**. One value lifts it today: an `assert:` entry
+using the object form of `tool_called` / `tool_not_called` stamps **v13**, so a v12 reader refuses the
+cassette as too new (upgrade) instead of rejecting the assertion as unrecognized (re-record). A stamped version newer than a given build understands is refused loudly by both `replay` and
 `verify-cassettes`. **`replay` alone offers an opt-in override, `--best-effort-future-cassette`;
 `verify-cassettes` does not accept that flag** — a verification gate has no "read it anyway" path, and its
 refusal says to upgrade instead. See [Unknown

@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process";
 import { mkdtempSync, cpSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname, resolve } from "node:path";
-import { rehashExitCode, recomputeBothAlgos, CASSETTE_VERSION } from "../src/run/cassette.js";
+import { rehashExitCode, recomputeBothAlgos, requiredVersionFor } from "../src/run/cassette.js";
 
 /**
  * `rehash`'s exit codes — the mapping, and that the CLI actually emits them.
@@ -59,7 +59,7 @@ describe.skipIf(!existsSync(CLI))("the CLI emits them", () => {
     if (typeof sessionPath !== "string") return null;
     const both = recomputeBothAlgos(sessionPath, dirname(file), c.scenario?.skills, c.fingerprint?.baseline ?? "0.0.0");
     if (!both?.legacyHash) return null;
-    c.cassetteVersion = CASSETTE_VERSION - 1;
+    c.cassetteVersion = requiredVersionFor({}) - 1; // one below the hash-format EPOCH (not CASSETTE_VERSION, which is past it)
     // `mode` must come from the SAME recompute as the digest. The committed example records `git` mode
     // (it lives in a checkout); this fixture does not, so the recompute is `raw`. Carrying the original's
     // `git` over a raw digest produces an internally inconsistent cassette, which `rehash` rightly refuses

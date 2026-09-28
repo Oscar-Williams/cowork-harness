@@ -390,7 +390,13 @@ export interface Cassette {
 //  The only value that currently needs v11 is `lane: "remote"` (changes replay-verdict semantics a
 //  pre-lane reader doesn't know about); `lane: "local"`/omitted — nearly every existing scenario — still
 //  stamps v10, unchanged. No hashing or manifest-shape change; HASH_FORMAT_EPOCH stays at v8.
-export const CASSETTE_VERSION = 12;
+// v12: the hash-format epoch (jcs1) — see HASH_FORMAT_EPOCH.
+// v13: the object form of `tool_called` / `tool_not_called` (input / scope / paired-result predicates).
+//  A value-aware interpretation floor only (KEY_REQUIRED_VERSION.assert): a cassette whose frozen scenario
+//  uses the object form stamps v13, so a v12 reader refuses it as "too new; upgrade" rather than as an
+//  unrecognized assertion to re-record. Every other scenario still stamps v12. No hashing or shape
+//  change; HASH_FORMAT_EPOCH stays at 12.
+export const CASSETTE_VERSION = 13;
 
 /** Minimum cassette format version this build will read. Pre-1.0.0: no legacy-format compatibility is
  *  maintained below this floor — an older cassette must be re-recorded, not silently tolerated. Raising
@@ -448,12 +454,23 @@ export const KEY_REQUIRED_VERSION: Record<string, (v: unknown) => number> = {
   answers: () => 0,
   on_unanswered: () => 0,
   expect_denied: () => 0,
-  assert: () => 0,
+  // The object form of tool_called / tool_not_called (v13) reads inputs, scope and paired results; a v12
+  // reader's strict assertion schema rejects it as UNRECOGNIZED and tells the user to re-record, which is
+  // the wrong remedy. Stamping v13 routes it to the future-cassette path ("too new; upgrade") instead.
+  // String-form assertions need nothing.
+  assert: (v) => (Array.isArray(v) && v.some(usesToolCallObjectForm) ? 13 : 0),
   skills: () => 0,
   requires_capabilities: () => 0,
   allow_host_writes: () => 0,
   allow_host_hooks: () => 0,
 };
+
+/** Does this (possibly loose, on-disk) assertion use the v13 object form of tool_called/tool_not_called? */
+function usesToolCallObjectForm(a: unknown): boolean {
+  if (!a || typeof a !== "object") return false;
+  const o = a as Record<string, unknown>;
+  return [o.tool_called, o.tool_not_called].some((v) => v !== null && typeof v === "object");
+}
 
 /** The minimum cassette format version a reader needs to correctly interpret this scenario — what gets
  *  STAMPED at every write site (record, rehash). NOT "which recorder wrote it" (see the CASSETTE_VERSION
@@ -2966,20 +2983,20 @@ export function readCassette(path: string): { cassette: Cassette } | { error: st
   if (cassette.fingerprint !== undefined) {
     const fmt = cassette.fingerprint.hashFormat;
     const shown = fmt === undefined ? "(absent)" : `'${fmt}'`;
-    // KNOWN versions only, both directions. A future v13/`jcs2` is NOT judged here — that belongs to the
+    // KNOWN versions only, both directions. A future v14/`jcs2` is NOT judged here — that belongs to the
     // future-cassette policy below, which is the surface that knows how to talk about versions this build
     // does not understand. The check applies to a baseline-only fingerprint too: `hashFormat` is stamped on
     // every buildFingerprint return path, so its absence at the current version is a genuine inconsistency
     // rather than a shape this build ever writes.
-    // Bound to HASH_FORMAT_EPOCH, not CASSETTE_VERSION. They are equal today and will not stay so: the
-    // next SHAPE-only bump moves CASSETTE_VERSION to 13 and leaves the epoch at 12. Keyed on the shape
-    // version, a v12 fingerprint missing `hashFormat` would start loading again, D7's "absent ⇒ legacy"
+    // Bound to HASH_FORMAT_EPOCH, not CASSETTE_VERSION: every KNOWN version from the epoch up (v12, and
+    // v13 — a shape/interpretation-only bump that left the epoch at 12) is written with `jcs1`. Keyed on
+    // the shape version alone, a v12 fingerprint missing `hashFormat` would load, D7's "absent ⇒ legacy"
     // would apply to an epoch-stamped document, and live `jcs1` digests would be compared as though they
     // were the same algorithm. `requiredVersionFor` derives its BASE from the epoch for this same reason.
-    if (recordedVersion === HASH_FORMAT_EPOCH && fmt !== "jcs1") {
+    if (recordedVersion >= HASH_FORMAT_EPOCH && recordedVersion <= CASSETTE_VERSION && fmt !== "jcs1") {
       return {
         error:
-          `cassette is stamped v${recordedVersion} but its fingerprint carries hashFormat ${shown} — a v${HASH_FORMAT_EPOCH} ` +
+          `cassette is stamped v${recordedVersion} but its fingerprint carries hashFormat ${shown} — a v${HASH_FORMAT_EPOCH}+ ` +
           `cassette must record 'jcs1'. The stamp and the digests disagree, so neither can be trusted; re-record`,
       };
     }
@@ -6386,7 +6403,12 @@ export function cmdRehash(args: string[]): void {
     // mis-read it forever.
     // Same binding as the read boundary, and deliberately NOT gated on `skillHash`: a baseline-only v12
     // fingerprint without `hashFormat` is just as inconsistent, and gating would skip it as "current".
-    if (recordedVersion === HASH_FORMAT_EPOCH && cassette.fingerprint !== undefined && cassette.fingerprint.hashFormat !== "jcs1") {
+    if (
+      recordedVersion >= HASH_FORMAT_EPOCH &&
+      recordedVersion <= CASSETTE_VERSION &&
+      cassette.fingerprint !== undefined &&
+      cassette.fingerprint.hashFormat !== "jcs1"
+    ) {
       results.push({
         file,
         action: "error",
