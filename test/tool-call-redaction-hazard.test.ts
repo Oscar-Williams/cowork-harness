@@ -98,3 +98,87 @@ describe("record-time warning (the exact guard)", () => {
     expect(redactionRewroteNegativeToolInputs(c, redactCassette(c, POLICY))).toEqual([]);
   });
 });
+
+// ---- the --assert-from shape: a FRESH, unredacted regex against a redacted stream -----------------
+// The frozen-regex guard cannot help here (the regex was never redacted), and a shape heuristic cannot
+// know every policy. So for the NEGATIVE-direction predicates — tool_not_called's input / input_any /
+// result.matches, and a positive result.not_matches — a miss over text carrying a redaction token is
+// "could not look", whatever the regex looks like.
+
+function streamWith(command: string, resultText: string): string[] {
+  return [
+    INIT,
+    line({
+      type: "assistant",
+      message: { role: "assistant", content: [{ type: "tool_use", id: "b1", name: "Bash", input: { command } }] },
+    }),
+    line({ type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: "b1", content: resultText }] } }),
+    DONE,
+  ];
+}
+
+async function assertFrom(
+  policy: Parameters<typeof redactCassette>[1],
+  command: string,
+  resultText: string,
+  assertion: Record<string, unknown>,
+) {
+  const base = { ...cassette([{ result: "success" }]), events: streamWith(command, resultText) } as Cassette;
+  const red = redactCassette(base, policy);
+  const reasserted = { ...red, scenario: { ...red.scenario, assert: [assertion] } } as Cassette;
+  const r = await replayCassette(reasserted, []);
+  return { red, v: r.assertions[0] };
+}
+
+const custom = { patterns: [{ re: /AcmeCorp/g, label: "customer" }], keyNames: [] as string[] };
+
+describe("--assert-from over a redacted stream: negative-direction misses on redacted text are unknown", () => {
+  it("(a) a custom-policy literal in tool_not_called.input", async () => {
+    const { red, v } = await assertFrom(custom, "deploy AcmeCorp now", "ok", {
+      tool_not_called: { tool: "Bash", input: { command: "AcmeCorp" } },
+    });
+    expect(red.events[1]).toContain("[REDACTED:customer:");
+    expect(v.pass).toBe(false);
+    expect(v.message).toMatch(/evidence unavailable/);
+  });
+
+  it("(b) a custom-policy literal in a positive result.not_matches", async () => {
+    const { v } = await assertFrom(custom, "echo hi", "deployed to AcmeCorp", {
+      tool_called: { tool: "Bash", result: { not_matches: "AcmeCorp" } },
+    });
+    expect(v.pass).toBe(false);
+    expect(v.message).toMatch(/evidence unavailable/);
+  });
+
+  it("(b') the same literal in tool_not_called.result.matches", async () => {
+    const { v } = await assertFrom(custom, "echo hi", "deployed to AcmeCorp", {
+      tool_not_called: { tool: "Bash", result: { matches: "AcmeCorp" } },
+    });
+    expect(v.pass).toBe(false);
+    expect(v.message).toMatch(/evidence unavailable/);
+  });
+
+  it("(c) keys: [command] redacts the whole value, so `rm -rf build` is unreadable", async () => {
+    const { red, v } = await assertFrom({ patterns: [], keyNames: ["command"] }, "rm -rf build", "ok", {
+      tool_not_called: { tool: "Bash", input: { command: "rm\\s+-rf" } },
+    });
+    expect(red.events[1]).toContain("[REDACTED:key:");
+    expect(v.pass).toBe(false);
+    expect(v.message).toMatch(/evidence unavailable/);
+  });
+
+  it("(d) the shipped project-slug pattern over a /root/.claude path", async () => {
+    const { red, v } = await assertFrom(POLICY, "cat /root/.claude/projects/-Users-acme-secret/x.jsonl", "ok", {
+      tool_not_called: { tool: "Bash", input: { command: "projects/-Users-acme" } },
+    });
+    expect(red.events[1]).toContain("[REDACTED:");
+    expect(v.pass).toBe(false);
+    expect(v.message).toMatch(/evidence unavailable/);
+  });
+
+  it("a passing evidence line never carries a redaction token", async () => {
+    const { v } = await assertFrom(custom, "deploy AcmeCorp now", "ok", { tool_called: { tool: "Bash", input: { command: "^deploy" } } });
+    expect(v.pass).toBe(true);
+    expect(v.evidence ?? "").not.toContain("[REDACTED:");
+  });
+});
