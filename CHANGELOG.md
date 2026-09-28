@@ -158,7 +158,8 @@ All notable changes to this project are documented here. The format is based on
   as the two spawned turns it was already forwarded to. Before, the file's `COWORK_HARNESS_EVALUATOR_MODEL`
   (or credentials) never applied to the evaluator, and the turns inherited `./.env` values that outranked
   the file. Like every command, `critique` now refuses `--dotenv` given both before and after the
-  subcommand.
+  subcommand, and a trailing `--dotenv` whose file would change the effective output format (put it
+  before the subcommand instead).
 
 ## [3.10.0] — 2026-09-27
 
