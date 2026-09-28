@@ -1556,3 +1556,43 @@ def test_literal_bash_command_check_at_hostloop_suggests_both_shells(tmp_path):
     assert "tool-input-shell-tier" not in _rules_at("container", body, tmp_path)
     listed = "assert:\n  - tool_called: { tool: [Bash, mcp__workspace__bash], input: { command: 'build\\.py' } }\n"
     assert "tool-input-shell-tier" not in _rules_at("hostloop", listed, tmp_path)
+
+
+# --- the redaction policy, read OFFLINE: JS-only syntax is translated, never silently skipped --------
+
+
+def test_every_pattern_in_the_repos_policy_translates_to_python():
+    pats = json.loads((REPO / ".cowork-redact.json").read_text())["patterns"]
+    compiled = [scenario._compile_js_redaction_pattern(p["regex"], p.get("flags", "")) for p in pats]
+    assert all(c is not None for c in compiled), [p["regex"] for p, c in zip(pats, compiled) if c is None]
+    assert len(compiled) == 18
+
+
+def test_translated_slug_pattern_matches_a_project_slug():
+    pats = json.loads((REPO / ".cowork-redact.json").read_text())["patterns"]
+    slug = scenario._compile_js_redaction_pattern(pats[16]["regex"], pats[16].get("flags", ""))
+    assert slug.search("cat /root/.claude/projects/-Users-acme-secret/x.jsonl")
+
+
+def test_project_slug_literal_in_a_negative_regex_warns(tmp_path):
+    body = "assert:\n  - tool_not_called: { tool: Bash, input: { command: 'projects/-Users-acme' } }\n"
+    assert RED_RULE in _rules(body, tmp_path)
+
+
+def test_an_untranslatable_policy_pattern_warns_instead_of_staying_silent(tmp_path):
+    (tmp_path / ".cowork-redact.json").write_text(json.dumps({"patterns": [{"regex": "\\p{Lu}{3,}Corp", "flags": "gu"}]}))
+    f = tmp_path / "sc.yaml"
+    f.write_text(
+        "name: t\nbaseline: latest\nsession: (inline)\nfidelity: container\nprompt: hi\n"
+        "assert:\n  - tool_not_called: { tool: Bash, input: { command: 'deploy' } }\n",
+        encoding="utf-8",
+    )
+    hits = [x for x in scenario.lint_file(str(f)) if x.rule == RED_RULE]
+    assert len(hits) == 1
+    assert hits[0].severity == "WARN"
+    assert "could not be checked offline" in hits[0].message
+
+
+def test_untranslatable_pattern_is_quiet_without_a_negative_input_regex(tmp_path):
+    (tmp_path / ".cowork-redact.json").write_text(json.dumps({"patterns": [{"regex": "\\p{Lu}{3,}Corp", "flags": "gu"}]}))
+    assert RED_RULE not in _rules("assert:\n  - tool_called: { tool: Bash, input: { command: 'deploy' } }\n", tmp_path)
