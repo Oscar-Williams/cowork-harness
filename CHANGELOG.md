@@ -18,6 +18,9 @@ All notable changes to this project are documented here. The format is based on
   every CLI that replays these cassettes first. Every other cassette still stamps v12. From this release,
   `replay` refuses a newer-format cassette before evaluating any assertion, so the next format bump cannot
   crash it the same way.
+- **`lint-skill --strict` can newly fail on a skill's size:** a `SKILL.md` body over 19,000 B, or a
+  `references/**.md` file over 90,000 B. Move detail out of the body into `references/`, and split an
+  oversized reference by topic.
 
 ### Added
 
@@ -44,6 +47,25 @@ All notable changes to this project are documented here. The format is based on
   comparison is the exact guard. `lint` resolves the policy differently: it reads `.cowork-redact.json`
   from the current directory and the scenario's directory only, while `record` also reads the cassette's
   directory, so a policy that sits only next to the cassette is invisible to `lint`.
+- **`lint-skill` size caps.**
+  - `skill-body-over-reattach-cap` (WARN) fires on a `SKILL.md` body over 19,000 B, with the frontmatter
+    excluded. After a context compaction the agent re-attaches only the first ~19,900 characters of an
+    invoked skill, so anything past that is lost. It reports INFO `skill-body-near-reattach-cap` from 80%.
+  - `skill-reference-over-read-cap` (WARN) fires on a `references/**.md` file over 90,000 B, because a
+    whole-file Read past ~25,000 tokens throws.
+  - Both caps were read from agent 2.1.281 (VM ELF and native). Both count UTF-8 bytes, which are never
+    fewer than the characters the agent counts, so they warn early rather than late.
+
+### Changed
+
+- **The companion skill's `SKILL.md` is now a short entrypoint (about 14 KB, down from 103 KB).** It keeps
+  the preflight, the Orient router, the invariants whose absence causes a false green, short workflows
+  and a routing table. The detail moved unchanged into six new files under `references/`:
+  `authoring.md`, `assertions-guide.md`, `run-record-replay.md`, `measurement.md`, `debugging.md` and
+  `gotchas.md` (numbering preserved). No harness behaviour changes. Links to the old `SKILL.md#gotchas-…`
+  anchor now point at `references/gotchas.md`, where the same heading lives.
+- **`npm run check:claims` also reports version stamps in the companion-skill payload,** including the
+  size caps' stamp in `scenario.py`.
 
 ## [3.10.0] — 2026-09-27
 
