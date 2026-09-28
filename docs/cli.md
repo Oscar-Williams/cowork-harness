@@ -556,6 +556,7 @@ Most runs need **none** of these — the defaults are correct. They're grouped b
 - `COWORK_AGENT_BINARY=<path>` — override the auto-detected staged agent ELF.
 - `COWORK_HOST_AGENT_BINARY=<path>` — override the auto-detected staged **native macOS** agent binary the `hostloop` tier spawns directly (distinct from `COWORK_AGENT_BINARY`, the container ELF).
 - `COWORK_HARNESS_VERIFY_AGENT_SHA=0` — skip the default sha256 integrity check of the resolved agent ELF against the baseline's recorded hash (on by default).
+- `COWORK_HARNESS_FORBID_SPAWN=1` — make `run`/`skill`/`record` refuse to stage or launch an agent: the run stops after every load-time check, before any image probe, egress sidecar or spawn. The fast test lane sets it so a regressed load-time refusal fails red instead of launching a real agent; it has no other use.
 - `COWORK_SKIP_CAPABILITY_PROBE=1` — skip the per-run capability probe (the harness otherwise probes the agent image/VM for the document/OCR/Office capabilities the real Cowork rootfs ships and **fails a run that uses one the image omits** — a likely false negative; suppress per-scenario with `allow_missing_capability: true`, or rebuild full parity).
 
 ### Deciders and dialogs
