@@ -5390,6 +5390,15 @@ async function writeReassertedAssertBlock(
   // Only manage expect_denied when it's meaningful — avoid gratuitously adding an empty field to a cassette
   // that never had one (keep the diff to what actually changed).
   if (nextExpectDenied.length || scn.expect_denied !== undefined) scn.expect_denied = nextExpectDenied;
+  // A new assert block can need a newer READER (the object form of tool_called → v13): restamp exactly as
+  // record does, or an older CLI meets a v12-stamped cassette carrying v13 semantics and says "re-record"
+  // instead of "too new". Never LOWER the stamp: the rest of the cassette was written for the old one.
+  const raw = rawCassette as { cassetteVersion?: number; $schema?: string };
+  const stamp = Math.max(raw.cassetteVersion ?? 0, requiredVersionFor(rawCassette.scenario));
+  if (stamp !== raw.cassetteVersion) {
+    raw.cassetteVersion = stamp;
+    raw.$schema = cassetteSchemaUrl(stamp);
+  }
   writeFileAtomic(cassetteFile, JSON.stringify(rawCassette, null, 2)); // atomic — no partial cassette on a crash
   warn(`::notice:: [replay --write] ${cassetteFile}: wrote the re-asserted block back to the cassette (events/controlOut unchanged)\n`);
 }
