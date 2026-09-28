@@ -23,13 +23,19 @@
  */
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
+import { pathToFileURL } from "node:url";
 
 const ROOT = process.cwd();
 /** Shipped surface only. The gitignored internal working-notes directory is deliberately out of scope. */
-const SCAN_ROOTS = ["src", "scripts", "docs"]; // "internal" is pruned by SKIP_DIRS below
-const SKIP_DIRS = new Set(["internal", "node_modules", "dist"]);
+/** `.claude/skills` is the companion-skill payload an installed agent reads: its references carry
+ *  binary-verified claims too, and scenario.py carries the lint-skill size caps' verification stamp. */
+const SCAN_ROOTS = ["src", "scripts", "docs", ".claude/skills"]; // "internal" is pruned by SKIP_DIRS below
+/** `_vendor` is the bundled third-party PyYAML copy: its version-shaped strings are not our claims. */
+const SKIP_DIRS = new Set(["internal", "node_modules", "dist", "_vendor", "__pycache__"]);
+/** `.py` reaches the payload's scenario.py; `src`/`scripts`/`docs` carry no Python, so it adds nothing there. */
+const SCAN_EXT = /\.(ts|md|py)$/;
 
-type Stamp = { file: string; line: number; kind: "agent" | "asar"; version: string; text: string };
+export type Stamp = { file: string; line: number; kind: "agent" | "asar"; version: string; text: string };
 
 const cmp = (a: string, b: string): number => {
   const [x, y] = [a.split(".").map(Number), b.split(".").map(Number)];
@@ -43,7 +49,7 @@ function walk(dir: string, out: string[] = []): string[] {
     const p = join(dir, e);
     const st = statSync(p, { throwIfNoEntry: false });
     if (st?.isDirectory()) walk(p, out);
-    else if (st?.isFile() && /\.(ts|md)$/.test(e)) out.push(p);
+    else if (st?.isFile() && SCAN_EXT.test(e)) out.push(p);
   }
   return out;
 }
@@ -53,7 +59,7 @@ function walk(dir: string, out: string[] = []): string[] {
 const AGENT_RE = /\b(?:agent(?:\s+ELF)?|ELF|CLI|binary)\s+(\d+\.\d+\.\d+)/g;
 const ASAR_RE = /\b(?:app\.asar|asar)\s+(\d+\.\d+\.\d+)/g;
 
-function collect(): Stamp[] {
+export function collectStamps(): Stamp[] {
   const out: Stamp[] = [];
   for (const root of SCAN_ROOTS) {
     const abs = join(ROOT, root);
@@ -86,18 +92,25 @@ function pinned(): { agent: string; asar: string } {
   return { agent: b.agentBinary?.version ?? b.agentVersion ?? "0.0.0", asar: newest };
 }
 
-const pin = pinned();
-const stamps = collect();
-const stale = stamps.filter((s) => cmp(s.version, s.kind === "agent" ? pin.agent : pin.asar) < 0).sort((a, b) => cmp(a.version, b.version));
+function main(): void {
+  const pin = pinned();
+  const stamps = collectStamps();
+  const stale = stamps
+    .filter((s) => cmp(s.version, s.kind === "agent" ? pin.agent : pin.asar) < 0)
+    .sort((a, b) => cmp(a.version, b.version));
 
-console.log(`binary-claim staleness — pinned agent ${pin.agent}, pinned asar ${pin.asar}`);
-console.log(
-  `${stamps.length} version-stamped claim(s) across ${new Set(stamps.map((s) => s.file)).size} file(s); ${stale.length} behind the pin.\n`,
-);
-for (const s of stale) console.log(`  ${s.kind.padEnd(5)} ${s.version.padEnd(11)} ${s.file}:${s.line}\n        ${s.text}`);
-if (!stale.length) console.log("  (nothing behind the pin)");
-console.log(
-  `\nREPORT ONLY — exits 0 by design. A stale stamp is not a wrong claim; it is a claim nobody has\n` +
-    `re-checked. Re-verify what matters for what you are shipping, and RE-STAMP ONLY WHAT YOU ACTUALLY\n` +
-    `RE-READ IN THE BINARY — bumping the digit without re-reading is how the last two defects survived.`,
-);
+  console.log(`binary-claim staleness — pinned agent ${pin.agent}, pinned asar ${pin.asar}`);
+  console.log(
+    `${stamps.length} version-stamped claim(s) across ${new Set(stamps.map((s) => s.file)).size} file(s); ${stale.length} behind the pin.\n`,
+  );
+  for (const s of stale) console.log(`  ${s.kind.padEnd(5)} ${s.version.padEnd(11)} ${s.file}:${s.line}\n        ${s.text}`);
+  if (!stale.length) console.log("  (nothing behind the pin)");
+  console.log(
+    `\nREPORT ONLY — exits 0 by design. A stale stamp is not a wrong claim; it is a claim nobody has\n` +
+      `re-checked. Re-verify what matters for what you are shipping, and RE-STAMP ONLY WHAT YOU ACTUALLY\n` +
+      `RE-READ IN THE BINARY — bumping the digit without re-reading is how the last two defects survived.`,
+  );
+}
+
+// Run only when invoked directly, so a test can import collectStamps() without printing the report.
+if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) main();
