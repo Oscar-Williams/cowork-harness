@@ -595,6 +595,146 @@ def _lint_prompt_slash(doc, path):
     return findings
 
 
+# --- the object form of tool_called / tool_not_called, and transcript_* values shaped like a command ---
+
+# `transcript_*` reads top-level assistant prose ONLY — never a tool_use — so a value shaped like a shell
+# command checks what the agent SAID it ran, not what ran. Two shapes, and only these:
+#   · an interpreter token at the start of the value or right after a shell operator (`;` `&&` `|` `$(`),
+#     followed by an argument — bare `node` in prose (`'node count'`) has no operator before it and is
+#     not a command start, so the start-of-value case also requires the argument to look like a path/flag;
+#   · a script filename (`.js .mjs .cjs .ts .py .sh`), regex-escaped or not. Data files (.json .md .yaml
+#     .csv) are what a transcript legitimately NAMES, so they are excluded.
+_INTERP = r"(?:python3?|node|bash|sh|npx|tsx|deno)"
+_CMD_AFTER_OPERATOR = re.compile(r"(?:;|&&|\|\||\||\$\()\s*" + _INTERP + r"\s+\S")
+_CMD_AT_START = re.compile(r"^\s*" + _INTERP + r"\s+(?:-|\S*[/.])")
+_SCRIPT_FILE = re.compile(r"\.(?:js|mjs|cjs|ts|py|sh)\b")
+_TRANSCRIPT_KEYS = ("transcript_matches", "transcript_not_matches", "transcript_contains", "transcript_not_contains")
+
+
+def _lint_transcript_command_shaped(items, path):
+    out = []
+    for key in _TRANSCRIPT_KEYS:
+        for v in _assert_values(items, key):
+            if not isinstance(v, str):
+                continue
+            lit = re.sub(r"\\(.)", r"\1", v)  # read `fetch-lesson\.js` as `fetch-lesson.js`
+            if _CMD_AFTER_OPERATOR.search(lit) or _CMD_AT_START.search(lit) or _SCRIPT_FILE.search(lit):
+                out.append(
+                    Finding(
+                        "WARN",
+                        "transcript-command-shaped",
+                        f"`{key}: {v!r}` looks like a shell command, but `{key}` reads the agent's top-level "
+                        "PROSE only — never a tool call. It passes when the agent merely SAYS it ran this "
+                        "(a false green), and cannot see the command that actually ran.",
+                        "Assert the call itself: `tool_called: {tool: [Bash, mcp__workspace__bash], input: "
+                        "{command: '<regex>'}}` (and `tool_not_called` for the negative).",
+                        path,
+                    )
+                )
+    return out
+
+
+# Literal shapes the reference redaction policy scrubs (home/temp paths, mount roots, emails). Mirrors
+# src/redactable-literal.ts; used when no policy is found, AND alongside a found policy, because a JS
+# policy (the shipped one uses variable-width lookbehind) often cannot be compiled by Python's `re`.
+_REDACTABLE_SHAPES = [
+    re.compile(r"/(?:Users|home|root)/[^/\s]"),
+    re.compile(r"/private/(?:tmp|var)/"),
+    re.compile(r"/var/folders/"),
+    re.compile(r"/Volumes/[^/\s]"),
+    re.compile(r"/System/Volumes/"),
+    re.compile(r"[A-Za-z0-9._%+-]@[A-Za-z0-9.-]+\.[A-Za-z]{2,}"),
+]
+
+
+def _redaction_policy_patterns(path):
+    """Compiled patterns from `.cowork-redact.json` in the dirs `record` searches (cwd, the scenario's own
+    dir), plus COWORK_HARNESS_REDACT_PATTERNS. A pattern Python cannot compile is skipped — the built-in
+    shapes still apply — since this is a warning heuristic, not the guard (`record` checks exactly)."""
+    pats = []
+    seen = set()
+    for d in (Path.cwd(), Path(path).resolve().parent):
+        f = d / ".cowork-redact.json"
+        if f in seen or not f.is_file():
+            continue
+        seen.add(f)
+        try:
+            cfg = json.loads(f.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        for p in cfg.get("patterns") or []:
+            src = p.get("regex") if isinstance(p, dict) else None
+            if not isinstance(src, str):
+                continue
+            flags = re.IGNORECASE if "i" in str(p.get("flags", "")) else 0
+            try:
+                pats.append(re.compile(src, flags))
+            except re.error:
+                continue
+    for src in [x.strip() for x in os.environ.get("COWORK_HARNESS_REDACT_PATTERNS", "").split(",") if x.strip()]:
+        try:
+            pats.append(re.compile(src))
+        except re.error:
+            continue
+    return pats
+
+
+def _lint_tool_call_object_form(items, fidelity, path):
+    out = []
+    policy = None
+    for key in ("tool_called", "tool_not_called"):
+        for v in _assert_values(items, key):
+            if not isinstance(v, dict):
+                continue
+            inp = v.get("input") if isinstance(v.get("input"), dict) else {}
+            regexes = [(f"input.{k}", r) for k, r in inp.items() if isinstance(r, str)]
+            if isinstance(v.get("input_any"), str):
+                regexes.append(("input_any", v["input_any"]))
+            # W: the negative form is the dangerous direction under redaction — the committed cassette's
+            # inputs are rewritten, so a regex naming a rewritten literal finds nothing and PASSES on replay.
+            if key == "tool_not_called" and regexes:
+                if policy is None:
+                    policy = _redaction_policy_patterns(path)
+                for where, src in regexes:
+                    lit = re.sub(r"\\(.)", r"\1", src)
+                    if any(p.search(lit) for p in _REDACTABLE_SHAPES + policy):
+                        out.append(
+                            Finding(
+                                "WARN",
+                                "tool-input-regex-redactable",
+                                f"`tool_not_called.{where}: {src!r}` names a literal the cassette's redaction "
+                                "policy rewrites. On a committed (redacted) cassette the recorded input no "
+                                "longer carries it, so this negative check cannot see what it looks for — "
+                                "replay reports it evidence-unavailable and `record` refuses the write.",
+                                "Match a part of the input redaction leaves alone (the verb and flags, a "
+                                "workspace-relative path), or keep this check on a live gate.",
+                                path,
+                            )
+                        )
+            # I: a literal `Bash` command check at a tier that routes shell through the workspace tool.
+            tools = v.get("tool")
+            tools = [tools] if isinstance(tools, str) else tools
+            if (
+                fidelity in ("hostloop", "cowork")
+                and isinstance(tools, list)
+                and "Bash" in tools
+                and "mcp__workspace__bash" not in tools
+                and "command" in inp
+            ):
+                out.append(
+                    Finding(
+                        "INFO",
+                        "tool-input-shell-tier",
+                        f"`{key}: {{tool: Bash, input: {{command: ...}}}}` on `fidelity: {fidelity}` — the host "
+                        "loop runs shell through `mcp__workspace__bash` (same `command` field), so a literal "
+                        "`Bash` sees no call there.",
+                        "List both shells: `tool: [Bash, mcp__workspace__bash]`.",
+                        path,
+                    )
+                )
+    return out
+
+
 def lint_doc(doc, path, raw_lines):
     findings = []
     if not isinstance(doc, dict):
@@ -722,7 +862,21 @@ def lint_doc(doc, path, raw_lines):
     # BOTH negative tool keys: `subagent_tool_absent` is judged against the tools sub-agents actually
     # USED, not a per-dispatch declared list, so a tool the tier never serves makes it equally vacuous.
     for _key in ("tool_not_called", "subagent_tool_absent"):
-        for _v in _assert_values(items, _key):
+        for _raw in _assert_values(items, _key):
+            # The object form of tool_not_called (`{tool: X | [X, Y], input: ...}`) is vacuous only when
+            # EVERY listed tool is unserved — `[Bash, mcp__workspace__bash]` is the portable spelling. An
+            # input/result predicate cannot rescue a tool the tier never serves. Mirrors
+            # objectFormTierVacuous (src/run/tier-vacuous-tools.ts); the harness refuses these at load.
+            if isinstance(_raw, dict) and _key == "tool_not_called":
+                _tools = _raw.get("tool")
+                _tools = [_tools] if isinstance(_tools, str) else _tools
+                if not isinstance(_tools, list) or not _tools or not all(isinstance(t, str) for t in _tools):
+                    continue
+                if any("*" in t or "?" in t or t not in _TIER_VACUOUS.get(fidelity, {}) for t in _tools):
+                    continue
+                _v = _tools[0]
+            else:
+                _v = _raw
             if not isinstance(_v, str) or "*" in _v or "?" in _v:
                 continue  # a glob is not a literal claim about one tool
             _repl = _TIER_VACUOUS.get(fidelity, {})
@@ -745,6 +899,8 @@ def lint_doc(doc, path, raw_lines):
             )
 
     # linter stays offline — the message carries the gate fact instead of reading a baseline).
+    findings.extend(_lint_tool_call_object_form(items, fidelity, path))
+    findings.extend(_lint_transcript_command_shaped(items, path))
     if "transcript_no_host_path" in assert_keys:
         if fidelity in ("hostloop", "protocol"):
             findings.append(
@@ -987,9 +1143,24 @@ def lint_doc(doc, path, raw_lines):
             for item in items:
                 tc = item.get("tool_called")
                 # A GLOB, not a regex (src/types.ts toolGlob) — ask whether THEIR pattern would match the
-                # gate tool under the harness's own matching rules. A non-str value is somebody else's
+                # gate tool under the harness's own matching rules. The object form witnesses a gate the
+                # same way (`{tool: AskUserQuestion}` fails "not called" on zero gates) unless its
+                # `count.min` is 0, which zero gates satisfies. Other value shapes are somebody else's
                 # finding; a glob cannot fail to compile, so there is nothing to guard against here.
-                if isinstance(tc, str) and _tool_glob_matches(tc, "AskUserQuestion"):
+                if isinstance(tc, dict):
+                    _cnt = tc.get("count")
+                    _min = _numeric(_cnt.get("min")) if isinstance(_cnt, dict) and "min" in _cnt else 1.0
+                    _tl = tc.get("tool")
+                    _tl = [_tl] if isinstance(_tl, str) else _tl
+                    if (
+                        _min is not None
+                        and _min >= 1
+                        and isinstance(_tl, list)
+                        and any(isinstance(g, str) and _tool_glob_matches(g, "AskUserQuestion") for g in _tl)
+                    ):
+                        has_companion = True
+                        break
+                elif isinstance(tc, str) and _tool_glob_matches(tc, "AskUserQuestion"):
                     has_companion = True
                     break
         if not has_companion:
