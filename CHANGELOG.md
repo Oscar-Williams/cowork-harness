@@ -13,7 +13,11 @@ All notable changes to this project are documented here. The format is based on
   flags a negative tool-input check that a committed (redacted) cassette cannot evaluate. A CI step
   using `--strict --min-severity WARN` turns red on either.
 - **A cassette whose scenario uses the object form of `tool_called` / `tool_not_called` is stamped v13.**
-  An older CLI refuses it as too new and asks you to upgrade. Every other cassette still stamps v12.
+  `verify-cassettes` on an older CLI refuses it as too new. `replay` on 3.10.0 or earlier does **not** refuse
+  cleanly: it warns that the object-form assertion is tolerated, then crashes evaluating it (exit 2). Upgrade
+  every CLI that replays these cassettes first. Every other cassette still stamps v12. From this release,
+  `replay` refuses a newer-format cassette before evaluating any assertion, so the next format bump cannot
+  crash it the same way.
 
 ### Added
 

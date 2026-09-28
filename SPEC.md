@@ -896,8 +896,10 @@ Covered-surface changes follow semver as of `1.0.0` — see [RELEASING.md](./REL
   VALUE rather than its presence — `lane: "local"`/omitted asks for semantics any older reader already
   gives, so it lifts nothing, while `lane: "remote"` would. The epoch floor dominates most scenarios, so
   cassettes stamp **v12**; the differential decides anything above it — today one value does: an `assert`
-  entry using the object form of `tool_called` / `tool_not_called` stamps **v13**, so a v12 reader refuses
-  that cassette as too new instead of rejecting the assertion as unrecognized. The minimum supported read version is **v9**
+  entry using the object form of `tool_called` / `tool_not_called` stamps **v13**. A v12 `verify-cassettes`
+  refuses that cassette as too new; a v12 `replay` (3.10.0 and earlier) warns the assertion is tolerated and
+  then crashes evaluating it, so upgrade before replaying one. From v13 on, `replay` refuses a newer-format
+  cassette before evaluating any assertion. The minimum supported read version is **v9**
   (`MIN_SUPPORTED_CASSETTE_VERSION`): a cassette below the floor is refused at load time with a
   re-record error (a pre-1.0 decision — no compatibility is maintained for formats below v9, and
   their schema files are no longer shipped; the retained schema files are `schema/cassette.v9.json`
