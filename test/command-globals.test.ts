@@ -197,3 +197,21 @@ describe.skipIf(!can)("the trailing --dotenv reports what it loaded the way the 
     expect(after.out).not.toContain(d);
   });
 });
+
+describe.skipIf(!can)("the OUTPUT_FORMAT refusal fires only when the effective format would change", () => {
+  it("a file that sets COWORK_HARNESS_OUTPUT_FORMAT=text when nothing was set (text either way) is accepted after the subcommand", () => {
+    const d = mkdtempSync(join(tmpdir(), "cmd-globals-fmt-"));
+    writeFileSync(join(d, "fmt.env"), "COWORK_HARNESS_OUTPUT_FORMAT=text\n");
+    const r = cli(["prune", "--dotenv", "fmt.env", "--run-dir", "/tmp/cwh-fmt-text-DOESNOTEXIST"], { cwd: d });
+    expect(r.code, r.out).toBe(0);
+  });
+
+  it("a file repeating the json already in force is accepted too", () => {
+    const d = mkdtempSync(join(tmpdir(), "cmd-globals-fmt-"));
+    writeFileSync(join(d, "fmt.env"), "COWORK_HARNESS_OUTPUT_FORMAT=json\n");
+    writeFileSync(join(d, ".env"), "COWORK_HARNESS_OUTPUT_FORMAT=json\n");
+    const r = cli(["stats", "--dotenv", "fmt.env", "--run-dir", "/tmp/cwh-fmt-json-DOESNOTEXIST"], { cwd: d });
+    expect(r.code, r.out).toBe(0);
+    expect(JSON.parse(r.stdout).command).toBe("stats");
+  });
+});

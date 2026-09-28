@@ -106,3 +106,27 @@ describe("PY_SCAFFOLD_FLAGS mirrors scenario.py's scaffold parser (the delegatio
     expect([...PY_SCAFFOLD_FLAGS].sort()).toEqual(declared.filter((f) => f !== "--out").sort());
   });
 });
+
+describe.skipIf(!can || !havePython)("the flag-built scaffold treats the env json default like the flag", () => {
+  it("COWORK_HARNESS_OUTPUT_FORMAT=json is refused the same way --output-format json is (never silently ignored)", () => {
+    const d = mkdtempSync(join(tmpdir(), "scaffold-deleg-"));
+    const r = spawnSync("node", [CLI, "scaffold", "--name", "x", "--prompt", "p"], {
+      encoding: "utf8",
+      cwd: d,
+      env: { ...process.env, COWORK_HARNESS_OUTPUT_FORMAT: "json" },
+    });
+    expect(r.status).toBe(2);
+    expect(JSON.parse(r.stdout.trim()).error.message).toMatch(/YAML/);
+  });
+
+  it("an explicit --output-format text overrides the env json and runs", () => {
+    const d = mkdtempSync(join(tmpdir(), "scaffold-deleg-"));
+    const r = spawnSync("node", [CLI, "scaffold", "--name", "x", "--prompt", "p", "--output-format", "text"], {
+      encoding: "utf8",
+      cwd: d,
+      env: { ...process.env, COWORK_HARNESS_OUTPUT_FORMAT: "json" },
+    });
+    expect(r.status, r.stderr).toBe(0);
+    expect(parseYaml(r.stdout).name).toBe("x");
+  });
+});

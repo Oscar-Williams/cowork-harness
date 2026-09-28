@@ -265,17 +265,19 @@ export function isFlagBuiltScaffold(args: string[]): boolean {
  *  stripped. A positional here is a run id meant for the other form: refused, so neither form is picked
  *  silently. Exits with the script's own code (127 when python is missing). */
 export function cmdScaffoldFlagBuilt(args: string[]): never {
-  let format: "text" | "json";
   try {
-    format = parseOutputFormat(args);
+    parseOutputFormat(args);
   } catch (e) {
     return fail("scaffold", "usage", String((e as Error).message), undefined, isJsonOutput(args));
   }
-  if (format === "json")
+  // isJsonOutput, not the flag alone: COWORK_HARNESS_OUTPUT_FORMAT=json asks for json the same way the flag
+  // does, and must be refused the same way rather than silently answered with YAML. An explicit
+  // `--output-format text` still overrides the env default.
+  if (isJsonOutput(args))
     return fail(
       "scaffold",
       "usage",
-      "scaffold: the flag-built form (--name/--prompt/…) writes scenario YAML only — drop --output-format json (use --out <file> to write it to a file)",
+      "scaffold: the flag-built form (--name/--prompt/…) writes scenario YAML only — drop --output-format json (or pass --output-format text over a COWORK_HARNESS_OUTPUT_FORMAT=json default); use --out <file> to write it to a file",
       undefined,
       true,
     );

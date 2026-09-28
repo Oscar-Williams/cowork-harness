@@ -64,7 +64,10 @@ export function applyCommandGlobal(command: string, flag: CommandGlobalFlag, val
     fail(command, "usage", new DotenvReadError(value, e).message, undefined, json);
   }
   const protectedKeys = state?.protectedKeys ?? new Set(Object.keys(process.env));
-  const before = process.env.COWORK_HARNESS_OUTPUT_FORMAT;
+  // The env var only ever selects json when it says exactly "json" (isJsonOutput's rule), so compare the
+  // EFFECTIVE format: a file that restates what is already in force changes nothing and is not refused.
+  const effective = () => (process.env.COWORK_HARNESS_OUTPUT_FORMAT === "json" ? "json" : "text");
+  const before = effective();
   const loaded: string[] = [];
   for (const [key, val] of entries) {
     if (protectedKeys.has(key)) continue;
@@ -73,7 +76,7 @@ export function applyCommandGlobal(command: string, flag: CommandGlobalFlag, val
   }
   // The output format is decided before a command's flags are parsed (its error envelope has to be), so a
   // value that arrives only now cannot take effect for this command. Refuse rather than print in the wrong one.
-  if (process.env.COWORK_HARNESS_OUTPUT_FORMAT !== before)
+  if (effective() !== before)
     fail(
       command,
       "usage",
