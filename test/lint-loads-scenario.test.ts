@@ -115,6 +115,18 @@ describe.skipIf(!can || !havePython)("lint reports what the scenario loader reje
     expect(loader[0].fix).toMatch(/fidelity: hostloop/);
   });
 
+  it("python reports the same file as ERROR fidelity-missing, once, beside the loader's finding", () => {
+    // A duplicate under the wrapper (like `enum-value-invalid`); on a direct `scenario.py lint` it is the only
+    // coverage. The retired WARN must not appear next to it.
+    const d = mkdtempSync(join(tmpdir(), "cwh-lint-load-"));
+    const f = scenario(d, "s.yaml", ["baseline: latest", "prompt: hello", "assert:", "  - result: success"]);
+    const found = jsonFindings(runCli(["lint", f, "--output-format", "json"]).stdout);
+    const py = found.filter((x) => x.rule === "fidelity-missing");
+    expect(py).toHaveLength(1);
+    expect(py[0].severity).toBe("ERROR");
+    expect(found.map((x) => x.rule)).not.toContain("fidelity-defaulted");
+  });
+
   it("a directory target attributes the loader finding to the same path python prints", () => {
     const d = mkdtempSync(join(tmpdir(), "cwh-lint-load-"));
     const sub = join(d, "d");

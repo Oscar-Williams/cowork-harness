@@ -918,43 +918,69 @@ def test_zero_gate_declaration_switches_the_message_to_drop_it(tmp_path):
     assert "inert" in f.message.lower() or "asserts nothing" in f.message.lower()
 
 
-# --- fidelity-defaulted -------------------------------------------------------
-# The schema default (`container`) models VM-LOOP; production runs HOST-LOOP by default (gate 1143815894 —
-# per-account, read from the fcache, so the warning must not assert it as a live fact).
-# So an omitted `fidelity:` measures the scenario against a lane real users are not on — silently. This is
-# the deprecation warning before the key becomes REQUIRED at the next major.
+# --- fidelity-missing ----------------------------------------------------------
+# `fidelity:` is REQUIRED since 4.0.0 (it defaulted to `container` before, with a warning from 2.4.0). The
+# old default modelled VM-LOOP while production runs HOST-LOOP by default (gate 1143815894 — per-account,
+# read from the fcache, so the finding must not assert it as a live fact). The loader refuses the file; on a
+# direct `scenario.py lint` this ERROR is the only coverage.
 
 
-def _mk(tmp_path, body):
+def _mk(tmp_path, body, rule="fidelity-missing"):
     f = tmp_path / "sc.yaml"
     f.write_text(body, encoding="utf-8")
-    return [x for x in scenario.lint_file(str(f)) if x.rule == "fidelity-defaulted"]
+    return [x for x in scenario.lint_file(str(f)) if x.rule == rule]
 
 
-def test_fidelity_defaulted_warns_when_the_key_is_absent(tmp_path):
+def test_fidelity_missing_is_an_error_when_the_key_is_absent(tmp_path):
     found = _mk(tmp_path, "name: t\nbaseline: latest\nsession: (inline)\nprompt: hi\n")
     assert len(found) == 1
-    assert found[0].severity == "WARN"
+    assert found[0].severity == "ERROR"
 
 
-# The load-bearing half. Reading the RESOLVED value would fire on `fidelity: container` too — an author
-# who named the tier has made the choice and must not be nagged. The rule must read the KEY.
+def test_the_retired_warning_is_gone(tmp_path):
+    assert _mk(tmp_path, "name: t\nbaseline: latest\nsession: (inline)\nprompt: hi\n", rule="fidelity-defaulted") == []
+
+
+def test_fidelity_missing_fails_lint_without_strict(tmp_path):
+    f = tmp_path / "sc.yaml"
+    f.write_text("name: t\nbaseline: latest\nsession: (inline)\nprompt: hi\nassert:\n  - result: success\n", encoding="utf-8")
+    code, _out = _lint_cmd([f], json_out=False)
+    assert code == 1
+
+
+# The rule reads the KEY: any named tier satisfies it.
 @pytest.mark.parametrize("tier", ["container", "hostloop", "cowork", "microvm", "protocol"])
-def test_fidelity_defaulted_silent_when_a_tier_is_named(tmp_path, tier):
+def test_fidelity_missing_silent_when_a_tier_is_named(tmp_path, tier):
     body = "name: t\nbaseline: latest\nsession: (inline)\nfidelity: %s\nprompt: hi\n" % tier
     assert _mk(tmp_path, body) == []
 
 
-# A deprecation notice that does not say what to do, or why, trains people to ignore it.
-def test_fidelity_defaulted_message_names_the_lanes_the_gate_and_the_removal(tmp_path):
+# A refusal that does not say what to do, or why, trains people to guess.
+def test_fidelity_missing_fix_names_the_lanes_the_gate_and_every_tier(tmp_path):
     f = _mk(tmp_path, "name: t\nbaseline: latest\nsession: (inline)\nprompt: hi\n")[0]
-    assert "VM-LOOP" in f.message
-    assert "HOST-LOOP" in f.message
-    assert "1143815894" in f.message, "cite the gate, so the claim is checkable"
+    assert "required" in f.message
+    assert "VM-LOOP" in f.fix
+    assert "HOST-LOOP" in f.fix
+    assert "1143815894" in f.fix, "cite the gate, so the claim is checkable"
     assert "fidelity: hostloop" in f.fix, "offer the production-matching tier"
     assert "fidelity: cowork" in f.fix, "offer the auto-picking tier"
-    assert "fidelity: container" in f.fix, "let an author keep today's behaviour deliberately"
-    assert "REQUIRED in the next major" in f.fix, "announce the removal, or it is just a nag"
+    assert "fidelity: container" in f.fix, "let an author keep the pre-4.0 behaviour"
+    assert "re-record" in f.fix, "a scenario with a cassette must add the tier it recorded"
+
+
+# Without a tier the tier-dependent rules have nothing to compare against. Running them against a phantom
+# `container` reported findings about a lane the author never chose: `tool_not_called: mcp__workspace__bash`
+# is tier-vacuous at container only, so the old code warned about it on a file that named no tier.
+def test_tier_rules_are_skipped_when_the_key_is_absent(tmp_path):
+    body = "assert:\n  - result: success\n  - tool_not_called: mcp__workspace__bash\n"
+    with_tier = tmp_path / "with.yaml"
+    with_tier.write_text("name: t\nbaseline: latest\nsession: (inline)\nfidelity: container\nprompt: hi\n" + body, encoding="utf-8")
+    assert any(x.rule == "tool-not-called-tier-vacuous" for x in scenario.lint_file(str(with_tier))), "canary: fires when named"
+    f = tmp_path / "without.yaml"
+    f.write_text("name: t\nbaseline: latest\nsession: (inline)\nprompt: hi\n" + body, encoding="utf-8")
+    rules = {x.rule for x in scenario.lint_file(str(f))}
+    assert "tool-not-called-tier-vacuous" not in rules
+    assert "fidelity-missing" in rules
 
 
 # --- prompt-slash-not-leading -------------------------------------------------
