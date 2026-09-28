@@ -6,6 +6,7 @@ import { spawnSync } from "node:child_process";
 import { fail, isJsonOutput, jsonError, jsonPayloadEnvelope, parseOutputFormat } from "./envelope.js";
 import { writeAllSync } from "../io.js";
 import { lintPrepass, type LintFinding } from "./lint-load.js";
+import { stripCommandGlobals } from "./command-globals.js";
 
 // Synchronous fd write (match envelope.ts/cli.ts/doctor.ts): writeAllSync retries EAGAIN and loops on
 // short writes so the whole payload lands before process.exit on a pipe (see src/io.ts).
@@ -48,6 +49,39 @@ function pythonNotFoundMessage(py: string, cmd: string): string {
   return `${py} not found — \`${cmd}\` needs Python 3 (PyYAML is bundled). Set $PYTHON or install Python.`;
 }
 
+/** The environment every wrapper-spawned `scenario.py` run gets. `COWORK_HARNESS_PROG` makes the script's
+ *  usage/error lines name the command the user actually typed (`cowork-harness lint`, not `scenario.py lint`);
+ *  it is passed as env, not a flag, so the script stays honest when invoked DIRECTLY, where it falls back to
+ *  its own basename. It is also how the script knows the wrapper ran (lint's loader note keys on it). */
+function scenarioScriptEnv(): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...process.env, COWORK_HARNESS_PROG: "cowork-harness" };
+  // Only the lint wrapper may hand python loader findings. A value inherited from the caller's shell would
+  // inject findings nobody computed (or, on a clean corpus, report ones that are not there).
+  delete env[EXTRA_FINDINGS_ENV];
+  return env;
+}
+
+/** Spawn `python3 scenario.py <subcommand> …`. On a spawn failure (python missing → ENOENT) it writes the
+ *  reason to stderr and returns `undefined`; the caller exits 127. Shared by `lint`, `lint-skill` and the
+ *  flag-built `scaffold`, so all three resolve python and report its absence the same way. */
+function spawnScenarioScript(
+  subcommand: string,
+  pyArgs: string[],
+  env: NodeJS.ProcessEnv,
+  capture: boolean,
+): ReturnType<typeof spawnSync> | undefined {
+  const py = process.env.PYTHON ?? "python3";
+  const r = capture
+    ? spawnSync(py, [resolveScenarioScript(), subcommand, ...pyArgs], { stdio: ["inherit", "pipe", "inherit"], encoding: "utf8", env })
+    : spawnSync(py, [resolveScenarioScript(), subcommand, ...pyArgs], { stdio: "inherit", env });
+  if (r.error) {
+    const enoent = (r.error as NodeJS.ErrnoException).code === "ENOENT";
+    process.stderr.write((enoent ? pythonNotFoundMessage(py, subcommand) : String(r.error.message)) + "\n");
+    return undefined;
+  }
+  return r;
+}
+
 /** Shared `lint`/`lint-skill` → `python3 scenario.py <cmd> …` passthrough (npm-consumer ergonomics;
  *  skill authors can still invoke python3 on the bundled script directly).
  *
@@ -81,18 +115,12 @@ function runLintLike(subcommand: "lint" | "lint-skill", args: string[], prepass:
   } catch (e) {
     fail(subcommand, "usage", String((e as Error).message), undefined, isJsonOutput(args));
   }
-  const script = resolveScenarioScript();
-  const py = process.env.PYTHON ?? "python3";
+  // --dotenv / --run-dir after the subcommand: applied here (python knows neither), then not forwarded.
+  args = stripCommandGlobals(subcommand, args, ["--min-severity", "--output-format"], isJsonOutput(args));
+  resolveScenarioScript(); // fail on a missing script before the loader pre-pass does any work
   const json = isJsonOutput(args);
   const pyArgs = stripOutputFormatFlag(args);
-  // Name the command the user actually typed in python's usage/error lines. Without this the linter
-  // reports `usage: scenario.py lint …` — a command a `cowork-harness` user cannot run. Passed as env
-  // (not a flag) so the script stays honest when invoked DIRECTLY, which SKILL.md and three docs document:
-  // there it falls back to its own basename.
-  const pyEnv: NodeJS.ProcessEnv = { ...process.env, COWORK_HARNESS_PROG: "cowork-harness" };
-  // Only THIS process may hand python loader findings. A value inherited from the caller's shell would
-  // inject findings nobody computed (or, on a clean corpus, report ones that are not there).
-  delete pyEnv[EXTRA_FINDINGS_ENV];
+  const pyEnv = scenarioScriptEnv();
 
   // `lint` only: run the harness's own scenario loader first, so "lint is clean" means "run/record load it".
   // See lint-load.ts for what is and is not checked. Skipped for --help (python prints usage and exits 0).
@@ -131,31 +159,23 @@ function runLintLike(subcommand: "lint" | "lint-skill", args: string[], prepass:
   };
 
   if (!json) {
-    const r = spawnSync(py, [script, subcommand, ...pyArgs], { stdio: "inherit", env: pyEnv });
-    if (r.error) {
-      const enoent = (r.error as NodeJS.ErrnoException).code === "ENOENT";
-      process.stderr.write((enoent ? pythonNotFoundMessage(py, subcommand) : String(r.error.message)) + "\n");
+    const r = spawnScenarioScript(subcommand, pyArgs, pyEnv, false);
+    if (!r) {
       process.stderr.write(loaderSummary(loaderRejected));
       return exit(127);
     }
     return exit(r.status ?? 1);
   }
 
-  const r = spawnSync(py, [script, subcommand, "--json", ...pyArgs], {
-    stdio: ["inherit", "pipe", "inherit"],
-    encoding: "utf8",
-    env: pyEnv,
-  });
-  if (r.error) {
-    const enoent = (r.error as NodeJS.ErrnoException).code === "ENOENT";
-    process.stderr.write((enoent ? pythonNotFoundMessage(py, subcommand) : String(r.error.message)) + "\n");
+  const r = spawnScenarioScript(subcommand, ["--json", ...pyArgs], pyEnv, true);
+  if (!r) {
     process.stderr.write(loaderSummary(loaderRejected));
     return exit(127);
   }
   const status = r.status ?? 1;
   let findings: unknown;
   try {
-    findings = JSON.parse(r.stdout ?? "");
+    findings = JSON.parse(String(r.stdout ?? ""));
   } catch {
     // stdio's stderr slot is "inherit" (see the spawnSync call above), so python's usage text already
     // reached the step log directly — r.stderr is always null here, there's no tail to surface as a hint.
@@ -201,4 +221,84 @@ export function cmdLint(args: string[], prepass: (args: string[]) => LintFinding
  *  for the text/json dual-mode behavior and the ENOENT → exit-127 guard. */
 export function cmdLintSkill(args: string[]): never {
   return runLintLike("lint-skill", args);
+}
+
+/** The bundled `scenario.py scaffold` flags that the native `scaffold <run-id | run-dir>` does not have.
+ *  Any of them selects the flag-built form. `--out` is shared by both forms, so it selects neither. Kept in
+ *  step with the script's parser by test/scaffold-delegation.test.ts, which reads its `add_argument` lines. */
+export const PY_SCAFFOLD_FLAGS = [
+  "--name",
+  "--prompt",
+  "--tier",
+  "--session",
+  "--skill",
+  "--content",
+  "--tool",
+  "--subagent",
+  "--gate",
+  "--web-fetch",
+  "--file",
+  "--artifact",
+  "--no-delete",
+  "--egress-allowed",
+  "--egress-denied",
+  "--no-validate",
+] as const;
+const PY_SCAFFOLD_BOOLEANS: readonly string[] = ["--no-delete", "--no-validate"];
+/** Every spaced value-taking flag of either `scaffold` form — what a scan must skip over as a value. */
+export const SCAFFOLD_VALUE_FLAGS: readonly string[] = [
+  ...PY_SCAFFOLD_FLAGS.filter((f) => !PY_SCAFFOLD_BOOLEANS.includes(f)),
+  "--out",
+  "--output-format",
+];
+
+const flagName = (a: string): string => (a.startsWith("--") && a.includes("=") ? a.slice(0, a.indexOf("=")) : a);
+
+/** True when `scaffold`'s args use the flag-built form (any flag only the bundled script knows). */
+export function isFlagBuiltScaffold(args: string[]): boolean {
+  return args.some((a) => (PY_SCAFFOLD_FLAGS as readonly string[]).includes(flagName(a)));
+}
+
+/** `cowork-harness scaffold --name … --prompt …` → `python3 scenario.py scaffold …`: build a scenario from
+ *  flags alone, no run needed. Text only — the script writes YAML (to stdout or `--out`), so an explicit
+ *  `--output-format json` is refused rather than silently ignored; `--output-format text` is accepted and
+ *  stripped. A positional here is a run id meant for the other form: refused, so neither form is picked
+ *  silently. Exits with the script's own code (127 when python is missing). */
+export function cmdScaffoldFlagBuilt(args: string[]): never {
+  try {
+    parseOutputFormat(args);
+  } catch (e) {
+    return fail("scaffold", "usage", String((e as Error).message), undefined, isJsonOutput(args));
+  }
+  // isJsonOutput, not the flag alone: COWORK_HARNESS_OUTPUT_FORMAT=json asks for json the same way the flag
+  // does, and must be refused the same way rather than silently answered with YAML. An explicit
+  // `--output-format text` still overrides the env default.
+  if (isJsonOutput(args))
+    return fail(
+      "scaffold",
+      "usage",
+      "scaffold: the flag-built form (--name/--prompt/…) writes scenario YAML only — drop --output-format json (or pass --output-format text over a COWORK_HARNESS_OUTPUT_FORMAT=json default); use --out <file> to write it to a file",
+      undefined,
+      true,
+    );
+  const pyArgs = stripOutputFormatFlag(args);
+  for (let i = 0; i < pyArgs.length; i++) {
+    const a = pyArgs[i];
+    if (a.startsWith("-")) {
+      // A spaced value-flag consumes the next token; only a non-flag token outside a value slot is a positional.
+      if (!a.includes("=") && !PY_SCAFFOLD_BOOLEANS.includes(a)) i++;
+      continue;
+    }
+    return fail(
+      "scaffold",
+      "usage",
+      `scaffold: "${a}" looks like a <run-id | run-dir>, but --name/--prompt/… build a scenario from flags. Use one form: ` +
+        "`scaffold <run-id | run-dir> [--out <file.yaml>]` (from a kept run) or `scaffold --name … --prompt … [--out <file.yaml>]` (from flags)",
+      undefined,
+      false,
+    );
+  }
+  const r = spawnScenarioScript("scaffold", pyArgs, scenarioScriptEnv(), false);
+  if (!r) return process.exit(127);
+  return process.exit(r.status ?? 1);
 }

@@ -583,6 +583,35 @@ describe.skipIf(!can)("P2 — unknown top-level frozen-scenario key on a future-
     expect(withoutExtra.stderr).not.toMatch(/unknown top-level key/);
   });
 
+  // The two halves of the documented contract (references/authoring.md, docs/scenario.md). A key that changes
+  // what a verdict means lifts the recorder's stamp, so THIS reader sees a future cassette and refuses it —
+  // it does not evaluate it green with the key ignored.
+  it("REFUSES the future-version cassette without the override (a meaning-changing key is never silently ignored)", () => {
+    const cwd = tmp();
+    write(cwd, "c.cassette.json", futureCassetteWithExtraKey({ someFutureKey: "remote" }));
+    const r = replay(cwd, ["c.cassette.json", "--output-format", "json"]);
+    expect(r.code).not.toBe(0);
+    expect(r.json?.ok).toBe(false);
+    expect(JSON.stringify(r.json)).toMatch(/cassette format too new/);
+  });
+
+  // …and a meaning-neutral key (stamped `() => 0`) leaves the stamp at this build's version, so the cassette
+  // replays exactly as if the key were absent: ignored by design, the forward tolerance of the frozen scenario.
+  it("a same-version cassette carrying an extra key replays GREEN, identical to one without it (ignored by design)", () => {
+    const cwd = tmp();
+    const withKey = JSON.parse(futureCassetteWithExtraKey({ someNeutralKey: "x" }));
+    withKey.cassetteVersion = CASSETTE_VERSION;
+    const withoutKey = JSON.parse(futureCassetteWithExtraKey({}));
+    withoutKey.cassetteVersion = CASSETTE_VERSION;
+    write(cwd, "with.cassette.json", JSON.stringify(withKey));
+    write(cwd, "without.cassette.json", JSON.stringify(withoutKey));
+    const a = replay(cwd, ["with.cassette.json", "--output-format", "json"]);
+    const b = replay(cwd, ["without.cassette.json", "--output-format", "json"]);
+    expect(a.code).toBe(0);
+    expect(a.code).toBe(b.code);
+    expect(a.json?.results?.[0]?.verdict).toEqual(b.json?.results?.[0]?.verdict);
+  });
+
   it("stays SILENT on an ordinary SAME-version cassette, even one carrying an extra key (no false positives)", () => {
     const cwd = tmp();
     const body = JSON.parse(futureCassetteWithExtraKey({ someFutureKey: "remote" }));

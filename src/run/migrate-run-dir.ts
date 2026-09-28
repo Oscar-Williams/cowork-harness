@@ -15,6 +15,7 @@
 // Assessment and execution were interleaved in earlier designs, and that is precisely what deleted and
 // fabricated turns: a rule would mutate one artifact and then discover the directory was inconsistent.
 
+import { applyParsedCommandGlobals, withCommandGlobals } from "./command-globals.js";
 import {
   existsSync,
   mkdirSync,
@@ -897,11 +898,12 @@ export function cmdMigrateRunDir(args: string[]): void {
   const out = (s: string) => process.stderr.write(s + "\n");
   let p;
   try {
-    p = parseArgs(args, { booleans: ["--write", "--verbose"], values: ["--scenario"] });
+    p = parseArgs(args, withCommandGlobals({ booleans: ["--write", "--verbose"], values: ["--scenario"] }));
   } catch (e) {
     out((e as Error).message);
     return process.exit(2);
   }
+  applyParsedCommandGlobals("migrate-run-dir", p, false);
   if (p.positionals.length > 1) {
     out(`migrate-run-dir takes an optional <runs-dir> (got ${p.positionals.length}: ${p.positionals.join(", ")})`);
     return process.exit(2);

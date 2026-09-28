@@ -255,8 +255,8 @@ authorable). Reach for this list when debugging a run's behavior, that one while
     **quarantined** to `<runs-root>/quarantine/` with a `.findings.txt` naming what leaked, and the command
     fails without writing the path you asked for (the recording is not discarded — you paid for it).
     `verify-cassettes --allow-host-inventory <regex>` is unrelated: a per-finding suppressor for the
-    scanner's `host-inventory` class on an already-committed cassette. Passing one where the other command
-    wants it fails as an unrecognized flag — they don't interchange. Depth: `references/ci-recipe.md`.
+    scanner's `host-inventory` class on an already-committed cassette. They don't interchange: passing one
+    to the other command is a usage error that names the command owning it. Depth: `references/ci-recipe.md`.
 
 26. **A `skill`-lane `PASS` does not mean the skill ran, or that the run was the one you wanted.** *Why:*
     an open-ended `skill` run has no `assert:` block, so its verdict reports only that **no guard fired**
@@ -270,13 +270,13 @@ authorable). Reach for this list when debugging a run's behavior, that one while
     read it — in production too — so on a self-referential prompt it may read `SKILL.md` and answer
     directly, with `skillActivity` empty.
 
-27. **`allow_stall: true` is a scenario assertion, so the `skill` lane cannot use it.** *Why:* the
+27. **`stalled` also fails a complete answer that closes by offering a follow-up.** *Why:* the
     `stalled` guard fires when a run's final message ends in `?` with no productive tool call after the
     last gate — which includes a complete answer that closes by *offering* a follow-up ("want me to run
-    this through a structured pass?"). The documented opt-out lives in an `assert:` block, and an
-    open-ended `skill` run has none, so the failure message names a remedy that lane can't perform.
-    *Fix:* on `skill`, read the final message before believing `stalled`, or move the check to a
-    `run` scenario where `allow_stall: true` is authorable.
+    this through a structured pass?"). *Fix:* read the final message before believing `stalled`. If
+    ending on a question is intended, opt out: `allow_stall: true` in a scenario's `assert:` block, or
+    `--allow-stall` on `skill` / `probe-dispatch`, which have no `assert:` block. The failure message
+    names the spelling for the lane you ran.
 
 For the assertion catalog, the YAML schema, the fidelity/answer tables, and the CI recipe, read the
 files in `references/` (the gotchas above are the full list; the references repeat only the

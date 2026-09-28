@@ -1739,6 +1739,15 @@ def cmd_lint(args):
         print(json.dumps([x.as_dict() for x in all_findings], indent=2))
     else:
         _print_findings(all_findings, len(args.files))
+    # Run directly (no COWORK_HARNESS_PROG — the wrapper always sets it), this script never ran the scenario
+    # loader `run`/`record` use, so "clean" here is weaker than `cowork-harness lint`'s. Say so on stderr only:
+    # stdout carries the --json array, and the exit code must not change.
+    if not os.environ.get("COWORK_HARNESS_PROG"):
+        print(
+            "note: scenario loader skipped — this direct run checks the lint rules only. "
+            "Run `cowork-harness lint` to also check that each file loads the way `run`/`record` load it.",
+            file=sys.stderr,
+        )
     has_error = any(x.severity == "ERROR" for x in all_findings)
     if has_error or (args.strict and all_findings):
         return 1
@@ -3122,7 +3131,7 @@ def main(argv=None):
     rap.add_argument("--json", action="store_true", help="emit the resolved types as a JSON array instead of one per line")
     rap.set_defaults(func=cmd_resolve_agent_types)
 
-    sp = sub.add_parser("scaffold", help="emit a valid scenario skeleton (self-linted)")
+    sp = sub.add_parser("scaffold", prog=f"{prog} scaffold" if prog else None, help="emit a valid scenario skeleton (self-linted)")
     sp.add_argument("--name", default="my-scenario", help="scenario name (default: my-scenario)")
     sp.add_argument("--prompt", help="the user turn (the prompt: block)")
     sp.add_argument("--tier", choices=VALID_TIERS, default="container", help="fidelity tier (default: container)")

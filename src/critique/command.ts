@@ -17,6 +17,7 @@
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { lookupSkillFlag } from "../run/skill-flag-surface.js";
+import { applyCommandGlobal } from "../run/command-globals.js";
 import { gradedAliasPath, turnArtifactPath } from "../run/turn-layout.js";
 import { renderKnownLimitations } from "./limitations.js";
 import { observedSkillInvocation, slashCommandSkillInvocation, subagentSkillCalls } from "./skill-invocation.js";
@@ -36,7 +37,7 @@ import { resolveDispatchableAgents, readPluginName, type ResolvedAgent } from ".
 import { findEnclosingPluginDir } from "../run/analyze-skill.js";
 import { safePathSegment } from "../staging/resolve.js";
 import { snapshotTurnBoundary, readTurn1Result, readTurn1Slice, type TurnBoundary } from "./evidence.js";
-import { runCritique, DEFAULT_EVALUATOR_MODEL } from "./evaluator.js";
+import { runCritique, defaultEvaluatorModel } from "./evaluator.js";
 import { loadBaseline } from "../baseline.js";
 import type { PlatformBaseline } from "../types.js";
 import { isLiveModelId } from "../types.js";
@@ -89,6 +90,8 @@ export interface ParsedArgs {
    *  anti-pattern. Empty when not in corpus-only mode. */
   ignoredFlags: string[];
   dotenv?: string;
+  /** `--run-dir` given after the subcommand: applied to critique's own process, which both turns inherit. */
+  runDir?: string;
   /** The tier BOTH turns run at. Always a concrete tier — `--fidelity cowork` is resolved at parse time,
    *  never forwarded as-is. */
   fidelity: "container" | "hostloop";
@@ -167,7 +170,7 @@ Critique's own:
                             critique refuses the same targets before any spend; a non-git folder is measured
                             raw, as staging copies it.
   --dotenv <path>           credentials
-  Global --run-dir <path>   must PRECEDE the subcommand
+  --run-dir <path>          relocate runs/ output (both turns inherit it); also accepted before the subcommand
 
 Not accepted (each errors with its reason rather than being silently ignored):
   --session-id / --resume   critique mints and manages its own session internally
@@ -184,7 +187,7 @@ Repeating a flag: --upload/--folder/--plugin/--marketplace/--enable/--answer acc
 COST AND PREREQUISITES — read before running:
   * Each critique is FOUR model workloads: two graded runs (task + reflection) at the chosen tier and two
     evaluator passes over an evidence package of up to ${MAX_PACKAGE_BYTES / 1024}KB.
-  * The evaluator defaults to ${DEFAULT_EVALUATOR_MODEL} — the most expensive tier. WHICH workload
+  * The evaluator defaults to ${defaultEvaluatorModel()} — the most expensive tier. WHICH workload
     dominates depends on the skill: evaluator cost is roughly FIXED (bounded by the evidence package),
     while the graded task turn is UNBOUNDED. On a trivial probe the two evaluator passes are ~3/4 of the
     total; on a real document-analysis run the ratio INVERTS (measured: task turn ~61%, evaluator ~30%).
@@ -303,6 +306,7 @@ function parseArgs(
   const positional: string[] = [];
   let prompt: string | undefined;
   let dotenv: string | undefined;
+  let runDir: string | undefined;
   let fidelity = "container";
   let evaluatorModel: string | undefined;
   let outputFormat: "json" | "text" = "text";
@@ -343,6 +347,12 @@ function parseArgs(
       const { value: v, adv } = flagVal(argv, i, "--dotenv");
       dotenv = v;
       shapes("--dotenv");
+      i += adv;
+    } else if (a === "--run-dir" || a.startsWith("--run-dir=")) {
+      once("--run-dir");
+      const { value: v, adv } = flagVal(argv, i, "--run-dir");
+      runDir = v;
+      shapes("--run-dir");
       i += adv;
     } else if (a === "--fidelity" || a.startsWith("--fidelity=")) {
       once("--fidelity");
@@ -500,6 +510,7 @@ function parseArgs(
     corpusOnly,
     ignoredFlags: corpusOnly ? runShaping : [],
     dotenv,
+    runDir,
     fidelity: fidelity as ParsedArgs["fidelity"],
     requestedFidelity,
     evaluatorModel,
@@ -1357,7 +1368,7 @@ interface ReportState {
   /** F35: the TRANSPORT-RESOLVED evaluator model, present only when the evaluator actually completed and
    *  every pass that ran agreed on it. Never the requested alias/default. */
   evaluatorModel?: string;
-  /** The requested model (opts.evaluatorModel ?? DEFAULT_EVALUATOR_MODEL) — shown ONLY as unresolved
+  /** The requested model (opts.evaluatorModel ?? defaultEvaluatorModel()) — shown ONLY as unresolved
    *  debugging context when the evaluator never completed (infra failure or evaluator error), clearly
    *  labeled as such; never presented as if it were the resolved provenance value. */
   requestedModel: string;
@@ -2126,6 +2137,22 @@ export function computeSkillInvocationVerdict(args: {
   );
 }
 
+/** critique's argument phase, exactly as `main` runs it: parse, then apply the per-command globals to THIS
+ *  process before anything reads the environment. Exported so a test drives the real path rather than
+ *  fabricating the apply. */
+export function prepareCritique(argv: string[]): ParsedArgs {
+  const opts = parseArgs(argv);
+  const json = opts.outputFormat === "json";
+  // --dotenv is ALSO forwarded to both spawned turns (as a leading --dotenv), but the evaluator runs HERE, so
+  // the file has to reach this process too. Applying it here also fixes the children's precedence: they
+  // inherit this env, where the file's keys now win over the ./.env this process auto-loaded, instead of
+  // inheriting ./.env's values as "exported" ones that their own --dotenv could not override. The child's
+  // own load of the same file then finds the same values: no double-apply conflict.
+  if (opts.dotenv !== undefined) applyCommandGlobal("critique", "--dotenv", opts.dotenv, json);
+  if (opts.runDir !== undefined) applyCommandGlobal("critique", "--run-dir", opts.runDir, json);
+  return opts;
+}
+
 async function main(argv: string[] = process.argv.slice(2)): Promise<void> {
   if (argv.includes("--help") || argv.includes("-h")) {
     writeAllSync(1, usage() + "\n");
@@ -2133,7 +2160,7 @@ async function main(argv: string[] = process.argv.slice(2)): Promise<void> {
   }
   let opts: ParsedArgs;
   try {
-    opts = parseArgs(argv);
+    opts = prepareCritique(argv);
   } catch (e) {
     process.stderr.write(`${(e as Error).message}\n`);
     // Exit taxonomy: FINDINGS never gate (always 0), but a usage error or an infra/protocol failure is
@@ -2241,7 +2268,7 @@ async function main(argv: string[] = process.argv.slice(2)): Promise<void> {
         taskResult: undefined,
         selfReportStatus: "unavailable",
         items: [],
-        requestedModel: opts.evaluatorModel ?? DEFAULT_EVALUATOR_MODEL,
+        requestedModel: opts.evaluatorModel ?? defaultEvaluatorModel(),
         infraFailure: taskInfra.reason,
         infraFailurePhase: "task turn",
         infraFailureKind: taskInfra.kind,
@@ -2334,7 +2361,7 @@ async function main(argv: string[] = process.argv.slice(2)): Promise<void> {
     // an infrastructure/protocol defect, never fall through to "the agent had nothing to say."
     const reflectionValidation = validateReflectionTurn(reflect, sessionId, outDir);
 
-    const requestedModel = opts.evaluatorModel ?? DEFAULT_EVALUATOR_MODEL;
+    const requestedModel = opts.evaluatorModel ?? defaultEvaluatorModel();
     let items: CritiqueItem[] = [];
     let evaluatorIntegrity: { pass1Canary: boolean; pass2Canary?: boolean } | undefined;
     let droppedEvaluatorItems: { pass1: number; pass2?: number } | undefined;

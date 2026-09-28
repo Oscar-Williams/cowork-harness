@@ -395,12 +395,11 @@ describe.skipIf(!can)("record rejects on_unanswered: prompt in the scenario, as 
 // AFTER the subcommand it's rejected as an unknown flag — but the bare "unknown flag" message sent
 // users hunting for a per-command flag that doesn't exist (the --dotenv-after-doctor footgun behind
 // campaign-2 H-2/H-4). The rejection now carries a position hint pointing at the leading form.
-describe.skipIf(!can)("global-flag position hint", () => {
-  // The check is centralized pre-dispatch, so these commands all hit the SAME code path — the value is
-  // that each previously surfaced a DIFFERENT confusing error for a trailing global flag (doctor →
-  // "unknown flag", run → "unexpected argument(s)", assertions → a positional-count error); the hint now
-  // pre-empts all of them uniformly. That divergence is exactly what makes the cross-command coverage worth
-  // asserting.
+describe.skipIf(!can)("--dotenv / --run-dir after the subcommand", () => {
+  // These used to be refused with "is a GLOBAL flag and must come BEFORE the subcommand". Each command's own
+  // parser now takes them (test/command-globals.test.ts has the full per-command matrix), so a trailing one
+  // is APPLIED: an absent --dotenv file is the command's "file not found", never a placement error, and
+  // never an unknown flag. These cases are the ones the old hint covered, kept to pin the new behaviour.
   for (const [label, args] of [
     ["doctor", ["doctor", "--tier", "protocol", "--dotenv", "/tmp/x.env"]],
     ["run", ["run", "x.yaml", "--dotenv", "/tmp/x.env"]],
@@ -412,13 +411,15 @@ describe.skipIf(!can)("global-flag position hint", () => {
     ["assertions (--run-dir equals form)", ["assertions", "--list", "--run-dir=/tmp/r"]],
     ["scaffold (--run-dir equals form)", ["scaffold", "abc", "--run-dir=/tmp/r"]],
   ] as const) {
-    it(`${label}: a misplaced --dotenv/--run-dir → exit 2 with the leading-position hint`, () => {
+    it(`${label}: a trailing --dotenv/--run-dir is applied by the command, not refused`, () => {
       const d = mkdtempSync(join(tmpdir(), "gf-"));
       const r = run([...args], d);
-      expect(r.code).toBe(2);
-      expect(r.out).toMatch(/GLOBAL flag and must come BEFORE the subcommand/);
-      // the hint names the actual subcommand, not the flag
-      expect(r.out).toMatch(new RegExp(`cowork-harness --(dotenv|run-dir) <path> ${args[0]}`));
+      expect(r.out).not.toMatch(/GLOBAL flag and must come BEFORE the subcommand/);
+      expect(r.out).not.toMatch(/unknown flag: --(dotenv|run-dir)/);
+      if (args.some((a) => a.startsWith("--dotenv"))) {
+        expect(r.code).toBe(2);
+        expect(r.out).toContain("--dotenv file not found: /tmp/x.env");
+      }
     });
   }
 
@@ -430,20 +431,11 @@ describe.skipIf(!can)("global-flag position hint", () => {
     expect(r.out).not.toMatch(/GLOBAL flag/);
   });
 
-  // critique accepts --dotenv as a legitimate PER-COMMAND flag, so the hint must never fire there —
-  // it would tell a correct invocation to move a flag that is already in the right place.
-  it("critique: a per-command --dotenv gets critique's own error, never the global hint", () => {
+  it("critique: a per-command --dotenv gets critique's own error", () => {
     const d = mkdtempSync(join(tmpdir(), "gf-"));
     const r = run(["critique", "some-skill-dir", "--prompt=hi", "--dotenv=/definitely/missing.env"], d);
     expect(r.code).toBe(2);
     expect(r.out).not.toMatch(/GLOBAL flag and must come BEFORE the subcommand/);
-  });
-
-  // The pre-dispatch guard already emits this sentence itself; the auto-hint must not append a second copy.
-  it("the spaced form emits the hint exactly once", () => {
-    const d = mkdtempSync(join(tmpdir(), "gf-"));
-    const r = run(["doctor", "--tier", "protocol", "--dotenv", "/tmp/x.env"], d);
-    expect(r.out.match(/GLOBAL flag and must come BEFORE the subcommand/g)).toHaveLength(1);
   });
 
   // THE REGRESSION THIS TASK IS MOST LIKELY TO CAUSE. Each of these is an error about a global flag in
@@ -462,22 +454,19 @@ describe.skipIf(!can)("global-flag position hint", () => {
     });
   }
 
-  // ORDERING. `run` takes its scenario as args[0], so a stray `--dotenv=` ahead of the path was absorbed
-  // as the target and the user's REAL path was reported as the unexpected argument — the correct token
-  // blamed, and no hint. This is the order a user actually types (flag straight after the subcommand).
-  for (const [label, args] of [
-    ["flag before the scenario path", ["run", "--dotenv=/tmp/x.env", "s.yaml"]],
-    ["flag as the only argument", ["run", "--dotenv=/tmp/x.env"]],
-    ["--run-dir before the path", ["run", "--run-dir=/tmp/r", "s.yaml"]],
+  // ORDERING. `run` takes its scenario as args[0]; a `--dotenv=`/`--run-dir=` ahead of the path is the flag,
+  // never the target, so the user's REAL path is never the token blamed.
+  for (const [label, args, expected] of [
+    ["--dotenv before the scenario path", ["run", "--dotenv=/tmp/x.env", "s.yaml"], /--dotenv file not found/],
+    ["--dotenv as the only argument", ["run", "--dotenv=/tmp/x.env"], /--dotenv file not found/],
+    ["--run-dir before the path", ["run", "--run-dir=/tmp/r", "missing.yaml"], /scenario path not found: missing\.yaml/],
   ] as const) {
-    it(`run: a misplaced global ${label} gets the hint, and never blames the path`, () => {
+    it(`run: ${label} is taken as the flag, and never blames the path`, () => {
       const d = mkdtempSync(join(tmpdir(), "gf-"));
       writeFileSync(join(d, "s.yaml"), "prompt: hi\n");
       const r = run([...args], d);
       expect(r.code).toBe(2);
-      expect(r.out).toMatch(/GLOBAL flag and must come BEFORE the subcommand/);
-      expect(r.out).toMatch(/cowork-harness --(dotenv|run-dir) <path> run/);
-      // the scenario path must NOT be named as the problem
+      expect(r.out).toMatch(expected);
       expect(r.out).not.toMatch(/unexpected argument\(s\): s\.yaml/);
       expect(r.out).not.toMatch(/scenario path not found: --/);
     });
@@ -492,19 +481,15 @@ describe.skipIf(!can)("global-flag position hint", () => {
     expect(r.out).not.toMatch(/GLOBAL flag and must come BEFORE the subcommand/);
   });
 
-  // The COMMA form is the shape that separates the two guards, and it is the reason `run`'s
-  // leftover-positional error carries its pointer in the MESSAGE rather than in fail()'s `hint`: a
-  // caller-supplied hint WINS over the auto-derived one (`hint ?? misplacedGlobalHint(…)`), and
-  // `--dotenv,foo` slips past cmdRun's strayGlobal pre-check (which terminates on `(=|$)`) while still
-  // matching misplacedGlobalHint (which also terminates on `[\s,]`) — so it lands here with the hint
-  // intact. Nothing covered this before; a future refactor onto `hint` would silently swallow it.
-  it("run: a comma-suffixed global reaches the leftover-positional path and KEEPS the hint", () => {
+  // A token that only STARTS with the flag name (`--dotenv,foo`) is not the flag: it stays an unexpected
+  // argument, reported as itself.
+  it("run: a comma-suffixed near-miss is an unexpected argument, not the flag", () => {
     const d = mkdtempSync(join(tmpdir(), "gf-"));
     writeFileSync(join(d, "s.yaml"), "prompt: hi\n");
     const r = run(["run", "s.yaml", "--dotenv,foo"], d);
     expect(r.code).toBe(2);
     expect(r.out).toMatch(/unexpected argument\(s\): --dotenv,foo/);
-    expect(r.out).toMatch(/GLOBAL flag and must come BEFORE the subcommand/);
+    expect(r.out).not.toMatch(/--dotenv file not found/);
   });
 
   // The flag name inside a quoted VALUE is being reported as a value, not parsed as a flag.
@@ -551,7 +536,7 @@ describe.skipIf(!can)("global-flag position hint", () => {
     expect(r.out).not.toMatch(/GLOBAL flag/);
   });
 
-  // Regression: the hint routes through fail(), so under --output-format json it emits the structured
+  // The per-command apply routes through fail(), so under --output-format json it emits the structured
   // error envelope like every other usage error — not bare text a JSON consumer can't parse.
   it("emits the json error envelope under --output-format json", () => {
     const d = mkdtempSync(join(tmpdir(), "gf-"));
@@ -562,7 +547,7 @@ describe.skipIf(!can)("global-flag position hint", () => {
     const env = JSON.parse(line!);
     expect(env.ok).toBe(false);
     expect(env.error.category).toBe("usage");
-    expect(env.error.message).toMatch(/GLOBAL flag and must come BEFORE the subcommand/);
+    expect(env.error.message).toMatch(/--dotenv file not found: \/tmp\/x\.env/);
   });
 });
 

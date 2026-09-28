@@ -51,7 +51,7 @@ Before the first command, confirm the CLI is reachable and **fail loud** (never 
 - **Agent binary (sandboxed live tiers — `container`/`microvm`/`hostloop`/`cowork`).** The staged Claude Code agent is **bind-mounted** from a local Claude Desktop install, or point `COWORK_AGENT_BINARY` at a `claude-code-vm/<ver>/claude` ELF. Nothing is bundled. `protocol` (L0) and `replay` need no staged agent; for the sandboxed tiers, no agent → no run; report that, don't skip silently.
 - **Docker / Lima.** Only `--fidelity protocol` (L0) runs without them. `container` / `microvm` / `hostloop` / `cowork` need Docker (Lima for L2). If they're absent, drop to `--fidelity protocol` and **say so** — a green that never exercised the sandbox is not a sandbox pass. At `protocol` the plugin under test **is** delivered (`--plugin-dir`), but its hooks then run as native host processes — so a plugin declaring hooks is refused there until you pass `--allow-host-hooks` / `allow_host_hooks: true`.
 - **Auth.** `CLAUDE_CODE_OAUTH_TOKEN` (preferred), or `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN`, via env or `.env`. Minting an OAuth token needs the **`claude` CLI** (`npm i -g @anthropic-ai/claude-code`, then `claude setup-token`).
-- **`--dotenv` is a GLOBAL flag — put it BEFORE the subcommand.** `cowork-harness --dotenv .env record …`, never `cowork-harness record … --dotenv .env`. Every *other* flag is subcommand-level, so muscle memory fights this one; the harness rejects the misplaced form with an exact-fix error, but placing it first avoids the round-trip. **One exception: `critique` also accepts `--dotenv` per-command** (`critique <folder> --prompt "…" --dotenv <path>`) — available as of **1.6.0** (documented but unreachable before then); `--run-dir` stays global-only everywhere.
+- **Point at another `.env`** with `--dotenv <path>`, and relocate run output with `--run-dir <path>`; both work before or after the subcommand.
 
 ## Orient — the three loops
 
@@ -103,12 +103,6 @@ lint-skill · analyze-skill · probe-dispatch ·
 verify-run · trace · inspect · diff · critique · stats · decide · gates · answer · scaffold · assertions --list · sync ·
 list · boundary-check · status · vm <init|status|delete|prune> · doctor · init-redact`. Always check `cowork-harness <cmd> --help`.
 
-**Two different `scaffold` tools — don't confuse them.** The native `cowork-harness scaffold <run-id>`
-above turns an already-*recorded* run into a scenario (needs a run to exist first). The bundled
-`scripts/scenario.py scaffold --name … --skill …` — see *Scaffold a valid scenario, then lint before
-you push* in `references/authoring.md` — builds a scenario from flags alone, no run required. Passing that section's
-flag set to the native command fails with `unknown flag: --name` (exit 2).
-
 ## Invariants — how a green run lies
 
 Each of these has produced a green run that tested nothing. The full catalog, with the reasoning
@@ -137,7 +131,7 @@ behind each, is [`references/gotchas.md`](references/gotchas.md).
 
 ## Short workflows
 
-- **Author, then lock:** `scripts/scenario.py scaffold …` → `cowork-harness lint scenarios/` →
+- **Author, then lock:** `cowork-harness scaffold --name … --prompt …` → `cowork-harness lint scenarios/` →
   `cowork-harness record <file.yaml> --dry-run` (free) → `record` once, with `--out` at a tracked path
   (a cassette cannot be moved) → `replay` on the PR gate.
 - **Fix answers without paying:** `--keep` one run → `trace <run-dir> --view questions` → edit

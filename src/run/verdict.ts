@@ -314,13 +314,17 @@ export function computeVerdict(result: RunResult, lane: "live" | "replay"): Verd
   // re-derived by run.ts's detector on the live run AND the replay re-drive, so a recorded stall fails replay
   // too). `result:"success"` alone is too generous — the SDK turn didn't error, but the agent asked for input
   // and stopped, so the task did not complete. Opt out with allow_stall when ending on a question is intended.
+  // The opt-out's spelling depends on the lane: a scenario authors `allow_stall: true` in its `assert:` block,
+  // while `skill`/`probe-dispatch` (both recorded as command "skill") have no block and take `--allow-stall`.
+  // Naming the scenario spelling to a `skill` user named a remedy that lane cannot perform.
+  const stallOptOut = result.command === "skill" ? "pass --allow-stall" : "assert allow_stall: true";
   if (result.stalledOnQuestion && !result.assertions.some((a) => a.assertion.allow_stall === true)) {
     signals.push({
       code: "stalled",
       severity: "fail",
       message:
         "run ended on an unanswered question — the agent asked for input and stopped; the task did not complete. " +
-        "Script the answer (answer: / --answer / a decider), or assert allow_stall: true if ending on a question is intended.",
+        `Script the answer (answer: / --answer / a decider), or ${stallOptOut} if ending on a question is intended.`,
     });
   }
 
@@ -377,7 +381,7 @@ export function computeVerdict(result: RunResult, lane: "live" | "replay"): Verd
         severity: "warn",
         message:
           "the final answer contains a question and the run wrote no deliverable to outputs/ — the agent may have ended on a request for input instead of a deliverable. " +
-          "Script the answer (answer:/--answer/a decider) or steer --decider-llm --intent; assert allow_stall: true if ending on a question is intended.",
+          `Script the answer (answer:/--answer/a decider) or steer --decider-llm --intent; ${stallOptOut} if ending on a question is intended.`,
       });
 
     // A skill can produce a deliverable, never deliver it, and still green: no assertion covers the

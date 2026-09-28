@@ -62,6 +62,9 @@ export const SKILL_FLAG_SURFACE: SkillFlagSpec[] = [
   // Without this a lean-image capability gap makes the task turn error, and the critique harvests a fact
   // about the rig instead of the skill — the same failure class as a missing upload.
   { flag: "--allow-missing-capability", arity: 0, critique: forwardBoth() },
+  // The open-ended lane's spelling of `allow_stall: true`. TASK-only: it changes the graded run's verdict, and
+  // the reflection turn is a fixed self-report whose own stall is not what critique grades.
+  { flag: "--allow-stall", arity: 0, critique: forwardTask() },
   // hostloop host-write consent. forwardBoth is load-bearing: checkHostLoopWriteConsent runs on EVERY
   // executeScenario at hostloop (the reflection resume included), so a task-only forward would refuse
   // every reflection turn of a folder-bearing hostloop critique.
@@ -167,6 +170,11 @@ export const SKILL_FLAG_SURFACE: SkillFlagSpec[] = [
   },
 
   // ---- critique implements or pins these itself ----
+  // `skill` takes these two after the subcommand as well as before it (run/command-globals.ts). critique has
+  // always owned --dotenv (validated, then passed to both turns as a LEADING --dotenv); --run-dir it applies
+  // to its own process, whose env both spawned turns inherit.
+  { flag: "--dotenv", arity: 1, critique: { kind: "owned", note: "validated here and passed to both turns as a leading --dotenv" } },
+  { flag: "--run-dir", arity: 1, critique: { kind: "owned", note: "applied to critique's own process; both turns inherit it" } },
   { flag: "--prompt-file", arity: 1, critique: { kind: "owned", note: "critique's probe prompt, read from a file" } },
   {
     flag: "--fidelity",
@@ -189,7 +197,7 @@ export const SKILL_FLAG_SURFACE: SkillFlagSpec[] = [
 // `--prompt` is here, not in the surface above: the `skill` lane takes its prompt POSITIONALLY
 // (`skill <folder> "<prompt>"`), so there is no `--prompt` flag to have a disposition about. The parity
 // guard caught this modelling error on its first run.
-export const CRITIQUE_ONLY_FLAGS = ["--evaluator-model", "--dotenv", "--prompt"] as const;
+export const CRITIQUE_ONLY_FLAGS = ["--evaluator-model", "--prompt"] as const;
 
 const BY_FLAG = new Map(SKILL_FLAG_SURFACE.map((s) => [s.flag, s]));
 

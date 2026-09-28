@@ -197,23 +197,24 @@ Full model in `references/scenario-schema.md`.
 ### Scaffold a valid scenario, then lint before you push
 
 Don't hand-write the YAML from memory — that's how invented keys (`assertions:` vs `assert:`,
-`json_file`, `answer_policy`) creep in. Start from the bundled generator, which emits the
+`json_file`, `answer_policy`) creep in. Start from `cowork-harness scaffold`, which emits the
 known-good skeleton (right tier, scripted `answers:` + `on_unanswered: fail`, content assertions
-separated from live-only ones, one concern per item) and **self-lints its own output**. The
-generator is the bundled `scripts/scenario.py` — installed as a plugin, point `S` at
-`${CLAUDE_PLUGIN_ROOT}/scripts/scenario.py`; from a repo checkout, use the literal path below:
+separated from live-only ones, one concern per item) and **self-lints its own output**. It has two
+forms: from flags alone (below, no run needed), or `scaffold <run-id>` from a run you already kept.
 
 ```bash
-S=".claude/skills/cowork-harness/scripts/scenario.py"
-python3 "$S" scaffold --name report-check --skill ./skills/report-gen \
+cowork-harness scaffold --name report-check --skill ./skills/report-gen \
   --prompt "Generate the weekly report to outputs/report.md." \
   --content 'weekly report' --artifact outputs/report.md \
   --egress-allowed api.weather.example.com --out scenarios/report-check.yaml
 ```
 
+The flag-built form runs the bundled `scripts/scenario.py scaffold`, which also runs directly with the
+same flags (installed as a plugin, `${CLAUDE_PLUGIN_ROOT}/scripts/scenario.py`).
+
 Then lint every scenario — it encodes the no-silent-false-green invariants. Use the CLI wrapper
 `cowork-harness lint`: it runs the bundled `scenario.py lint` **and** the harness's own scenario loader,
-so a file `run`/`record` would refuse fails lint too (running `scenario.py lint` directly skips the loader):
+so a file `run`/`record` would refuse fails lint too (running `scenario.py lint` directly skips the loader, and says so):
 
 ```bash
 cowork-harness lint scenarios/*.yaml
@@ -245,8 +246,12 @@ on a schema error; a directory reports each `✗ broken:` file and exits 1). **R
 its sign:** `record <file>` — with or without
 `--dry-run` — answers `2` for "did not load" and `1` for "loaded fine, but this record is refused" (a
 pre-spend policy refusal; `--max-budget-usd` is the one refusal that keeps exit 2). Treating any non-zero
-as "scenario broken" mis-reports every refused-but-valid scenario. Corollary: **the loader** fails LOUD on an unknown key (never silently) —
-but **`replay` does not**: a frozen top-level key it doesn't recognize (e.g. `lane:` recorded pre-1.16.0) is
-silently ignored and can flip a lane-sensitive verdict green; only frozen **assertion** keys stay
-hard-rejected there. Full split + the v11 version-regime:
+as "scenario broken" mis-reports every refused-but-valid scenario. Corollary: **the loader** fails LOUD on an unknown key (never silently).
+`replay` reads a frozen scenario from a cassette, and what an OLDER CLI does with a key it doesn't know is
+decided when the cassette is recorded. A key that changes what a verdict means (e.g. `lane: remote`) raises
+the cassette's version stamp, so the older `replay` / `verify-cassettes` refuses it as too new instead of
+evaluating it (`replay --best-effort-future-cassette` overrides that and names the key). For `lane: remote`
+that holds for a cassette recorded on ≥ 1.16.0 (stamped v11); one recorded by 1.14.0 or 1.15.0 is stamped
+v10, a pre-`lane` CLI ignores the key there, and `rehash` re-stamps it. A meaning-neutral key leaves the
+stamp alone and is ignored by design. Full split:
 [docs/scenario.md](https://github.com/yaniv-golan/cowork-harness/blob/main/docs/scenario.md#unknown-keys-the-loader-is-strict-lint-is-lenient).

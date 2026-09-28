@@ -70,7 +70,7 @@ describe("COWORK_* env vars ↔ docs", () => {
 describe("semantic-judge default model ↔ docs", () => {
   it("every doc that names the judge default names the code's actual default", () => {
     const judgeSrc = readFileSync(resolve("src/decide/semantic-judge.ts"), "utf8");
-    const m = judgeSrc.match(/DEFAULT_JUDGE_MODEL\s*=\s*process\.env\.\w+\s*\|\|\s*"([^"]+)"/);
+    const m = judgeSrc.match(/JUDGE_MODEL_FALLBACK\s*=\s*"([^"]+)"/);
     // fail loud on a const rename — a null match must never degrade into a skipped sync check
     expect(m).not.toBeNull();
     const id = m![1];

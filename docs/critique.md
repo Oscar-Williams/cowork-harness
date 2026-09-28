@@ -154,6 +154,7 @@ ignored.
 |---|---|
 | `--timeout <ms>` | wall-clock budget for the task turn (default **30 min**; critique's own kill-switch stretches to fit). The turn is killed *after* its model spend, so too-short costs the money **and** the result — the default errs long deliberately |
 | `--label <tag>` | generation tag in the run index, for pairing critiques across fixes |
+| `--allow-stall` | don't fail the task turn when it ends on a question (the `stalled` signal) — the CLI equivalent of `allow_stall: true` |
 | `--answer "<q-regex>=<choice>"`, `--answer-policy <yaml>` | pre-answer the skill's gates — **this is what makes gated skills critiquable at all** |
 | `--on-unanswered fail\|first` | unscripted-gate policy (`prompt` is refused — there is no TTY inside) |
 | `--decider-llm` / `--intent` / `--decider-model` / `--decider-cmd` / `--decider-dir` | answer live gates in the graded run (these forward to the graded `skill` turn, which accepts all of them — `run` and `record` each accept a narrower subset, see [decider-dir.md → Decider flags by command](./decider-dir.md#decider-flags-by-command-run-vs-record-vs-skill)) |
@@ -168,8 +169,8 @@ ignored.
 | `--skill <name>` | multi-skill **plugin** target: grade `skills/<name>/SKILL.md` (+ every `agents/**.md` it can dispatch, + any plugin-root `references/` file the skill actually links) instead of a missing plugin-root SKILL.md — see below |
 | `--fidelity container\|hostloop\|cowork` | container (default) or hostloop; `cowork` resolves via the baseline's loop gate to one of those two and pins BOTH turns to it. `microvm`/`protocol` refused with a reason — see [Known limitations](#known-limitations). At hostloop a writable `--folder` needs `--allow-host-writes` |
 | `--keep` | accepted as a no-op; runs are always kept |
-| `--dotenv <path>` | credentials — works **before** `critique` (the global form) or **after** it |
-| `--run-dir <path>` | **global, unlike `--dotenv`** — must still PRECEDE the subcommand; a trailing `critique … --run-dir` is rejected |
+| `--dotenv <path>` | credentials and knobs (e.g. `COWORK_HARNESS_EVALUATOR_MODEL`) — works **before** `critique` or **after** it (once); applies to critique's own process, where the evaluator runs, and to both turns |
+| `--run-dir <path>` | relocate the runs root — works **before** `critique` or **after** it; both turns inherit it |
 
 **Refused, and why**
 

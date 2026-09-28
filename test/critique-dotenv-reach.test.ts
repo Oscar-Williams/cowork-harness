@@ -55,20 +55,23 @@ describe.skipIf(!can)("cli: critique --dotenv is reachable (equals form)", () =>
   });
 });
 
-describe.skipIf(!can)("cli: the misplaced-global guard stays intact for everything else", () => {
-  it("critique --run-dir (trailing) is STILL rejected as a misplaced global", () => {
-    const d = mkdtempSync(join(tmpdir(), "crit-dotenv-"));
-    const r = run(["critique", "some-skill-dir", "--prompt", "hi", "--run-dir", "/tmp/x"], d);
-    expect(r.code).toBe(2);
-    expect(r.out).toMatch(/GLOBAL flag and must come BEFORE the subcommand/);
-    expect(r.out).toMatch(/cowork-harness --run-dir <path> critique/);
+// --run-dir after the subcommand is accepted by every command now, critique included: critique parses it
+// itself and applies it to its own process, whose env both spawned turns inherit.
+describe("critique --run-dir after the subcommand", () => {
+  it("parses in both forms, and a repeat is refused like every other single-valued critique flag", () => {
+    expect(parseArgs(["some-skill-dir", "--prompt", "hi", "--run-dir", "/tmp/x"]).runDir).toBe("/tmp/x");
+    expect(parseArgs(["some-skill-dir", "--prompt", "hi", "--run-dir=/tmp/y"]).runDir).toBe("/tmp/y");
+    expect(() => parseArgs(["some-skill-dir", "--prompt", "hi", "--run-dir", "/a", "--run-dir", "/b"])).toThrow(/given more than once/);
   });
+});
 
-  it("a trailing --dotenv on a DIFFERENT command is STILL rejected as a misplaced global", () => {
+describe.skipIf(!can)("cli: a trailing --dotenv on a DIFFERENT command is applied by that command too", () => {
+  it("doctor … --dotenv <missing> fails with the not-found error, not a placement error", () => {
     const d = mkdtempSync(join(tmpdir(), "crit-dotenv-"));
     const r = run(["doctor", "--tier", "protocol", "--dotenv", MISSING_DOTENV], d);
     expect(r.code).toBe(2);
-    expect(r.out).toMatch(/GLOBAL flag and must come BEFORE the subcommand/);
+    expect(r.out).not.toMatch(/GLOBAL flag and must come BEFORE the subcommand/);
+    expect(r.out).toContain(`--dotenv file not found: ${MISSING_DOTENV}`);
   });
 });
 

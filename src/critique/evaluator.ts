@@ -47,10 +47,10 @@ import { ROOT_REFERENCE_SECTION_PREFIX, AGENT_SECTION_PREFIX } from "./package-e
 // corpus that genuinely cannot fit in context — which is what the ceiling exists to detect. Do not reach
 // for it because a transcript was elided.
 
-/** The evaluator model. A concrete/dated id, like the semantic judge's `DEFAULT_JUDGE_MODEL` — a floating
+/** The evaluator model. A concrete/dated id, like the semantic judge's `defaultJudgeModel()` — a floating
  *  alias would make "which model produced this critique" unrecoverable after the fact. Env-overridable;
  *  `runCritique`'s `opts.model` overrides per call (the `--evaluator-model` CLI flag feeds that). */
-/** The evaluator model's own doc lives on DEFAULT_EVALUATOR_MODEL below; this is the transport timeout.
+/** The evaluator model's own doc lives on defaultEvaluatorModel() below; this is the transport timeout.
  *  Transport timeout for critique's evaluator passes. The shared default (600s) is sized for a DECIDER
  *  gate — small prompt, one-line answer. An evaluator pass prefills a large evidence corpus and emits tens
  *  of thousands of reasoning tokens, and its timeout is a SIGKILL with no retry, so a kill during pass 1
@@ -88,7 +88,12 @@ function exitEvaluatorTimeoutScope(): void {
   evaluatorTimeoutPrior = undefined;
 }
 
-export const DEFAULT_EVALUATOR_MODEL = process.env.COWORK_HARNESS_EVALUATOR_MODEL || "claude-opus-4-8";
+export const EVALUATOR_MODEL_FALLBACK = "claude-opus-4-8";
+/** Read at USE, never at import: main() loads `.env` files (and a --dotenv) after the modules are imported,
+ *  so an import-time read could never see a value set there. */
+export function defaultEvaluatorModel(): string {
+  return process.env.COWORK_HARNESS_EVALUATOR_MODEL || EVALUATOR_MODEL_FALLBACK;
+}
 
 const CLASSIFICATIONS = new Set<CritiqueItem["classification"]>([
   "grounded-and-actionable",
@@ -478,7 +483,7 @@ export interface RunCritiqueOptions {
   /** Mechanical integrity signal: false = that pass omitted the trusted canary item, so an empty or short
    *  critique must be treated as unreliable (possible adversarial silencing), never as a clean bill. */
   onEvaluatorIntegrity?: (integrity: { pass1Canary: boolean; pass2Canary?: boolean }) => void;
-  /** Pinned evaluator model; defaults to `DEFAULT_EVALUATOR_MODEL`. */
+  /** Pinned evaluator model; defaults to `defaultEvaluatorModel()`. */
   model?: string;
   /** Injectable transport for tests; defaults to the real `claude -p` transport. */
   complete?: Complete;
@@ -512,7 +517,7 @@ export interface RunCritiqueOptions {
   onPass2Start?: () => void;
   /** F35: called ONCE, synchronously, after the resolved model is confirmed (agreeing across every pass
    *  that actually ran) — with the TRANSPORT-RESOLVED model id (e.g. `claude-opus-4-8-20260115`), never the
-   *  requested alias (e.g. `"opus"`) `opts.model`/`DEFAULT_EVALUATOR_MODEL` may have been. A callback
+   *  requested alias (e.g. `"opus"`) `opts.model`/`defaultEvaluatorModel()` may have been. A callback
    *  (rather than widening this function's return type to `{items, model}`) so the pre-existing
    *  `CritiqueItem[]` contract — and every caller/test built against it — is untouched; this is purely
    *  additive provenance for a caller (the CLI) that wants to print/persist "which model actually graded
@@ -553,7 +558,7 @@ export async function runCritique(
   const evidence = armorEvidence(sections, opts.nonce);
   const pkg = evidence.text;
   opts.onArmoredEvidence?.(pkg);
-  const model = opts.model ?? DEFAULT_EVALUATOR_MODEL;
+  const model = opts.model ?? defaultEvaluatorModel();
   const complete = opts.complete ?? claudeCliComplete;
   // The shared transport's 600s default is sized for a DECIDER gate: a small prompt and a one-line answer.
   // An evaluator pass is a different workload — a large evidence corpus to prefill plus tens of thousands of

@@ -92,6 +92,12 @@ here**, and the failure is silent. Every one below was hit by an agent working i
   in `LIVE_ONLY_KEYS` instead, so they only run on live (non-replay) gates. These four exported constants
   are the single source of truth; the README's "what replay checks" prose just describes them. The wrong
   bucket is a **silent no-op in CI**.
+- **A new scenario key must pick its cassette version.** `KEY_REQUIRED_VERSION` (`src/run/cassette.ts`)
+  needs an entry for it (a coverage test enforces that), and the entry has to be RIGHT, which no test can
+  check: if an older CLI would read a cassette carrying this key's value and reach a different verdict,
+  return the new cassette version for that value (value-aware, like `lane: "remote"` → 11). Only a value
+  that means what an older CLI already does may return `0`. A `0` is what makes an older `replay` ignore the
+  frozen key; a meaning-changing key mis-tagged `0` is a silent false green on every older runner.
 - **`replay` consumes `controlOut` and re-serializes via `serializeDecision` to guard the AskUserQuestion
   answer shape (O7) on the token-free lane. A new decision *kind* must extend BOTH `serializeDecision`
   AND `deserializeDecision` (declared inverses in `src/agent/session.ts`) — they must not drift.**

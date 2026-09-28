@@ -210,7 +210,7 @@ carries an `artifacts` manifest (recorded `outputs/` + connected folders; then `
 deliverable is invisible to the gate. Don't let a green replay gate convince you the deliverable is correct.
 Run `cowork-harness lint` (the bundled `scenario.py lint` plus the harness's own loader) in CI to catch a scenario that put a
 filesystem/egress-only check on the replay lane (a silent no-op). Author new scenarios with
-`scenario.py scaffold` so they start from a valid, self-linted skeleton.
+`cowork-harness scaffold --name … --prompt …` so they start from a valid, self-linted skeleton.
 
 ## Recording a cassette
 

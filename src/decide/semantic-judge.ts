@@ -12,7 +12,12 @@ import type { SemanticClaimResult, SemanticJudge } from "../assert.js";
  *  before/after comparison — a floating alias ("opus") resolves to whatever the latest is at call time.
  *  A strong grader is the right default: rubric grading needs reliability. Env-overridable; can also be
  *  set per-assert. */
-const DEFAULT_JUDGE_MODEL = process.env.COWORK_HARNESS_JUDGE_MODEL || "claude-opus-4-8";
+const JUDGE_MODEL_FALLBACK = "claude-opus-4-8";
+/** Read at USE, never at import: main() loads `.env` files (and a --dotenv) after the modules are imported,
+ *  so an import-time read could never see a value set there. */
+function defaultJudgeModel(): string {
+  return process.env.COWORK_HARNESS_JUDGE_MODEL || JUDGE_MODEL_FALLBACK;
+}
 
 /** Extract EVERY balanced top-level `{...}` object from a string, ignoring braces inside JSON string
  *  literals. Judge models routinely wrap the JSON in prose, restate it fenced + unfenced, or echo the
@@ -138,7 +143,7 @@ export function makeSemanticJudge(opts: { model?: string; complete?: Complete } 
   // dated model id per call (see llm-transport.ts's `parseEnvelope` / `CompleteResult.model`), and a
   // floating alias can resolve to a DIFFERENT concrete model between calls (F11) — so the requested alias
   // alone is not a truthful "which model graded" record.
-  const requestedModel = opts.model ?? DEFAULT_JUDGE_MODEL;
+  const requestedModel = opts.model ?? defaultJudgeModel();
   const complete = opts.complete ?? claudeCliComplete;
   const judge: SemanticJudge = async (rubric, answer) => {
     const { text, model: resolvedModel } = await complete(buildJudgePrompt(rubric, answer), requestedModel);

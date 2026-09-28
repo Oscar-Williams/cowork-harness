@@ -1,3 +1,4 @@
+import { applyCommandGlobal, isCommandGlobalFlag } from "./command-globals.js";
 import readline from "node:readline";
 import { unpinnedModelWarning } from "./model-provenance.js";
 import os from "node:os";
@@ -111,21 +112,10 @@ function chatUsage(): string {
 export async function cmdChat(args: string[]) {
   const positional: string[] = [];
   let raw = false;
-  // parse COWORK_HARNESS_FIDELITY through the same tier set the --fidelity flag validates. An
-  // invalid value (a typo, or microvm/cowork which chat doesn't support) is rejected LOUDLY rather than
-  // silently degraded to container — symmetric with the CLI flag and with skill's env handling.
-  const envFid = process.env.COWORK_HARNESS_FIDELITY;
-  if (envFid !== undefined && !(CHAT_FIDELITY_TIERS as readonly string[]).includes(envFid)) {
-    log(
-      `chat: COWORK_HARNESS_FIDELITY must be one of ${CHAT_FIDELITY_TIERS.join("|")} (got "${envFid}")` +
-        (["microvm", "cowork"].includes(envFid) ? ` — ${envFid} is not supported in chat` : "") +
-        "\n",
-    );
-    process.exit(2);
-  }
-  let fidelity: ChatFidelity = (envFid as ChatFidelity | undefined) ?? "container";
-  // COWORK_HARNESS_MODEL env var default (CLI --model takes precedence).
-  let model: string | undefined = process.env.COWORK_HARNESS_MODEL;
+  // The env defaults (COWORK_HARNESS_FIDELITY / _MODEL) are resolved AFTER the flag loop, so a --dotenv given
+  // after the subcommand (applied inside the loop) reaches them too.
+  let fidelityFlag: ChatFidelity | undefined;
+  let modelFlag: string | undefined;
   let verbose = false;
   let allowHostWrites = false;
   let allowHostHooks = false;
@@ -156,7 +146,11 @@ export async function cmdChat(args: string[]) {
   };
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
-    if (a === "--raw") {
+    const gEq = a.startsWith("--") ? a.indexOf("=") : -1;
+    const gName = gEq > 0 ? a.slice(0, gEq) : a;
+    if (isCommandGlobalFlag(gName)) {
+      applyCommandGlobal("chat", gName, gEq > 0 ? a.slice(gEq + 1) : nextValue(i++, gName, "a path"), false);
+    } else if (a === "--raw") {
       raw = true;
       seenFlags.add("--raw");
     } else if (a === "--verbose") verbose = true;
@@ -172,12 +166,12 @@ export async function cmdChat(args: string[]) {
         log(`chat --fidelity must be ${CHAT_FIDELITY_TIERS.map((t) => `"${t}"`).join(", ")} (got "${v ?? ""}")\n`);
         process.exit(2);
       }
-      fidelity = v as ChatFidelity;
+      fidelityFlag = v as ChatFidelity;
       seenFlags.add("--fidelity");
     } else if (a === "--model") {
       // Route through nextValue so a flag-looking next token is rejected (not swallowed as the model id),
       // matching --upload/--folder/--plugin. The `-\d` carve-out keeps valid model ids intact.
-      model = nextValue(i++, "--model", "a model id");
+      modelFlag = nextValue(i++, "--model", "a model id");
       seenFlags.add("--model");
     } else if (a === "--upload") {
       uploads.push(nextValue(i++, "--upload", "a file path"));
@@ -193,6 +187,21 @@ export async function cmdChat(args: string[]) {
       process.exit(2);
     } else positional.push(a);
   }
+  // parse COWORK_HARNESS_FIDELITY through the same tier set the --fidelity flag validates. An
+  // invalid value (a typo, or microvm/cowork which chat doesn't support) is rejected LOUDLY rather than
+  // silently degraded to container — symmetric with the CLI flag and with skill's env handling.
+  const envFid = process.env.COWORK_HARNESS_FIDELITY;
+  if (envFid !== undefined && !(CHAT_FIDELITY_TIERS as readonly string[]).includes(envFid)) {
+    log(
+      `chat: COWORK_HARNESS_FIDELITY must be one of ${CHAT_FIDELITY_TIERS.join("|")} (got "${envFid}")` +
+        (["microvm", "cowork"].includes(envFid) ? ` — ${envFid} is not supported in chat` : "") +
+        "\n",
+    );
+    process.exit(2);
+  }
+  const fidelity: ChatFidelity = fidelityFlag ?? (envFid as ChatFidelity | undefined) ?? "container";
+  // COWORK_HARNESS_MODEL env var default (CLI --model takes precedence).
+  const model: string | undefined = modelFlag ?? process.env.COWORK_HARNESS_MODEL;
   const folder = positional[0];
   const seedPrompt = positional[1]; // optional: injected as the first turn before the REPL
   // reject extra positionals — `chat <folder> [prompt]` consumes at most two; a third (e.g. an
