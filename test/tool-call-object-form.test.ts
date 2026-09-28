@@ -288,8 +288,32 @@ describe("scope classifier (synthetic streams — pins the classifier, not the b
       F: "main",
       FB: "main", // fork-scoped: a top-level Skill's children are main-agent flow
     });
-    // fileToolAttempts and toolCalls must agree — they share one classifier.
     expect(rec.toolCalls.find((t) => t.toolUseId === "G1")?.parentToolUseId).toBe("A2");
+  });
+
+  it("fileToolAttempts and toolCalls agree on origin for every gated file-tool call (one classifier)", async () => {
+    const read = (id: string, parent?: string): AgentEvent => ({
+      type: "tool_use",
+      name: "Read",
+      input: { file_path: `outputs/${id}.md` },
+      toolUseId: id,
+      ...(parent ? { parentToolUseId: parent } : {}),
+    });
+    const rec = await drive([
+      read("RM"), // main
+      ...dispatch("A1", "researcher"),
+      read("RS", "A1"), // subagent
+      ...dispatch("A2", "nested", "A1"),
+      read("RG", "A2"), // grandchild → subagent
+      read("RU", "NOT-A-DISPATCH"), // unknown
+      { type: "tool_use", name: "Skill", input: { skill: "fork" }, toolUseId: "F" },
+      read("RF", "F"), // fork-scoped → main
+    ]);
+    const attempts = new Map(rec.fileToolAttempts.map((a) => [a.toolUseId, a.origin]));
+    const calls = new Map(rec.toolCalls.filter((c) => c.name === "Read").map((c) => [c.toolUseId, c.origin]));
+    expect([...attempts.keys()].sort()).toEqual(["RF", "RG", "RM", "RS", "RU"]);
+    expect(Object.fromEntries(attempts)).toEqual(Object.fromEntries(calls));
+    expect(Object.fromEntries(calls)).toEqual({ RM: "main", RS: "subagent", RG: "subagent", RU: "unknown", RF: "main" });
   });
 
   it("scope: main / subagent / any select the right calls; subagent_type matches the IMMEDIATE (nested) dispatch", async () => {
