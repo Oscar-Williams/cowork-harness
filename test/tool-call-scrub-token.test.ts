@@ -74,3 +74,31 @@ describe("the secret scrubber's tokens are redaction tokens too", () => {
     expect((r as { evidence?: string }).evidence ?? "").not.toContain("[REDACTED");
   });
 });
+
+// ---- a HIT must never come from a token's own text --------------------------------------------------
+import { redactText } from "../src/redact.js";
+
+describe("a regex hit on a redaction token's own text is not evidence", () => {
+  const keyTok = redactText("deploy AcmeCorp now", { patterns: [{ re: /AcmeCorp/g, label: "key" }], keyNames: [] });
+  const emailTok = redactText("mailed alice@example.com", { patterns: [{ re: /\S+@\S+/g, label: "email" }], keyNames: [] });
+
+  it("sanity: the tokens are real redactText output", () => {
+    expect(keyTok).toMatch(/\[REDACTED:key:[0-9a-f]{12}\]/);
+    expect(emailTok).toMatch(/\[REDACTED:email:[0-9a-f]{12}\]/);
+  });
+
+  it.each([["key"], ["\\b[0-9a-f]{12}\\b"], ["REDACTED"]])("tool_called input %s does not pass on the token's text", (rx) => {
+    const [r] = evaluate([{ tool_called: { tool: "Bash", input: { command: rx } } }], ctx(keyTok, "ok"));
+    expect(r.pass).toBe(false);
+  });
+
+  it("tool_called result.matches 'email' does not pass on [REDACTED:email:…]", () => {
+    const [r] = evaluate([{ tool_called: { tool: "Bash", result: { matches: "email" } } }], ctx("echo", emailTok));
+    expect(r.pass).toBe(false);
+  });
+
+  it("a hit on the UNREDACTED part still passes", () => {
+    const [r] = evaluate([{ tool_called: { tool: "Bash", input: { command: "^deploy\\s" } } }], ctx(keyTok, "ok"));
+    expect(r.pass).toBe(true);
+  });
+});
