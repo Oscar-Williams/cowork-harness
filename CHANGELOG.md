@@ -6,6 +6,29 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Changed — BREAKING (requires a major bump; see [SPEC.md §12](./SPEC.md#12-versioning--the-10-compatibility-contract))
+
+- **`lint --strict` now fails only on ERROR and WARN, and hides INFO.** Under `--strict` the default
+  `--min-severity` is WARN, so an INFO finding is neither printed nor failing. Without `--strict` the
+  default is still INFO, and an explicit `--min-severity` always wins. `lint-skill --strict` already never
+  failed on INFO, so the two flags now agree by default.
+  - *Who is affected:* anyone running bare `lint --strict`, including the packaged Action with
+    `command: lint` and `strict: true`. A scenario that failed only on INFO now passes. A step that
+    already passes `--strict --min-severity WARN` behaves exactly as before.
+  - *To keep the old behaviour:* add `--min-severity INFO` (for the Action, `extra-args: --min-severity
+    INFO`).
+  - *Action users:* a workflow that leaves `version:` at its `latest` default picks up 4.0.0, and both
+    changes here, as soon as it is promoted. Pin `version: "^3"` to defer it.
+- **`record` exits 1, not 2, when `--max-budget-usd` refuses**, on `--dry-run` and the real command, on
+  every `record` path (a single file, a directory, `--rerecord-stale`). A refusal of a scenario that loaded now always exits 1, so 2 no longer
+  means "over budget"; it means the scenario did not load, or a usage or setup error. On a directory,
+  broken files beside a loadable scenario over the cap now exit 1 too. The error category (`runtime`) and
+  message are unchanged. `skill` and `run` are unchanged: their `--max-budget-usd` refusal still exits 2.
+  - *Who is affected:* a script or CI step that reads exit 2 from `record` as "over budget".
+  - *To keep the old behaviour:* none; the exit code's meaning changed and no flag restores it. Treat
+    exit 1 as the refusal. To tell a budget refusal from the other refusals, match `refused before
+    spending` in the error message (`error.message` in the JSON envelope).
+
 ### Upgrade notes
 
 - **`lint` reports two new WARNs.** `transcript-command-shaped` flags a `transcript_*` value that looks

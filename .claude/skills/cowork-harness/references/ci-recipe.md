@@ -83,11 +83,12 @@ GitHub-hosted runners, no token/Docker/agent:
                                                     # step cannot fail on a WARN-class rule (e.g.
                                                     # vacuous-gate-assert) — it would print the
                                                     # finding and still exit 0. --min-severity WARN
-                                                    # keeps the advisory INFO class advisory — pair them.
-                                                    # Bare `lint --strict` fails on INFO too, which reds
-                                                    # on scenarios that are perfectly fine. (`lint-skill
-                                                    # --strict` never fails on INFO: same flag name, a
-                                                    # different rule. Do not carry one over to the other.)
+                                                    # keeps the advisory INFO class advisory. From 4.0.0
+                                                    # that is bare `--strict`'s default floor too; on a
+                                                    # 3.x CLI bare `--strict` also fails on INFO, so keep
+                                                    # the pair explicit. `--min-severity INFO` gates on
+                                                    # INFO as well. (`lint-skill --strict` never fails
+                                                    # on INFO and has no floor to widen.)
 - run: cowork-harness verify-cassettes cassettes/    # privacy + staleness — FAILS on a stale recording
                                                     # ALSO fails on a leaked host inventory: recording at
                                                     # protocol/hostloop freezes YOUR machine's MCP servers,
@@ -134,6 +135,7 @@ you have a reason:
     command: lint
     path: scenarios/
     version: "^3"                       # holds the major
+    strict: true                        # without it, only ERROR fails the step
     extra-args: --min-severity WARN     # needs a CLI >= 1.11.0; any 3.x satisfies that
 ```
 

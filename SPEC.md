@@ -703,17 +703,19 @@ identically.** A scenario the **loader** rejects — absent file, unparseable YA
 invalid enum value — exits **`2`**, matching `run` and `replay`. A **pre-spend policy refusal** — a
 scenario no run could satisfy, `on_unanswered: prompt`, the host-inventory destination refusal, a slug
 collision — exits **`1`**. So `2` means it did not load and `1` means it loaded and this record was
-refused, on the preview and the real command alike; `--max-budget-usd` is the one refusal that reports
-`2` (it is a `runtime`-category gate on both paths). That split is what makes `record <file> --dry-run`
+refused, on the preview and the real command alike. The `--max-budget-usd` refusal is one of the `1`s: it
+keeps its `runtime` error category, but since 4.0.0 it exits `1` on both paths (it exited `2` before), so
+no refusal of a scenario that loaded shares `2` with one that did not. `skill` and `run` are unchanged: their
+`--max-budget-usd` refusal still exits `2`. That split is what makes `record <file> --dry-run`
 usable as a "does this still load?" check: a corpus where the destination refusal is routine would
 otherwise report every valid scenario with the same code as a broken one. The scenario is parsed once,
 BEFORE the credential guard, so "does this file load" never depends on holding a token.
 A `record <dir/>` target keeps the same 1-vs-2 meaning at batch scale: a directory whose files all fail
 to load exits `1` (they are broken, not absent), while a directory with no scenarios at all exits `2`.
-Where a `--max-budget-usd` cap could also refuse, the outcome follows from which check can even apply:
-**all** files broken exits `1` (nothing loaded, so there is nothing to spend on and the budget gate never
-runs), while **some** broken alongside a loadable scenario over the cap exits `2` (the budget refusal is
-about the run you were about to pay for). That split is unchanged from earlier releases.
+Where a `--max-budget-usd` cap could also refuse, both outcomes exit `1`: **all** files broken exits `1`
+(nothing loaded, so there is nothing to spend on and the budget gate never runs), and **some** broken
+alongside a loadable scenario over the cap also exits `1`, because the budget refusal is a refusal of a
+scenario that loaded. Before 4.0.0 the second case exited `2`.
 On a `record <dir/>` target only the **path-independent** refusals (prompt policy,
 assert contradiction, duplicate cassette target) join `broken[]` in exiting `1`; the path-DEPENDENT ones
 (host-inventory destination, cassette portability) are advisory `notes[]` that do not affect the exit
@@ -862,7 +864,12 @@ Covered-surface changes follow semver as of `1.0.0` — see [RELEASING.md](./REL
 - **CLI surface** — command names, their accepted flags, and the **per-command** exit codes (§11).
   Exit codes are per-command, not global: `run`/`skill` use `0` pass / `1` assertion-or-agent fail /
   `2` usage / `3` boundary-integrity, with `4` reserved (§11). Removing a command or flag, or changing
-  an exit-code meaning, is breaking.
+  an exit-code meaning, is breaking. A flag's default is part of its meaning. Two 4.0.0 changes were
+  major for these reasons: under `lint --strict` the default `--min-severity` became WARN, so INFO no
+  longer fails or prints unless `--min-severity INFO` is passed; and `record`'s `--max-budget-usd`
+  refusal now exits `1` like its other pre-spend refusals, instead of `2` (§11). `skill`/`run` still
+  exit `2` on that refusal: on `run`/`skill`, a `runtime`-category pre-spend refusal also exits `2`,
+  alongside usage errors.
 - **Scenario & session schemas** — `schema/scenario.schema.json`, `schema/session.schema.json` (the
   authored-input contract). Tightening validation on a previously-valid document is breaking.
 - **Baseline JSON shape** — the `baselines/desktop-*.json` field structure (CI's committed source of

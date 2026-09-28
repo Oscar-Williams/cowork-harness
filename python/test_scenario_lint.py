@@ -532,11 +532,48 @@ def test_strict_with_min_severity_error_is_not_a_contradiction(tmp_path):
     "0 findings" and still exit 1 — indistinguishable from a bug. The filter runs before BOTH the
     render and the exit computation, so the two agree.
     """
-    strict_only, _ = _lint_cli(tmp_path, "--strict")
-    assert strict_only == 1  # an INFO exists at the default floor, so --strict fails
+    strict_info, _ = _lint_cli(tmp_path, "--strict", "--min-severity", "INFO")
+    assert strict_info == 1  # an INFO exists at an explicit INFO floor, so --strict fails
     filtered, out = _lint_cli(tmp_path, "--strict", "--min-severity", "ERROR")
     assert filtered == 0
     assert "manifest-needs-snapshot" not in out
+
+
+# --- lint --strict defaults its floor to WARN (4.0.0) -----------------------------------------------
+# `--strict` without `--min-severity` fails only on ERROR and WARN and hides INFO, matching
+# `lint-skill --strict`, which never failed on INFO. An explicit `--min-severity` always wins, so
+# `--strict --min-severity INFO` keeps the old gate.
+def test_strict_default_floor_is_warn_info_only_scenario_passes(tmp_path):
+    code, out = _lint_cli(tmp_path, "--strict")
+    assert code == 0
+    assert "manifest-needs-snapshot" not in out
+
+
+def test_strict_default_floor_json_hides_info(tmp_path):
+    code, out = _lint_cli(tmp_path, "--strict", "--json")
+    assert code == 0
+    assert json.loads(out) == []
+
+
+def test_strict_with_explicit_info_floor_keeps_the_old_gate(tmp_path):
+    code, out = _lint_cli(tmp_path, "--strict", "--min-severity", "INFO")
+    assert code == 1
+    assert "manifest-needs-snapshot" in out
+
+
+def test_strict_default_floor_still_fails_on_warn(tmp_path):
+    # the WARN half of the new default: a WARN still fails `--strict` with no `--min-severity`.
+    code, out = _lint_cli(tmp_path, "--strict", body="assert:\n  - gate_answers_delivered: true\n")
+    assert code == 1
+    assert "vacuous-gate-assert" in out
+    assert "gate-needs-controlout" not in out  # the INFO beside it is hidden
+
+
+def test_plain_lint_default_floor_is_still_info(tmp_path):
+    # without --strict the default floor stays INFO: INFO is printed, exit 0.
+    code, out = _lint_cli(tmp_path)
+    assert code == 0
+    assert "manifest-needs-snapshot" in out
 
 
 def test_min_severity_filters_json_identically(tmp_path):

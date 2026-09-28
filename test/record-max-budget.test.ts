@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve, join } from "node:path";
 import { batchBudgetTracker } from "../src/run/budget.js";
@@ -253,5 +253,105 @@ describe("batchBudgetTracker — the running total", () => {
     const clean = batchBudgetTracker(0.1, true);
     clean.add(0.01);
     expect(clean.summary(3, 10)).toBeUndefined(); // cap never reached
+  });
+});
+
+// The budget refusal's EXIT CODE on `record` (4.0.0): `1`, like every other pre-spend refusal of a
+// scenario that loaded, so `2` always means "did not load". `skill` and `run` keep `2`. A placeholder
+// credential lets the REAL path reach the gate (the auth guard sits above it); nothing spawns, since the
+// gate refuses first and the unit lane's spawn guard would refuse anything that got past it.
+describe.skipIf(!can)("record --max-budget-usd — a refusal exits 1, not 2", () => {
+  const PLACEHOLDER = { ANTHROPIC_API_KEY: "placeholder-not-used-no-spawn-in-this-suite" };
+  function cliWith(args: string[], root: string, cwd: string) {
+    const r = spawnSync("node", [CLI, ...args], {
+      encoding: "utf8",
+      env: { ...process.env, COWORK_HARNESS_RUNS_DIR: root, ...PLACEHOLDER },
+      cwd,
+    });
+    return { code: r.status, all: (r.stdout ?? "") + (r.stderr ?? "") };
+  }
+
+  it("single scenario, preview and real path: exit 1", () => {
+    const root = tmpRoot();
+    const work = tmpWork();
+    seedRun(root, "pricey", "local_1", 0.5);
+    cli(["stats", "--reindex"], root);
+    writeFileSync(join(work, "pricey.yaml"), scenarioYaml("pricey"));
+    const f = join(work, "pricey.yaml");
+    for (const extra of [["--dry-run"], ["--out", join(work, "p.cassette.json")]]) {
+      const r = cliWith(["record", f, "--max-budget-usd", "0.0001", ...extra], root, work);
+      expect(r.all, extra.join(" ")).toMatch(/refused before spending/);
+      expect(r.code, extra.join(" ")).toBe(1);
+    }
+  });
+
+  it("json mode: the refusal envelope is ok:false and the exit is 1", () => {
+    const root = tmpRoot();
+    const work = tmpWork();
+    seedRun(root, "pricey", "local_1", 0.5);
+    cli(["stats", "--reindex"], root);
+    writeFileSync(join(work, "pricey.yaml"), scenarioYaml("pricey"));
+    const r = cliWith(
+      ["record", join(work, "pricey.yaml"), "--max-budget-usd", "0.0001", "--dry-run", "--output-format", "json"],
+      root,
+      work,
+    );
+    expect(r.code).toBe(1);
+    const env = JSON.parse(r.all.split("\n").find((l) => l.startsWith("{"))!);
+    expect(env.ok).toBe(false);
+    expect(env.error.message).toMatch(/refused before spending/);
+  });
+
+  it("a batch with broken files beside a loadable scenario over the cap: exit 1, and the budget gate is what refused", () => {
+    const root = tmpRoot();
+    const work = tmpWork();
+    seedRun(root, "pricey", "local_1", 0.5);
+    cli(["stats", "--reindex"], root);
+    writeFileSync(join(work, "pricey.yaml"), scenarioYaml("pricey"));
+    writeFileSync(join(work, "broken.yaml"), scenarioYaml("broken").replace("assert:", "assert:\n  - not_a_real_key: true"));
+    for (const extra of [["--dry-run"], []]) {
+      const r = cliWith(["record", work, "--max-budget-usd", "0.0001", ...extra], root, work);
+      expect(r.all, extra.join(" ") || "real").toMatch(/refused before spending/);
+      expect(r.code, extra.join(" ") || "real").toBe(1);
+    }
+  });
+
+  it("`skill --max-budget-usd` is unchanged: its refusal still exits 2", () => {
+    const root = tmpRoot();
+    const work = tmpWork();
+    const skillDir = join(work, "pricey-skill");
+    mkdirSync(skillDir);
+    writeFileSync(join(skillDir, "SKILL.md"), "---\nname: pricey-skill\ndescription: test skill\n---\nDo the thing.\n");
+    // `skill` names its run `skill-<folder basename>`, so that is the history the gate reads.
+    seedRun(root, "skill-pricey-skill", "local_1", 0.5);
+    cli(["stats", "--reindex"], root);
+    const r = cliWith(["skill", skillDir, "do the thing", "--max-budget-usd", "0.0001"], root, work);
+    expect(r.all).toMatch(/refused before spending/);
+    expect(r.code).toBe(2);
+  });
+
+  it("`run --max-budget-usd` is unchanged: its refusal still exits 2", () => {
+    const root = tmpRoot();
+    const work = tmpWork();
+    seedRun(root, "pricey", "local_1", 0.5);
+    cli(["stats", "--reindex"], root);
+    writeFileSync(join(work, "pricey.yaml"), scenarioYaml("pricey"));
+    const r = cliWith(["run", join(work, "pricey.yaml"), "--max-budget-usd", "0.0001"], root, work);
+    expect(r.all).toMatch(/refused before spending/);
+    expect(r.code).toBe(2);
+  });
+
+  it("`record --rerecord-stale` over the cap: exit 1 (it shares the batch gate)", () => {
+    const root = tmpRoot();
+    const work = tmpWork();
+    // A committed cassette made stale by baseline drift: a free way to put one in the re-record set.
+    const cassette = JSON.parse(readFileSync(resolve("examples/replays/example-multiselect-gate.cassette.json"), "utf8"));
+    cassette.fingerprint.baseline = "desktop-0.0.1";
+    writeFileSync(join(work, "s.cassette.json"), JSON.stringify(cassette));
+    seedRun(root, cassette.scenario.name, "local_1", 0.5);
+    cli(["stats", "--reindex"], root);
+    const r = cliWith(["record", work, "--rerecord-stale", "--max-budget-usd", "0.0001"], root, work);
+    expect(r.all, "the budget gate must be what refused").toMatch(/refused before spending/);
+    expect(r.code).toBe(1);
   });
 });
