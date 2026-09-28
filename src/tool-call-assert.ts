@@ -16,7 +16,7 @@
 import type { AssertContext } from "./assert.js";
 import type { ToolCalledObject, ToolNotCalledObject, ToolCallRecord } from "./types.js";
 import { compileUserRegex } from "./regex.js";
-import { REDACTION_TOKEN_MARK, regexNamesRedactableLiteral } from "./redactable-literal.js";
+import { REDACTION_TOKEN_RE, hasRedactionToken, regexNamesRedactableLiteral } from "./redactable-literal.js";
 
 type KeyResult = { pass: true; evidence?: string } | { pass: false; message: string };
 type Status = "yes" | "no" | "unknown";
@@ -69,13 +69,12 @@ const all = (xs: Status[]): Status => (xs.includes("no") ? "no" : xs.includes("u
  *  the red say "could not look" instead of "not called". */
 function missIsUnknown(text: string, truncated: boolean | undefined, source: string, negativeDirection: boolean): boolean {
   if (truncated === true) return true;
-  if (!text.includes(REDACTION_TOKEN_MARK)) return false;
+  if (!hasRedactionToken(text)) return false;
   return negativeDirection || regexNamesRedactableLiteral(source);
 }
 
 /** A passing evidence line never quotes a redaction token: it would present rewritten bytes as though
  *  they were what the check saw. */
-const REDACTION_TOKEN_RE = /\[REDACTED:[^\]]*\]/g;
 const scrubTokens = (s: string): string => s.replace(REDACTION_TOKEN_RE, "(redacted)");
 
 export function checkToolCallObject(
@@ -94,7 +93,7 @@ export function checkToolCallObject(
   // A frozen regex that record-time redaction rewrote (a `[REDACTED:…]` token spliced into the source —
   // which is now a character class) no longer says what the author wrote. Both directions are unknowable.
   const sources = toolCallObjectRegexes(o);
-  const redactedSrc = sources.find((s) => s.source.includes(REDACTION_TOKEN_MARK));
+  const redactedSrc = sources.find((s) => hasRedactionToken(s.source));
   if (redactedSrc)
     return fail(
       `evidence unavailable: ${key}.${redactedSrc.where} was rewritten by the cassette's redaction policy ("${redactedSrc.source.slice(0, 120)}") — ` +

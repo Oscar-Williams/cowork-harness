@@ -10,8 +10,16 @@
  * copy of the same shapes; the record-time comparison (`redactedNegativeInputMatches`) is the exact guard.
  */
 
-/** Every redaction token starts with this (`[REDACTED:<label>:<hash>]`, src/redact.ts `token()`). */
-export const REDACTION_TOKEN_MARK = "[REDACTED:";
+/** Every redaction token, in every form the harness writes: the content-redaction policy's
+ *  `[REDACTED:<label>:<hash>]` (src/redact.ts `token()`), and the operator-secret scrubber's colon-less
+ *  `[REDACTED]` plus its whole-field `[REDACTED:base64]` / `[REDACTED:uri]` (src/secrets.ts). The scrubber
+ *  runs over result.json and events.jsonl, so its tokens reach every cassette and every verify-run. */
+export const REDACTION_TOKEN_RE = /\[REDACTED(?::[^\]]*)?\]/g;
+
+/** Does this text carry a redaction token of any form? */
+export function hasRedactionToken(text: string): boolean {
+  return /\[REDACTED(?::|\])/.test(text);
+}
 
 const REDACTABLE_SHAPES: RegExp[] = [
   /\/(?:Users|home|root)\/[^/\s]/,

@@ -101,7 +101,7 @@ import { anyGlobMatches } from "../glob.js";
 import { compileUserRegex } from "../regex.js";
 import { toolNameSpellings } from "./tool-name-canonicalization.js";
 import { toolCallObjectRegexes } from "../tool-call-assert.js";
-import { REDACTION_TOKEN_MARK } from "../redactable-literal.js";
+import { hasRedactionToken } from "../redactable-literal.js";
 import { extractComputerLinks } from "./computer-links.js";
 import { makeRenderer, renderFooter, type RenderPlan } from "./renderer.js";
 import { jsonEnvelope, jsonPayloadEnvelope, fail, isJsonOutput, pkgVersion } from "./envelope.js";
@@ -2472,7 +2472,7 @@ export function redactionRewroteNegativeToolInputs(base: Cassette, redacted: Cas
     const redRegexes = redO && typeof redO === "object" ? toolCallObjectRegexes(redO) : [];
     for (const r of inputRegexes) {
       const redSrc = redRegexes.find((x) => x.where === r.where)?.source;
-      if (redSrc !== undefined && redSrc.includes(REDACTION_TOKEN_MARK) && !r.source.includes(REDACTION_TOKEN_MARK))
+      if (redSrc !== undefined && hasRedactionToken(redSrc) && !hasRedactionToken(r.source))
         findings.push(
           `assert[${i}] tool_not_called.${r.where} "${r.source}" was itself rewritten by the redaction policy — the committed cassette no longer carries the pattern you wrote, so replay reports it evidence-unavailable`,
         );
