@@ -149,7 +149,8 @@ All notable changes to this project are documented here. The format is based on
   `rehash` re-stamps it.
 - **`--label` (`run` / `skill` / `probe-dispatch`) and `record --model` refuse a flag-looking value,**
   as every other value-taking flag already did; `--label --dotenv` no longer takes `--dotenv` as the
-  label. The `=` form stays the escape for a value that starts with `-`.
+  label. As with every other value flag, a negative-number-shaped value (`--label -1`) is still taken as
+  the value; any other value starting with `-` needs the `=` form (`--label=-v2`).
 - **`COWORK_HARNESS_JUDGE_MODEL` and `COWORK_HARNESS_EVALUATOR_MODEL` can now be set from a `.env`**
   (`./.env`, the install `.env` or `--dotenv`). Both were read before any `.env` loaded, so only an
   exported variable took effect.

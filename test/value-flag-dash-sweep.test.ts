@@ -83,3 +83,20 @@ describe.skipIf(!can)("every value-taking flag refuses a flag-looking value", ()
     }
   }
 });
+
+// The refusal is for a FORGOTTEN value, not a dash-leading one: like every other value flag (flagValueStrict's
+// `-\d` carve-out), a spaced negative-number-shaped label is a value. Any other dash-leading label takes `=`.
+describe.skipIf(!can)("--label keeps the CLI's negative-number carve-out", () => {
+  it("skill --label -1 is a label (exit 0), as it was before the guard", () => {
+    const d = mkdtempSync(join(tmpdir(), "dash-sweep-"));
+    const r = cli(["skill", "./plugin", "hi", "--dry-run", "--label", "-1"], d);
+    expect(r.code, r.out).toBe(0);
+  });
+  it("skill --label -v2 is refused as a forgotten value; --label=-v2 is the escape", () => {
+    const d = mkdtempSync(join(tmpdir(), "dash-sweep-"));
+    const spaced = cli(["skill", "./plugin", "hi", "--dry-run", "--label", "-v2"], d);
+    expect(spaced.code).toBe(2);
+    expect(spaced.out).toMatch(/--label/);
+    expect(cli(["skill", "./plugin", "hi", "--dry-run", "--label=-v2"], d).code).toBe(0);
+  });
+});
