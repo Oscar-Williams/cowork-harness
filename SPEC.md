@@ -723,8 +723,9 @@ code, because a dir target takes no `--out` and the preview would be guessing th
 **`verify-cassettes` uses its OWN three-way split, not the `run`/`skill` meanings above:** `0` clean ·
 `1` verification RAN and found a real problem (any PII finding, any staleness finding whose
 `StalenessFinding.class` is NOT `unverifiable-*`, or scenario-prompt drift) · `2` usage · `3`
-verification could NOT complete (any `unverifiable-*`-class staleness finding, a cassette written by a
-newer harness than this one understands, or a per-file read error/crash — including a
+verification could NOT complete (any `unverifiable-*`-class staleness finding, a recorded scenario source
+the loader rejects so the prompt-drift check cannot run, a cassette written by a newer harness than this
+one understands, or a per-file read error/crash — including a
 malformed/unreadable cassette, which is tallied there rather than as a `1` finding). A real finding
 always outranks a could-not-verify signal within the same run, so exit `1` wins if both occur.
 **`rehash` uses its own four-way split:** `0` all migrated (or nothing needed migrating) · **`4` PARTIAL —
@@ -761,7 +762,7 @@ verdict logic a finding doesn't have) — it emits its own, published as
   "results": [ { "file": "string",
                  "findings": [ { "where": "string", "cls": "email|currency|domain|path|machine-inventory|host-inventory|unscanned|binary", "sample": "string" } ],
                  "staleness": [ "string" ],   // GENUINE drift: a StalenessFinding whose class is NOT `unverifiable-*` (gate failure, exit 1)
-                 "unverifiable": [ "string" ],// a StalenessFinding whose class IS `unverifiable-*` — could not verify (exit 3, unless the SAME run also has a `staleness`/`findings`/`scenarioDrift` entry, which wins exit 1)
+                 "unverifiable": [ "string" ],// a StalenessFinding whose class IS `unverifiable-*`, or a `scenario-drift:` entry for a recorded scenario source the loader rejects (e.g. no `fidelity:`) — could not verify (exit 3, unless the SAME run also has a `staleness`/`findings`/`scenarioDrift` entry, which wins exit 1). A YAML syntax break in that source stays a `notes[]` entry
                  "notes": [ "string" ],       // NON-failing informational channel (never affects ok/exit) — e.g. a pre-effectiveFidelity cassette with an explicit tier: statically knowable, nothing baseline-dependent to verify. Text output: a `·`-prefixed row.
                  "version": [ "string" ],     // cassette written by a NEWER harness than this one understands — always a could-not-verify failure (exit 3), independent of --skip-staleness
                  "error?": "string",          // a malformed/unreadable cassette (or a per-file crash) is TALLIED here, never crashes the batch — a could-not-verify failure (exit 3)

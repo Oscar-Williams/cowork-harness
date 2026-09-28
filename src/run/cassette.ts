@@ -5210,13 +5210,15 @@ function recordingShapingDrift(frozen: Scenario, onDisk: Scenario): string[] {
  *  and caught only by the opt-in `--assert-from`. Covers every field in `RECORDING_SHAPING_FIELDS` (prompt,
  *  baseline, fidelity, lane, answers, skills, requires_capabilities — see recordingShapingDrift), each
  *  default-normalized so a `[]`-vs-undefined churn can't false-positive. A resolvable+drifted field from an EXACTLY-recorded
- *  (persisted) source is a DEFINITE divergence → hard fail; a name-resolved match, or an unresolvable/
- *  unparseable source, is "can't compare" → a non-failing note, never a false-red (many valid cassettes ship
- *  without a committed source). */
+ *  (persisted) source is a DEFINITE divergence → hard fail. A persisted source the LOADER rejects (a schema
+ *  violation, e.g. no `fidelity:`) is `unverifiable: true` — the check cannot run until the file is fixed, and
+ *  "cannot verify" is not green. A name-resolved match, an unresolvable source, or a YAML syntax break is
+ *  "can't compare" → a non-failing note, never a false-red (many valid cassettes ship without a committed
+ *  source, and a half-written sibling is a normal mid-edit state). */
 export function scenarioContentDrift(
   cassette: Pick<Cassette, "scenarioSource" | "scenario">,
   cassetteFile: string,
-): { verifiable: true; drifted: string[] } | { verifiable: false; reason?: string } {
+): { verifiable: true; drifted: string[] } | { verifiable: false; reason?: string; unverifiable?: true } {
   try {
     const src = _resolveRerecordSource(cassetteFile, cassette);
     // No on-disk source at all is the NORMAL standalone-cassette case — nothing to compare, and that's
@@ -5226,8 +5228,23 @@ export function scenarioContentDrift(
     try {
       onDisk = parseScenarioFile(src.path);
     } catch (e) {
-      // A source that DOES resolve but won't parse is a genuine "should be checkable but isn't" — worth a
-      // note. Mirror the default replay lane: a mid-edit/invalid on-disk YAML must NEVER abort verify-cassettes.
+      // The loader REJECTED the recorded source (a schema violation — e.g. no `fidelity:`, required since
+      // 4.0.0). The drift check cannot run, and this is not a transient state: until the file is fixed,
+      // an edited-but-not-re-recorded prompt goes undetected on every run of this gate. "Cannot verify" is
+      // not green, so it is `unverifiable` (exit 3) — but only for a PERSISTED source, the one this
+      // cassette really was recorded from. A name-lookup match may be an unrelated file.
+      if (e instanceof UsageError && src.via === "persisted")
+        return {
+          verifiable: false,
+          unverifiable: true,
+          reason:
+            e instanceof FidelityMissingError
+              ? `the recorded scenario source does not load, so prompt drift was not checked: ${fidelityMissingForCassette(e, cassette.scenario)}`
+              : `the recorded scenario source ${src.path} does not load (${compactSchemaError(e.message)}), so prompt drift was not checked — fix the file; \`cowork-harness record ${src.path} --dry-run\` shows the full error`,
+        };
+      // Anything else — a YAML syntax break (the mid-edit case) or a name-lookup source — stays a
+      // non-failing note. Mirror the default replay lane: a mid-edit on-disk YAML must NEVER abort or red
+      // verify-cassettes.
       return {
         verifiable: false,
         // COMPACT, deliberately: this string lands in the `notes[]` array of a schema-covered envelope.
@@ -6057,8 +6074,9 @@ async function computeCassetteMargins(cassette: Cassette, cassetteDir: string, s
  *  staleness check over one cassette or every `*.cassette.json` in a dir (non-recursive). Exit codes are
  *  split by whether verification actually ran: exit 1 = verification RAN and found a real problem (a PII
  *  finding, a genuine `StalenessFinding.class` — one NOT prefixed `unverifiable-` — or scenario-prompt
- *  drift); exit 3 = verification could NOT complete (any `unverifiable-*` staleness class, a cassette
- *  format newer than this harness understands, or a per-file read error/crash). A finding always wins
+ *  drift); exit 3 = verification could NOT complete (any `unverifiable-*` staleness class, a recorded
+ *  scenario source the loader rejects, a cassette format newer than this harness understands, or a
+ *  per-file read error/crash). A finding always wins
  *  over an unverifiable when both occur in the same run. `unscanned` notes are informational. Dedicated
  *  JSON envelope. `--margins` adds a per-count-assert recorded-vs-budget report (a per-cassette replay
  *  cost, single-sample). */
@@ -6403,8 +6421,9 @@ export async function cmdVerifyCassettes(args: string[]) {
     }
     // Scenario-content (prompt) drift: the fingerprint doesn't cover the scenario's own prompt, so an
     // edited-but-not-re-recorded prompt would otherwise pass clean. A resolvable+drifted prompt is a hard
-    // fail (its own bucket, so --skip-staleness can't mask it); an unresolvable/unparseable source is a
-    // non-failing note (can't compare ⇒ not a false-red).
+    // fail (its own bucket, so --skip-staleness can't mask it); a recorded source the loader rejects is
+    // unverifiable (exit 3); an unresolvable source or a YAML syntax break is a non-failing note (can't
+    // compare ⇒ not a false-red).
     const scenarioDrift: string[] = [];
     if (doScenarioDrift) {
       const drift = scenarioContentDrift(rc.cassette, f);
@@ -6413,6 +6432,9 @@ export async function cmdVerifyCassettes(args: string[]) {
           scenarioDrift.push(
             `scenario recording-shaping field(s) [${drift.drifted.join(", ")}] differ from the cassette's frozen copy — the frozen events no longer correspond to this scenario; re-record or \`replay --assert-from\``,
           );
+      } else if (drift.unverifiable && drift.reason) {
+        // The recorded source is rejected by the loader: the drift check could not run ⇒ not green.
+        unverifiable.push(`scenario-drift: ${drift.reason}`);
       } else if (drift.reason) {
         // Only when a resolvable source failed to parse — the common "no committed source" case is silent.
         notes.push(`scenario-drift: ${drift.reason}`);

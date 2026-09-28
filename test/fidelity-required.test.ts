@@ -8,8 +8,10 @@
 //  - a non-scenario YAML (no `prompt:`) is not told to add `fidelity:`;
 //  - `executeScenario` refuses a fidelity-less object from a library caller before any work;
 //  - `run`, `record --dry-run` (single file and directory) and `lint` inherit the refusal;
-//  - replay of an existing cassette is unaffected, and the paths that read the on-disk sibling name the
-//    tier the cassette recorded, not a generic default.
+//  - replay of an existing cassette is unaffected, and each of the three paths that read the on-disk
+//    sibling names the tier the cassette recorded, not a generic default;
+//  - `verify-cassettes` reports a schema-rejected recorded source as UNVERIFIABLE (it can no longer run the
+//    drift check, and "cannot verify" is not green), while a YAML syntax break stays a note.
 //
 // Token-free throughout: nothing spawns an agent.
 import { describe, it, expect } from "vitest";
@@ -223,5 +225,27 @@ describe.skipIf(!can)("replay of an existing cassette with a fidelity-less sibli
     const r = cli(["replay", "c.cassette.json"], d);
     expect(r.code).toBe(0);
     expect(r.all).not.toMatch(/does not load/);
+  });
+
+  it("verify-cassettes reports the recorded source as unverifiable (exit 3), naming the recorded tier", () => {
+    const d = cassetteDir();
+    writeFileSync(join(d, "s.yaml"), SIBLING_NO_TIER);
+    const r = cli(["verify-cassettes", "c.cassette.json", "--output-format", "json"], d);
+    expect(r.code).toBe(3);
+    const env = JSON.parse(r.stdout.trim());
+    expect(env.ok).toBe(false);
+    const res = env.results[0];
+    expect(res.unverifiable.join("\n")).toMatch(/fidelity: hostloop/);
+    expect(res.scenarioDrift, "not a drift: the check could not run").toEqual([]);
+  });
+
+  it("verify-cassettes keeps a YAML syntax break in the source as a non-failing note", () => {
+    const d = cassetteDir();
+    writeFileSync(join(d, "s.yaml"), "prompt: [unterminated\n");
+    const r = cli(["verify-cassettes", "c.cassette.json", "--output-format", "json"], d);
+    const env = JSON.parse(r.stdout.trim());
+    expect(env.results[0].unverifiable).toEqual([]);
+    expect(env.results[0].notes.join("\n")).toMatch(/prompt drift not checked/);
+    expect(r.code).toBe(0);
   });
 });

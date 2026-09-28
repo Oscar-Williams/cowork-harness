@@ -40,6 +40,22 @@ describe("scenarioContentDrift (function-level)", () => {
     expect(r.verifiable).toBe(false);
   });
 
+  it("a persisted source the LOADER rejects → unverifiable, not a note (the check cannot run until it is fixed)", () => {
+    const d = mkdtempSync(join(tmpdir(), "cwh-scd-"));
+    writeFileSync(join(d, "s.yaml"), "prompt: hi\n"); // no `fidelity:` — required since 4.0.0
+    const r = scenarioContentDrift(frozen("hi"), join(d, "x.cassette.json"));
+    expect(r).toEqual({ verifiable: false, unverifiable: true, reason: expect.stringMatching(/fidelity: container/) });
+  });
+
+  it("a NAME-LOOKUP source the loader rejects stays a note — it may be an unrelated same-named file", () => {
+    const d = mkdtempSync(join(tmpdir(), "cwh-scd-"));
+    writeFileSync(join(d, "c.yaml"), "prompt: hi\n");
+    const cassette = { scenarioSource: "gone.yaml", scenario: { name: "c", prompt: "hi" } } as any;
+    const r = scenarioContentDrift(cassette, join(d, "x.cassette.json"));
+    expect(r.verifiable).toBe(false);
+    expect((r as { unverifiable?: true }).unverifiable).toBeUndefined();
+  });
+
   it("a lenient cassette missing scenario.name does NOT throw (would otherwise abort the batch)", () => {
     const d = mkdtempSync(join(tmpdir(), "cwh-scd-"));
     // No scenarioSource and no name → resolution would slug(undefined) and throw; must be caught.
