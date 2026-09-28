@@ -399,9 +399,10 @@ export interface Cassette {
 // v12: the hash-format epoch (jcs1) — see HASH_FORMAT_EPOCH.
 // v13: the object form of `tool_called` / `tool_not_called` (input / scope / paired-result predicates).
 //  A value-aware interpretation floor only (KEY_REQUIRED_VERSION.assert): a cassette whose frozen scenario
-//  uses the object form stamps v13, so a v12 reader refuses it as "too new; upgrade" rather than as an
-//  unrecognized assertion to re-record. Every other scenario still stamps v12. No hashing or shape
-//  change; HASH_FORMAT_EPOCH stays at 12.
+//  uses the object form stamps v13, so a v12 `verify-cassettes` refuses it as "too new; upgrade" rather than
+//  as an unrecognized assertion to re-record. (A v12 `replay` still evaluated before refusing, and crashes on
+//  the object form — the reason replay now refuses a future cassette before evaluating anything.) Every other
+//  scenario still stamps v12. No hashing or shape change; HASH_FORMAT_EPOCH stays at 12.
 export const CASSETTE_VERSION = 13;
 
 /** Minimum cassette format version this build will read. Pre-1.0.0: no legacy-format compatibility is
@@ -462,7 +463,8 @@ export const KEY_REQUIRED_VERSION: Record<string, (v: unknown) => number> = {
   expect_denied: () => 0,
   // The object form of tool_called / tool_not_called (v13) reads inputs, scope and paired results; a v12
   // reader's strict assertion schema rejects it as UNRECOGNIZED and tells the user to re-record, which is
-  // the wrong remedy. Stamping v13 routes it to the future-cassette path ("too new; upgrade") instead.
+  // the wrong remedy. Stamping v13 routes it to the future-cassette path ("too new; upgrade") instead —
+  // on verify-cassettes; a v12 `replay` evaluates before refusing and crashes (see CASSETTE_VERSION).
   // String-form assertions need nothing.
   assert: (v) => (Array.isArray(v) && v.some(usesToolCallObjectForm) ? 13 : 0),
   skills: () => 0,
@@ -7066,6 +7068,21 @@ export async function replayCassette(
     }
   }
 
+  // Refuse BEFORE driving or evaluating anything (after the unknown-key notice above, which is part of
+  // the refusal's explanation). A future cassette is exactly the one that carries assertion shapes this
+  // build cannot evaluate; evaluating first and refusing after is how 3.10.0 crashed on a v13 cassette
+  // instead of saying "too new". Only `--best-effort-future-cassette` goes further.
+  if (futureVersionMsg && !opts.bestEffortFutureCassette) {
+    const assertions: RunResult["assertions"] = [];
+    assertions.push({
+      assertion: {} as Assertion,
+      pass: false,
+      source: "cassette-format",
+      message: `cassette format too new: ${futureVersionMsg} (pass --best-effort-future-cassette to attempt replay anyway)`,
+    });
+    return { ...replayErrorResult(cassette.scenario?.name ?? "(unnamed cassette)"), assertions };
+  }
+
   const session = new CassetteAgentSession(cassette.events, cassette.controlOut);
 
   // cassette→skill/baseline staleness tripwire. Mirrors `asarFingerprint` — warn by default; `--strict`
@@ -7635,15 +7652,8 @@ export async function replayCassette(
           source: "staleness",
         });
 
-    // future cassette version — hard failure under --strict (forward semantics may not be
-    // correctly interpreted here, so a green replay would be a false-green).
-    if (futureVersionMsg && !opts.bestEffortFutureCassette)
-      assertions.push({
-        assertion: {} as Assertion,
-        pass: false,
-        source: "cassette-format",
-        message: `cassette format too new: ${futureVersionMsg} (pass --best-effort-future-cassette to attempt replay anyway)`,
-      });
+    // (A future cassette without --best-effort-future-cassette never reaches here: it is refused at the top,
+    // before anything is evaluated.)
 
     // differing duplicate request_ids in control-out are CONTRADICTORY protocol data — an
     // UNCONDITIONAL cassette-corruption failure (no longer strict-only). --strict stays reserved for
