@@ -225,6 +225,7 @@ describe("TARGET_FILES", () => {
       ".claude/skills/cowork-harness/.claude-plugin/plugin.json",
       ".claude/skills/cowork-harness/SKILL.md",
       // Every references/*.md except ci-recipe.md, sorted — enumerated from the directory.
+      ".claude/skills/cowork-harness/references/assertion-catalog.md",
       ".claude/skills/cowork-harness/references/assertions-guide.md",
       ".claude/skills/cowork-harness/references/authoring.md",
       ".claude/skills/cowork-harness/references/critique.md",

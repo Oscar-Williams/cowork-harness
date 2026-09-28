@@ -275,7 +275,7 @@ Recognize these before "fixing" a non-bug:
   pass or a defect — assert `no_delete_in_outputs` / `transcript_no_host_path` to hard-fail on it instead.
 
 The full 22-code signal table (severity + per-signal opt-out) is in
-[`references/scenario-schema.md`](./scenario-schema.md); [`docs/scenario.md`](https://github.com/yaniv-golan/cowork-harness/blob/main/docs/scenario.md) (repo-only) carries
+[`references/assertion-catalog.md`](./assertion-catalog.md); [`docs/scenario.md`](https://github.com/yaniv-golan/cowork-harness/blob/main/docs/scenario.md) (repo-only) carries
 the fuller narrative.
 
 ### Checking whether a background run is alive

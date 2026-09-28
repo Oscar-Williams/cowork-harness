@@ -8,7 +8,7 @@ import { resolve } from "node:path";
 //      imported from verdict.ts, to avoid an import cycle — see the note above RunResult.verdict)
 //   3. the persisted envelope's enum                — schema/run-result.json    (hand-maintained; NOT
 //      emitted by `npm run schema`)
-//   4. the full signal table                        — the companion skill's scenario-schema reference
+//   4. the full signal table                        — the companion skill's assertion-catalog reference
 //   5. the warn-severity enumeration                — docs/scenario.md
 //
 // Signal codes are a semver-COVERED surface (SPEC.md §12), and a code added to (1) without (2) or (3)
@@ -17,7 +17,7 @@ import { resolve } from "node:path";
 // schema and docs/scenario.md while the skill's "full signal list" kept advertising a set that no longer
 // matched. Same scrape-the-source, token-free pattern as test/docs-index-sync.test.ts.
 
-const SCHEMA_REF = ".claude/skills/cowork-harness/references/scenario-schema.md";
+const SCHEMA_REF = ".claude/skills/cowork-harness/references/assertion-catalog.md";
 
 function read(rel: string): string {
   return readFileSync(resolve(rel), "utf8");

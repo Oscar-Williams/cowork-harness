@@ -1,6 +1,6 @@
 # Assertions guide
 
-Tracks `cowork-harness 3.10.0` (baseline `desktop-2.9939.2`). Read it when choosing assertion keys: the two orthogonal axes and the goal → key map. The full catalog is `scenario-schema.md`.
+Tracks `cowork-harness 3.10.0` (baseline `desktop-2.9939.2`). Read it when choosing assertion keys: the two orthogonal axes and the goal → key map. The full catalog is `assertion-catalog.md`.
 Moved from SKILL.md unchanged except for relative links. A section named in the text lives in the file
 SKILL.md's routing table assigns it; "Part I/II/III" are authoring.md, run-record-replay.md and debugging.md.
 
@@ -13,7 +13,7 @@ Conflating these is the **biggest landmine**. An assertion key has two independe
   not: match prose with `transcript_matches` / `transcript_contains` (stable lexical markers only —
   not semantic content the model paraphrases, which re-records red); check structured JSON with YAML
   `artifact_json` (or the [pytest lane](https://github.com/yaniv-golan/cowork-harness/blob/main/python/README.md) for complex predicates), not via a transcript substring.
-  To check a command that RAN (not one the agent mentioned), use the object form `tool_called: {tool, input: {command: <regex>}, scope?, result?}` — see [scenario-schema.md](./scenario-schema.md).
+  To check a command that RAN (not one the agent mentioned), use the object form `tool_called: {tool, input: {command: <regex>}, scope?, result?}` — see [assertion-catalog.md](./assertion-catalog.md).
 - **Axis B — survives `replay`?** *Independent of Axis A.* On the token-free `replay` lane, only
   **content keys** evaluate; filesystem / egress keys are skipped (live-only) — loudly, via an
   `::warning::` annotation, not a silent no-op. A key
@@ -23,7 +23,8 @@ Getting Axis B wrong means a check that **does nothing in CI** — the harness w
 (an `::warning::` annotation, not a silent no-op — see the Axis B bullet above), and the bundled linter
 catches it before you push — run it (see *Scaffold a valid scenario, then lint before you push* below).
 
-See `references/scenario-schema.md` for the full assertion catalog with each key's replay class.
+See `references/assertion-catalog.md` for the full assertion catalog, and `references/scenario-schema.md`'s
+*Replay class* for which keys survive `replay`.
 
 #### Which assertion for which question (goal → key)
 
