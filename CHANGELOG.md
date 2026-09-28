@@ -82,6 +82,11 @@ All notable changes to this project are documented here. The format is based on
   - *To fix:* set `model:` in the session file, which keeps the model part of the scenario (recommended
     for anything you re-run or compare). Or pass `--model <id>`, or set `COWORK_HARNESS_MODEL` (for
     example in `.env`) as a machine default.
+  - *Sessions with committed cassettes:* a session file's `model:` is part of the session fingerprint, so
+    adding it to a session that cassettes were recorded against makes `verify-cassettes` report them stale
+    (exit 1) until you re-record them. To migrate without re-recording, supply the model with `--model` or
+    `COWORK_HARNESS_MODEL`, which the fingerprint does not include; move it into the session when you
+    next re-record.
   - *Action users:* `command: run` needs a model the same way. Set it in the session, pass the new `model`
     input, or use `extra-args: --model <id>`. A job-level `env: COWORK_HARNESS_MODEL` also works. Pin
     `version: "^3"` to defer the change.

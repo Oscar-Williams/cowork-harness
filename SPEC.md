@@ -517,8 +517,9 @@ the filesystem/egress keys are sourced from on-disk but remain live-only (source
 such an edit). The `session` is **not drift-checked on the replay path**, so a session change between record and
 re-assert does not move the replay verdict — the notice states this; re-record if the session changed.
 It *is* fingerprinted, but only `verify-cassettes` checks that hash (§11.1): `sessionFingerprint`
-covers the session's connected `folders`/`plugins`/`skills`/`mcp`/`egress`/`web_fetch`, plus `projects`
-and `agent_env` when set. `model` is covered by neither, so a model swap is undetected everywhere.
+covers the session's connected `folders`/`plugins`/`skills`/`mcp`/`egress`/`web_fetch` and the `model:` the
+session file pins, plus `projects` and `agent_env` when set. A model supplied by `--model` or
+`COWORK_HARNESS_MODEL` is not in that hash; the cassette's `environment.model` records the model that ran.
 
 **`replay_protocol_fidelity` (O7 guard):** after the run, `replay` re-serializes each decision
 response via `serializeDecision` and compares to the frozen `controlOut` envelope (canonical

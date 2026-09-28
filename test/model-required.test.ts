@@ -277,6 +277,20 @@ describe.skipIf(!can)("record", () => {
     expect(cli(["record", "sc/", "--dry-run", "--model", "claude-sonnet-5"], d).code).toBe(0);
   });
 
+  it("a session that does not load is skipped by the dry-run model check, not refused for a model", () => {
+    // The check opens the session only to read `model:`. A session that is missing on this machine is not
+    // its question to answer (the real record reports it), so neither dry-run arm blames the model for it.
+    const d = work();
+    mkdirSync(join(d, "sc"));
+    const missing = `name: m\nprompt: hi\nfidelity: protocol\nsession: ./no-such-session.yaml\nassert:\n  - result: success\n`;
+    writeFileSync(join(d, "sc", "m.yaml"), missing);
+    const file = cli(["record", "sc/m.yaml", "--dry-run"], d);
+    expect(file.all).not.toMatch(/no model is pinned/);
+    const dir = cli(["record", "sc/", "--dry-run", "--output-format", "json"], d);
+    const doc = JSON.parse(dir.stdout) as { refusals: { file: string; message: string }[] };
+    expect(doc.refusals.filter((x) => /no model is pinned/.test(x.message))).toEqual([]);
+  });
+
   it("record <file> (real) refuses with exit 1 before any run dir, naming the channels", () => {
     const d = work();
     writeFileSync(join(d, "s.yaml"), UNPINNED("s"));
