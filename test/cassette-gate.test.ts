@@ -306,7 +306,14 @@ describe("CI scans every tracked cassette", () => {
     expect(excl, "the documented EXCLUDE pattern vanished from ci.yml").not.toBeNull();
     const excluded = new RegExp(excl![1].replace(/\\\\/g, "\\"));
 
-    const uncovered = tracked().filter((f) => !f.startsWith("examples/replays/") && !excluded.test(f));
+    // Two scanned roots: examples/replays/ (its own directory step) and test/fixtures/ (test-only
+    // recordings that must stay out of the examples directory's replay and re-record cycle), which the
+    // residual sweep above scans one file at a time. Anywhere else is still a finding: a cassette in a new
+    // location is a decision to make here, on purpose, not a path the sweep happens to reach.
+    const SWEPT_ROOTS = ["test/fixtures/"];
+    const uncovered = tracked().filter(
+      (f) => !f.startsWith("examples/replays/") && !excluded.test(f) && !(sweepsResidual && SWEPT_ROOTS.some((r) => f.startsWith(r))),
+    );
     expect(uncovered, `tracked cassette(s) gated by nothing: ${uncovered.join(", ")}`).toEqual([]);
     expect(tracked().length, "the *.cassette.json pathspec stopped matching anything").toBeGreaterThan(0);
   });
