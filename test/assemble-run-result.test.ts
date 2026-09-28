@@ -69,6 +69,7 @@ function fullyExplicitFixture(): CompleteRunResult {
     mcpErrors: undefined,
     hookEvents: undefined,
     fileToolAttempts: undefined,
+    toolCalls: undefined,
     pathDenials: undefined,
     presentedFiles: undefined,
     presentFilesCalls: undefined,

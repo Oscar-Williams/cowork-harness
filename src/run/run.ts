@@ -2,7 +2,7 @@ import { warn } from "../io.js";
 import { isUsageLimit } from "../usage-limit.js";
 import { randomUUID, createHash } from "node:crypto";
 import type { AgentSession, AgentEvent, DecisionRequest, DecisionResponse, QSpec } from "../agent/session.js";
-import type { UsageInfo, CostInfo, RunResult, InfraErrorSource } from "../types.js";
+import type { UsageInfo, CostInfo, RunResult, InfraErrorSource, ToolCallRecord } from "../types.js";
 
 /** A frozen cassette row's `source` is untrusted text — narrow it before it reaches the typed record,
  *  so an unrecognized value falls back to the fatal class rather than silently minting a new severity. */
@@ -60,6 +60,30 @@ const TASK_EVENT_SUBTYPES = new Set([
 export function deniedPathFrom(inp: Record<string, unknown>): string | undefined {
   const vals = ["file_path", "path"].map((k) => inp[k]).filter((v): v is string => typeof v === "string");
   return vals.find(isVmSessionsPath) ?? vals[0];
+}
+
+/** Per-field cap for `RunRecord.toolCalls` inputs — the same 10 KB cap tool-result `assertText` uses. */
+export const TOOL_CALL_INPUT_CAP = 10_240;
+
+/** Top-level input fields of one tool call, each capped at TOOL_CALL_INPUT_CAP with a `truncated` flag.
+ *  A non-string value is matched as its JSON (an Agent `tools` array, a numeric timeout). A non-object
+ *  input yields `{}`: it has no fields, so every `input` regex misses it. */
+export function capToolCallInput(input: unknown): Record<string, { text: string; truncated?: boolean }> {
+  const out: Record<string, { text: string; truncated?: boolean }> = {};
+  if (!input || typeof input !== "object" || Array.isArray(input)) return out;
+  for (const [k, v] of Object.entries(input as Record<string, unknown>)) {
+    let text: string;
+    if (typeof v === "string") text = v;
+    else {
+      try {
+        text = JSON.stringify(v) ?? String(v);
+      } catch {
+        text = String(v);
+      }
+    }
+    out[k] = text.length > TOOL_CALL_INPUT_CAP ? { text: text.slice(0, TOOL_CALL_INPUT_CAP), truncated: true } : { text };
+  }
+  return out;
 }
 
 /** Bound a captured decision input so a large tool payload can't bloat the run record. Objects pass
@@ -507,6 +531,10 @@ export interface RunRecord {
     parentToolUseId?: string;
     toolUseId?: string;
   }>;
+  /** Every non-synthetic tool call, in stream order, with capped top-level inputs and the SAME origin
+   *  classification `fileToolAttempts` uses (one classifier, `this.classifyOrigin`). The evidence the
+   *  object form of tool_called / tool_not_called reads — see RunResult.toolCalls. */
+  toolCalls: ToolCallRecord[];
   /** DECISION-level path-denial telemetry from all THREE producers that can deny a gated file-tool call
    *  on a path grounds: the PreToolUse path gate's own hook decision, a denied `can_use_tool` ask on a
    *  gated file tool with a path, and a pre-ask `permission_denied` stream event correlated (by
@@ -619,6 +647,17 @@ export class Run {
   // its parent is positively confirmed here, so an unrecognized parent stays dropped/sub-agent-attributed
   // exactly as before — fail-safe toward undercount, never toward overcount.
   private forkScopedIds = new Set<string>();
+  /** THE origin classifier — shared by `fileToolAttempts` and `toolCalls` so the two can never disagree.
+   *  `main`: no parent, or a confirmed fork parent (a Skill call, an Agent(fork) dispatch) — the same
+   *  predicate `toolsCalled` counts by. `subagent`: the parent is a dispatch THIS RUN RECORDED; every
+   *  Agent/Task/subagent_type block is recorded regardless of its own parent, so a grandchild resolves
+   *  here too. `unknown`: the parent is not a recorded dispatch — a parented call that arrived before its
+   *  dispatch frame, or a non-dispatch parent (e.g. a Skill invoked inside a sub-agent). It is NOT "depth
+   *  ≥ 2"; bare parent-id presence is never enough to call a call sub-agent work. */
+  private classifyOrigin(parentToolUseId: string | undefined): "main" | "subagent" | "unknown" {
+    if (!parentToolUseId || this.forkScopedIds.has(parentToolUseId)) return "main";
+    return this.rec.subagents.some((s) => s.toolUseId === parentToolUseId) ? "subagent" : "unknown";
+  }
   /** The SESSION root — the directory whose `mnt/` subtree is the user-visible workspace. Supplied by the
    *  caller because the agent's own `cwd` is only the same thing on SOME tiers: in a VM/container the
    *  agent runs at the session root, but at hostloop it runs in the outputs dir, several levels inside
@@ -692,6 +731,7 @@ export class Run {
       mcpErrors: [],
       hookEvents: [],
       fileToolAttempts: [],
+      toolCalls: [],
       pathDenials: [],
       presentedFiles: [],
       presentFilesCalls: 0,
@@ -819,6 +859,17 @@ export class Run {
             // parented falls to the sub-agent branch below (attributed if the parent is a recognized
             // dispatch, dropped otherwise — unchanged from before).
             const isMainAgentFlow = !ev.parentToolUseId || this.forkScopedIds.has(ev.parentToolUseId);
+            const origin = this.classifyOrigin(ev.parentToolUseId);
+            // Every non-synthetic call, with capped inputs — the object form of tool_called reads this.
+            // Synthetic = the MCP round-trip echo of a call that already arrived as a real tool_use block.
+            if (!ev.synthetic)
+              this.rec.toolCalls.push({
+                toolUseId: ev.toolUseId,
+                name: ev.name,
+                input: capToolCallInput(ev.input),
+                origin,
+                parentToolUseId: ev.parentToolUseId,
+              });
             // Attempt-level telemetry for every GATED file tool, recorded OUTSIDE the main/subagent
             // branch below so every gated attempt is captured regardless of attribution. `origin` uses
             // the SAME recognized-dispatch membership check the sub-agent attribution branch uses (see
@@ -833,11 +884,7 @@ export class Run {
                 tool: ev.name,
                 paths, // RAW strings — matcher normalization (if any) lives in the assertion, never here
                 gatePath: paths.file_path ?? paths.path, // first-match order = ["file_path","path"], production's extraction order
-                origin: isMainAgentFlow
-                  ? "main"
-                  : this.rec.subagents.some((s) => s.toolUseId === ev.parentToolUseId)
-                    ? "subagent"
-                    : "unknown",
+                origin,
                 parentToolUseId: ev.parentToolUseId,
                 toolUseId: ev.toolUseId,
               });

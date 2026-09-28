@@ -65,6 +65,22 @@ export function tierVacuousTool(pattern: string, tier: string, webFetchViaApi: b
   return { tool: pattern, tier, instead: table[pattern] ?? null };
 }
 
+/** The object form of `tool_not_called`: vacuous only when EVERY `tool` member is a literal the tier does
+ *  not serve. One served member (`[Bash, mcp__workspace__bash]` — the portable spelling) or any glob keeps
+ *  it satisfiable, so it is never refused. An `input`/`result` predicate cannot rescue a vacuous tool: a
+ *  call that can never happen satisfies no predicate either. Returns the first unserved member's finding
+ *  (for the message) when all are unserved. */
+export function objectFormTierVacuous(
+  value: { tool: string | string[] },
+  tier: string,
+  webFetchViaApi: boolean,
+): TierVacuousFinding | undefined {
+  const tools = Array.isArray(value.tool) ? value.tool : [value.tool];
+  const findings = tools.map((t) => tierVacuousTool(t, tier, webFetchViaApi));
+  if (findings.length === 0 || findings.some((f) => f === undefined)) return undefined;
+  return findings[0];
+}
+
 /** Keys this refusal covers. Both are NEGATIVE tool assertions judged against a set of names the tier
  *  never produces, so both pass vacuously in exactly the same way.
  *

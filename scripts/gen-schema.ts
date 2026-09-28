@@ -35,7 +35,9 @@ function collectEnums(node: unknown, path: string, out: Record<string, string[]>
       // dotted key (a future `assert[].something.result` would shadow `assert.result`). Silently keeping
       // the last one would leave the linter validating one field against another's values while the
       // key-set test still passed — a wrong rule that looks right. Fail the generator instead.
-      if (out[path])
+      // A union's arms contribute no path segment either, so the SAME field can be reached through two
+      // arms — identical values are one field, deduplicated; differing values are a real collision.
+      if (out[path] && JSON.stringify(out[path]) !== JSON.stringify(en))
         throw new Error(`enum path collision in the scenario schema: "${path}" — give one of them a distinct key before regenerating`);
       out[path] = en as string[];
     }
@@ -46,6 +48,12 @@ function collectEnums(node: unknown, path: string, out: Record<string, string[]>
     for (const [k, v] of Object.entries(props)) collectEnums(v, path ? `${path}.${k}` : k, out);
   }
   if (obj.items !== undefined) collectEnums(obj.items, path, out); // array items: same path, no segment
+  // Union arms (`tool_called: <glob> | {…, scope}`): same path, no segment — the author writes the field
+  // under the key, whichever arm they chose.
+  for (const kind of ["anyOf", "oneOf"] as const) {
+    const arms = obj[kind];
+    if (Array.isArray(arms)) for (const arm of arms) collectEnums(arm, path, out);
+  }
 }
 
 /** Every enum-valued field in the scenario schema, keyed by a stable field id: a top-level key

@@ -364,6 +364,8 @@ _EMBEDDED_ENUMS = {
     "assert.path_denied.source": ["pretooluse", "can_use_tool", "permission_denied"],
     "assert.path_denied.agent_scope": ["main", "subagent", "any"],
     "assert.question_options.order": ["exact", "any"],
+    "assert.tool_called.scope": ["main", "subagent", "any"],
+    "assert.tool_not_called.scope": ["main", "subagent", "any"],
     "assert.hook_event_fired": list(_FALLBACK_KNOWN_HOOK_EVENTS_ORDERED),
     "assert.hook_event_blocked": list(_FALLBACK_KNOWN_HOOK_EVENTS_ORDERED),
 }
@@ -595,6 +597,270 @@ def _lint_prompt_slash(doc, path):
     return findings
 
 
+# --- the object form of tool_called / tool_not_called, and transcript_* values shaped like a command ---
+
+# `transcript_*` reads top-level assistant prose ONLY — never a tool_use — so a value shaped like a shell
+# command checks what the agent SAID it ran, not what ran. A command shape is recognised at the START of the
+# value, after a shell operator (`;` `&&` `||` `|` `$(`), or after "ran"/"run"/"then", in three forms:
+#   · a tool verb that never opens English prose (npm, npx, pnpm, yarn, pip, git, curl, wget, docker, uv),
+#     followed by an argument;
+#   · a shell (bash, sh, zsh) followed by any non-version argument (`bash deploy`);
+#   · an interpreter (python3?, node, tsx, deno) followed by a flag or a file/path argument — NOT a bare
+#     word (`node count`) and NOT a version (`python 3.12`, `node v22.1`), which is how prose names them.
+# Plus a script FILENAME anywhere: a lowercase stem + .js/.mjs/.cjs/.ts/.py/.sh (`fetch-lesson.js`) — not a
+# product name (`Node.js`, `Next.js`), not a bare extension (`the .ts files`), not a data file (.json .md).
+# Deliberately NOT verbs: `make` (prose starts "make sure …"), so `make build` stays clean; and `node build`
+# stays clean for the same reason `node count` must.
+_CMD_LEAD = r"(?:^|;|&&|\|\||\||\$\(|\b(?:ran|run|then)\b)\s*"
+_VERSION_ARG = r"v?\d[\d.]*\b"
+_CMD_TOOL = re.compile(_CMD_LEAD + r"(?:npm|npx|pnpm|yarn|pip3?|git|curl|wget|docker|uv)\s+(?!" + _VERSION_ARG + r")[\w./:-]")
+_CMD_SHELL = re.compile(_CMD_LEAD + r"(?:bash|sh|zsh)\s+(?!" + _VERSION_ARG + r")[\w./-]")
+_CMD_INTERP = re.compile(
+    _CMD_LEAD + r"(?:python3?|node|tsx|deno)\s+(?!" + _VERSION_ARG + r")(?:-{1,2}[A-Za-z]|[\w.-]*/|[\w-]+\.\w)"
+)
+_PRODUCT_JS = r"(?:node|next|nuxt|vue|react|express|three|d3|chart|moment|angular|ember|svelte|solid)\.js"
+_SCRIPT_FILE_STEM_LOWER = re.compile(r"(?:^|(?<=[\s/'\"`(=]))[a-z0-9_][\w-]*\.(?:js|mjs|cjs|ts|py|sh)\b")
+
+
+def _command_shaped(lit):
+    if _CMD_TOOL.search(lit) or _CMD_SHELL.search(lit) or _CMD_INTERP.search(lit):
+        return True
+    # a script filename with a lowercase-led stem that is not a product name
+    for m in _SCRIPT_FILE_STEM_LOWER.finditer(lit):
+        if not re.fullmatch(_PRODUCT_JS, m.group(0), re.IGNORECASE):
+            return True
+    return False
+
+
+_TRANSCRIPT_KEYS = ("transcript_matches", "transcript_not_matches", "transcript_contains", "transcript_not_contains")
+
+
+def _lint_transcript_command_shaped(items, path):
+    out = []
+    for key in _TRANSCRIPT_KEYS:
+        for v in _assert_values(items, key):
+            if not isinstance(v, str):
+                continue
+            # Read the regex as prose: a class escape (`\s`, `\d`) becomes a space, and an escaped
+            # punctuation mark (`\.`, or an over-escaped `\\.`) becomes itself — `fetch-lesson\.js\s+129`
+            # reads as `fetch-lesson.js +129`.
+            lit = re.sub(r"\\+([^A-Za-z0-9])", r"\1", re.sub(r"\\+[A-Za-z]", " ", v))
+            if _command_shaped(lit):
+                out.append(
+                    Finding(
+                        "WARN",
+                        "transcript-command-shaped",
+                        f"`{key}: {v!r}` looks like a shell command, but `{key}` reads the agent's top-level "
+                        "PROSE only — never a tool call. It passes when the agent merely SAYS it ran this "
+                        "(a false green), and cannot see the command that actually ran.",
+                        "Assert the call itself: `tool_called: {tool: [Bash, mcp__workspace__bash], input: "
+                        "{command: '<regex>'}}` (and `tool_not_called` for the negative).",
+                        path,
+                    )
+                )
+    return out
+
+
+# Literal shapes the reference redaction policy scrubs (home/temp paths, mount roots, emails). Mirrors
+# src/redactable-literal.ts; used when no policy is found, AND alongside a found policy, because a JS
+# policy (the shipped one uses variable-width lookbehind) often cannot be compiled by Python's `re`.
+_REDACTABLE_SHAPES = [
+    re.compile(r"/(?:Users|home|root)/[^/\s]"),
+    re.compile(r"/private/(?:tmp|var)/"),
+    re.compile(r"/var/folders/"),
+    re.compile(r"/Volumes/[^/\s]"),
+    re.compile(r"/System/Volumes/"),
+    re.compile(r"(?:^|[/\"'\s])-(?:Users|home|root)-[^/\s]"),  # a Claude project slug (-Users-acme-repo)
+    re.compile(r"sk-ant-"),  # an Anthropic key: the operator-secret scrubber rewrites it whole to [REDACTED]
+    re.compile(r"[A-Za-z0-9._%+-]@[A-Za-z0-9.-]+\.[A-Za-z]{2,}"),
+]
+
+
+def _strip_lookbehinds(src):
+    """Drop every `(?<=…)` / `(?<!…)` group, honouring escapes, character classes and nested parens.
+    Python's `re` needs fixed-width lookbehind; the shipped policy's are variable-width. A lookbehind only
+    NARROWS a match, so dropping it makes the pattern match MORE — the safe direction for a warning."""
+    out = []
+    i, n = 0, len(src)
+    while i < n:
+        if src.startswith("(?<=", i) or src.startswith("(?<!", i):
+            depth, j, in_class = 0, i, False
+            while j < n:
+                c = src[j]
+                if c == "\\":
+                    j += 2
+                    continue
+                if in_class:
+                    if c == "]":
+                        in_class = False
+                elif c == "[":
+                    in_class = True
+                elif c == "(":
+                    depth += 1
+                elif c == ")":
+                    depth -= 1
+                    if depth == 0:
+                        break
+                j += 1
+            i = j + 1
+            continue
+        if src[i] == "\\" and i + 1 < n:
+            out.append(src[i : i + 2])
+            i += 2
+            continue
+        out.append(src[i])
+        i += 1
+    return "".join(out)
+
+
+def _compile_js_redaction_pattern(src, flags=""):
+    """Compile a `.cowork-redact.json` (JavaScript) pattern with Python `re`, translating what can be
+    translated: variable-width lookbehinds are dropped (see _strip_lookbehinds), `(?<name>` becomes
+    `(?P<name>`, and the i/s/m flags map across (g/u/y have no Python meaning here). Returns None when the
+    result still does not compile (e.g. a `\\p{…}` property escape) — the caller must say so, not skip it."""
+    py = _strip_lookbehinds(src)
+    py = re.sub(r"\(\?<(?![=!])([A-Za-z_][A-Za-z0-9_]*)>", r"(?P<\1>", py)
+    fl = 0
+    if "i" in flags:
+        fl |= re.IGNORECASE
+    if "s" in flags:
+        fl |= re.DOTALL
+    if "m" in flags:
+        fl |= re.MULTILINE
+    try:
+        return re.compile(py, fl)
+    except re.error:
+        return None
+
+
+def _redaction_policy_patterns(path):
+    """`(compiled, uncheckable)` for `.cowork-redact.json` in cwd and the scenario's own dir, plus
+    COWORK_HARNESS_REDACT_PATTERNS. `record` searches cwd, the scenario dir AND the cassette's dir, so this
+    can miss a policy that sits only next to the cassette; the record-time comparison is the exact guard.
+    JS-only syntax is translated (_compile_js_redaction_pattern); a pattern that still will not compile
+    is returned in `uncheckable`, so the caller can say so instead of silently skipping it."""
+    pats = []
+    bad = []
+    seen = set()
+    for d in (Path.cwd(), Path(path).resolve().parent):
+        f = d / ".cowork-redact.json"
+        if f in seen or not f.is_file():
+            continue
+        seen.add(f)
+        try:
+            cfg = json.loads(f.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        for p in cfg.get("patterns") or []:
+            src = p.get("regex") if isinstance(p, dict) else None
+            if not isinstance(src, str):
+                continue
+            c = _compile_js_redaction_pattern(src, str(p.get("flags", "g")))
+            if c is not None:
+                pats.append(c)
+            else:
+                bad.append(src)
+    # The operator-secret scrubber (src/secrets.ts) rewrites these LITERALLY, everywhere, before any cassette
+    # or verify-run sees the stream: COWORK_HARNESS_SCRUB_VALUES, and the values of the variables named in
+    # COWORK_HARNESS_SCRUB_KEYS. Matched as literals, so a regex naming one (or a prefix of one) is flagged.
+    _csv = lambda v: [x.strip() for x in (v or "").split(",") if x.strip()]  # noqa: E731
+    for lit in _csv(os.environ.get("COWORK_HARNESS_SCRUB_VALUES")) + [
+        os.environ[k] for k in _csv(os.environ.get("COWORK_HARNESS_SCRUB_KEYS")) if os.environ.get(k)
+    ]:
+        # a secret prefix of 6+ chars named in the regex is as good as the secret: match either direction
+        pats.append(re.compile("|".join(re.escape(lit[:n]) for n in range(min(len(lit), 6), len(lit) + 1))))
+    for src in [x.strip() for x in os.environ.get("COWORK_HARNESS_REDACT_PATTERNS", "").split(",") if x.strip()]:
+        c = _compile_js_redaction_pattern(src, "g")
+        if c is not None:
+            pats.append(c)
+        else:
+            bad.append(src)
+    return pats, bad
+
+
+def _lint_tool_call_object_form(items, fidelity, path):
+    out = []
+    policy = None
+    for key in ("tool_called", "tool_not_called"):
+        for v in _assert_values(items, key):
+            if not isinstance(v, dict):
+                continue
+            inp = v.get("input") if isinstance(v.get("input"), dict) else {}
+            regexes = [(f"input.{k}", r) for k, r in inp.items() if isinstance(r, str)]
+            if isinstance(v.get("input_any"), str):
+                regexes.append(("input_any", v["input_any"]))
+            # W: the negative form is the dangerous direction under redaction — the committed cassette's
+            # inputs are rewritten, so a regex naming a rewritten literal finds nothing and PASSES on replay.
+            if key == "tool_not_called" and regexes:
+                if policy is None:
+                    policy, uncheckable = _redaction_policy_patterns(path)
+                    if uncheckable:
+                        out.append(
+                            Finding(
+                                "WARN",
+                                "tool-input-regex-redactable",
+                                f"{len(uncheckable)} redaction policy pattern(s) could not be checked offline "
+                                f"(not compilable by Python even after translation: {uncheckable[0]!r}"
+                                f"{', …' if len(uncheckable) > 1 else ''}), so this scenario's negative "
+                                "tool-input regexes were not checked against them.",
+                                "`record` checks exactly and refuses a cassette whose negative check the "
+                                "policy rewrote; or simplify the pattern to syntax Python also accepts.",
+                                path,
+                            )
+                        )
+                for where, src in regexes:
+                    lit = re.sub(r"\\(.)", r"\1", src)
+                    if any(p.search(lit) for p in _REDACTABLE_SHAPES + policy):
+                        out.append(
+                            Finding(
+                                "WARN",
+                                "tool-input-regex-redactable",
+                                f"`tool_not_called.{where}: {src!r}` names a literal the cassette's redaction "
+                                "policy rewrites. On a committed (redacted) cassette the recorded input no "
+                                "longer carries it, so this negative check cannot see what it looks for — "
+                                "replay reports it evidence-unavailable and `record` refuses the write.",
+                                "Match a part of the input redaction leaves alone (the verb and flags, a "
+                                "workspace-relative path), or keep this check on a live gate.",
+                                path,
+                            )
+                        )
+            # I: `count: {min: 0}` with no max is satisfied by any number of calls, including none.
+            _cnt = v.get("count") if key == "tool_called" else None
+            if isinstance(_cnt, dict) and _numeric(_cnt.get("min")) == 0 and "max" not in _cnt:
+                out.append(
+                    Finding(
+                        "INFO",
+                        "tool-called-always-passes",
+                        "`tool_called` with `count: {min: 0}` and no `max` is satisfied by any number of calls, "
+                        "including none — it asserts nothing.",
+                        "Add a `max` (e.g. `count: {max: 0}` means \"never\"), raise `min`, or drop the assertion.",
+                        path,
+                    )
+                )
+            # I: a literal `Bash` command check at a tier that routes shell through the workspace tool.
+            tools = v.get("tool")
+            tools = [tools] if isinstance(tools, str) else tools
+            if (
+                fidelity in ("hostloop", "cowork")
+                and isinstance(tools, list)
+                and "Bash" in tools
+                and "mcp__workspace__bash" not in tools
+                and "command" in inp
+            ):
+                out.append(
+                    Finding(
+                        "INFO",
+                        "tool-input-shell-tier",
+                        f"`{key}: {{tool: Bash, input: {{command: ...}}}}` on `fidelity: {fidelity}` — the host "
+                        "loop runs shell through `mcp__workspace__bash` (same `command` field), so a literal "
+                        "`Bash` sees no call there.",
+                        "List both shells: `tool: [Bash, mcp__workspace__bash]`.",
+                        path,
+                    )
+                )
+    return out
+
+
 def lint_doc(doc, path, raw_lines):
     findings = []
     if not isinstance(doc, dict):
@@ -722,7 +988,21 @@ def lint_doc(doc, path, raw_lines):
     # BOTH negative tool keys: `subagent_tool_absent` is judged against the tools sub-agents actually
     # USED, not a per-dispatch declared list, so a tool the tier never serves makes it equally vacuous.
     for _key in ("tool_not_called", "subagent_tool_absent"):
-        for _v in _assert_values(items, _key):
+        for _raw in _assert_values(items, _key):
+            # The object form of tool_not_called (`{tool: X | [X, Y], input: ...}`) is vacuous only when
+            # EVERY listed tool is unserved — `[Bash, mcp__workspace__bash]` is the portable spelling. An
+            # input/result predicate cannot rescue a tool the tier never serves. Mirrors
+            # objectFormTierVacuous (src/run/tier-vacuous-tools.ts); the harness refuses these at load.
+            if isinstance(_raw, dict) and _key == "tool_not_called":
+                _tools = _raw.get("tool")
+                _tools = [_tools] if isinstance(_tools, str) else _tools
+                if not isinstance(_tools, list) or not _tools or not all(isinstance(t, str) for t in _tools):
+                    continue
+                if any("*" in t or "?" in t or t not in _TIER_VACUOUS.get(fidelity, {}) for t in _tools):
+                    continue
+                _v = _tools[0]
+            else:
+                _v = _raw
             if not isinstance(_v, str) or "*" in _v or "?" in _v:
                 continue  # a glob is not a literal claim about one tool
             _repl = _TIER_VACUOUS.get(fidelity, {})
@@ -745,6 +1025,8 @@ def lint_doc(doc, path, raw_lines):
             )
 
     # linter stays offline — the message carries the gate fact instead of reading a baseline).
+    findings.extend(_lint_tool_call_object_form(items, fidelity, path))
+    findings.extend(_lint_transcript_command_shaped(items, path))
     if "transcript_no_host_path" in assert_keys:
         if fidelity in ("hostloop", "protocol"):
             findings.append(
@@ -904,6 +1186,12 @@ def lint_doc(doc, path, raw_lines):
                     _f = _enum_finding(f"assert.path_denied.{_key}", _value, path)
                     if _f is not None:
                         findings.append(_f)
+        for _tk in ("tool_called", "tool_not_called"):
+            _tv = _item.get(_tk)
+            if isinstance(_tv, dict) and "scope" in _tv:
+                _f = _enum_finding(f"assert.{_tk}.scope", _tv["scope"], path)
+                if _f is not None:
+                    findings.append(_f)
         _question_options = _item.get("question_options")
         if isinstance(_question_options, dict):
             if "order" in _question_options:
@@ -987,9 +1275,24 @@ def lint_doc(doc, path, raw_lines):
             for item in items:
                 tc = item.get("tool_called")
                 # A GLOB, not a regex (src/types.ts toolGlob) — ask whether THEIR pattern would match the
-                # gate tool under the harness's own matching rules. A non-str value is somebody else's
+                # gate tool under the harness's own matching rules. The object form witnesses a gate the
+                # same way (`{tool: AskUserQuestion}` fails "not called" on zero gates) unless its
+                # `count.min` is 0, which zero gates satisfies. Other value shapes are somebody else's
                 # finding; a glob cannot fail to compile, so there is nothing to guard against here.
-                if isinstance(tc, str) and _tool_glob_matches(tc, "AskUserQuestion"):
+                if isinstance(tc, dict):
+                    _cnt = tc.get("count")
+                    _min = _numeric(_cnt.get("min")) if isinstance(_cnt, dict) and "min" in _cnt else 1.0
+                    _tl = tc.get("tool")
+                    _tl = [_tl] if isinstance(_tl, str) else _tl
+                    if (
+                        _min is not None
+                        and _min >= 1
+                        and isinstance(_tl, list)
+                        and any(isinstance(g, str) and _tool_glob_matches(g, "AskUserQuestion") for g in _tl)
+                    ):
+                        has_companion = True
+                        break
+                elif isinstance(tc, str) and _tool_glob_matches(tc, "AskUserQuestion"):
                     has_companion = True
                     break
         if not has_companion:

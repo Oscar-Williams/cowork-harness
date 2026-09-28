@@ -1236,6 +1236,31 @@
         }
       }
     },
+    "toolCalls": {
+      "type": "array",
+      "description": "Every non-synthetic tool call the run observed, in stream order, with its top-level input fields (each capped at 10 KB, `truncated` when cut; a non-string value as its JSON) and where it ran: `main` = top-level or a fork-scoped parent (Skill / Agent(fork)); `subagent` = the parent is a sub-agent dispatch this run recorded, at any depth; `unknown` = the parent is not a recorded dispatch. Backs the object form of tool_called / tool_not_called. Absent on a result recorded before the field existed — that form then fails evidence-unavailable.",
+      "items": {
+        "type": "object",
+        "required": ["name", "input", "origin"],
+        "properties": {
+          "toolUseId": { "type": "string" },
+          "name": { "type": "string" },
+          "input": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "required": ["text"],
+              "properties": {
+                "text": { "type": "string" },
+                "truncated": { "type": "boolean" }
+              }
+            }
+          },
+          "origin": { "enum": ["main", "subagent", "unknown"] },
+          "parentToolUseId": { "type": "string" }
+        }
+      }
+    },
     "toolResults": {
       "type": "array",
       "description": "Tool-result text at assertion-fidelity cap (10 KB per result). Used by tool_result_contains / tool_result_not_contains. `assertText` is preferred when present; falls back to `text` (500-char display cap) for cassettes recorded before this field was added.",

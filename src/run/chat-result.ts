@@ -141,6 +141,7 @@ export function buildChatResult(record: RunRecord, opts: ChatResultOpts): RunRes
     mcpErrors: record.mcpErrors,
     hookEvents: record.hookEvents,
     fileToolAttempts: record.fileToolAttempts,
+    toolCalls: record.toolCalls,
     pathDenials: record.pathDenials,
     presentedFiles: record.presentedFiles,
     presentFilesCalls: record.presentFilesCalls,

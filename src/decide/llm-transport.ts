@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { assertSpawnAllowed } from "../spawn-guard.js";
 import { warn, envPositiveNumber } from "../io.js";
 import { isUsageLimit } from "../usage-limit.js";
 import type { Complete, CompleteResult } from "./decider.js";
@@ -223,6 +224,7 @@ function spawnOnce(bin: string, prompt: string, model: string, timeoutMs: number
  * the first attempt. Set `COWORK_HARNESS_LLM_RETRIES=0` to disable (e.g. deterministic CI).
  */
 export const claudeCliComplete: Complete = async (prompt, model) => {
+  assertSpawnAllowed("the --decider-llm transport (`claude -p`)");
   const bin = process.env.COWORK_HARNESS_CLAUDE_BIN || "claude";
   // envPositiveNumber warns LOUD (not a silent revert) when the var is SET but unparseable/non-positive
   // (e.g. "5m", "0", "-1") — the old `Number(...) || dflt` idiom swallowed a typo'd knob with no signal.

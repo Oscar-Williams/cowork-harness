@@ -133,7 +133,7 @@ reproduce. See [docs/scenario.md](./scenario.md#how-an-assertion-edit-reaches-ci
 ```jsonc
 {
   "generator": "cowork-harness",          // provenance: the tool that produced this file
-  "cassetteVersion": 12,                  // the MINIMUM format a reader needs for this cassette (see Cassette versioning below) — floored at the hash-format epoch, so cassettes stamp 12. ABSENT reads as 0 and, like anything below the v9 read floor, is refused at load time with a re-record error; a FUTURE version hard-fails unless --best-effort-future-cassette
+  "cassetteVersion": 12,                  // the MINIMUM format a reader needs for this cassette (see Cassette versioning below) — floored at the hash-format epoch, so cassettes stamp 12 (13 when `assert:` uses the object form of tool_called/tool_not_called; a 3.10.0 `replay` crashes on those, so upgrade first). ABSENT reads as 0 and, like anything below the v9 read floor, is refused at load time with a re-record error; a FUTURE version hard-fails unless --best-effort-future-cassette
   "scenarioSource": "scenarios/my-test.yaml", // the authored scenario SOURCE file this was recorded from, relative to the cassette dir (absent for an inline/in-memory scenario)
   "scenario": { /* Scenario object — same schema as the .yaml */ },
   "events": [ /* JSON lines from events.jsonl (child→driver stdout) */ ],
@@ -175,7 +175,11 @@ different algorithm and reports drift that is not there, so the stamp floors at 
 (v12). Above that floor it is *value-aware*: `record` reads a field's actual VALUE rather than its
 presence, so `lane: "local"`/omitted lifts nothing (a pre-`lane` reader already gives exactly the
 local-delivery semantics it asks for) while `lane: "remote"` would. The epoch floor dominates that
-differential today, so cassettes stamp **v12**. A stamped version newer than a given build understands is refused loudly by both `replay` and
+differential for most scenarios, so cassettes stamp **v12**. One value lifts it today: an `assert:` entry
+using the object form of `tool_called` / `tool_not_called` stamps **v13**. A v12 `verify-cassettes` refuses
+that cassette as too new; a v12 `replay` (3.10.0 and earlier) warns the assertion is tolerated and then crashes
+evaluating it (exit 2), so upgrade before replaying one. From v13 on, `replay` refuses a newer-format cassette
+before evaluating any assertion. A stamped version newer than a given build understands is refused loudly by both `replay` and
 `verify-cassettes`. **`replay` alone offers an opt-in override, `--best-effort-future-cassette`;
 `verify-cassettes` does not accept that flag** — a verification gate has no "read it anyway" path, and its
 refusal says to upgrade instead. See [Unknown
@@ -484,8 +488,8 @@ the rules and CI-placement rationale (why each category behaves this way), see
 | `transcript_not_contains` | literal absent from transcript **Sees top-level `assistant_text` only — it excludes every `tool_use`/`tool_result`**, so text the agent emitted only inside a tool call (an `AskUserQuestion` gate question or option, a tool result) can never match at any phrasing; use the gate keys (`question_asked`, `question_context`, `question_options`) or `tool_result_contains` for those. |
 | `transcript_matches` | case-insensitive regex matches transcript **Sees top-level `assistant_text` only — it excludes every `tool_use`/`tool_result`**, so text the agent emitted only inside a tool call (an `AskUserQuestion` gate question or option, a tool result) can never match at any phrasing; use the gate keys (`question_asked`, `question_context`, `question_options`) or `tool_result_contains` for those. |
 | `transcript_not_matches` | regex does not match **Sees top-level `assistant_text` only — it excludes every `tool_use`/`tool_result`**, so text the agent emitted only inside a tool call (an `AskUserQuestion` gate question or option, a tool result) can never match at any phrasing; use the gate keys (`question_asked`, `question_context`, `question_options`) or `tool_result_contains` for those. |
-| `tool_called` | agent invoked the named tool |
-| `tool_not_called` | agent never invoked it |
+| `tool_called` | agent invoked the named tool. The object form (`{tool, input, result, scope, …}`) is re-derived on replay from the frozen `tool_use`/`tool_result` blocks — inputs, scope and pairing alike — and its cassette stamps v13 |
+| `tool_not_called` | agent never invoked it. Object form: as above; a candidate whose recorded input (or paired result) carries a redaction token cannot be ruled out, so replay reports it evidence-unavailable instead of passing |
 | `reference_read` | a skill `references/`/`scripts/` file matching the regex was accessed (Read/Grep/Glob/Bash) — replay re-derives it from the cassette's frozen tool inputs, same as `tool_called` |
 | `no_observed_reference_access` | no observed access matched the regex — under-approximating by design, so it is not proof of non-use |
 | `tool_result_contains` | literal substring in a tool result |

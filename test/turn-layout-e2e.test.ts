@@ -38,6 +38,11 @@ const CLAUDE_AVAILABLE = ((): boolean => {
   }
 })();
 
+// These drive a REAL host `claude` (the operator's own credentials), so they no longer run just because a
+// `claude` binary is on PATH: that made every local `npm test` a real model call. Opt in with
+// COWORK_HARNESS_ALLOW_HOST_E2E=1. (CI never had `claude`, so CI coverage is unchanged.)
+const RUN_HOST_E2E = CLAUDE_AVAILABLE && process.env.COWORK_HARNESS_ALLOW_HOST_E2E === "1";
+
 // THE GAP THIS CLOSES.
 //
 // Every other test in this feature FABRICATES a run directory and then asserts about it. That is why the
@@ -50,12 +55,19 @@ const CLAUDE_AVAILABLE = ((): boolean => {
 
 let runsRoot: string;
 let prevRunsDir: string | undefined;
+let prevForbid: string | undefined;
 beforeEach(() => {
+  // The one deliberate exception to the unit lane's spawn guard (test/setup/forbid-spawn.ts): these drive
+  // REAL protocol runs of the host `claude` CLI on purpose, gated on RUN_HOST_E2E below.
+  prevForbid = process.env.COWORK_HARNESS_FORBID_SPAWN;
+  process.env.COWORK_HARNESS_FORBID_SPAWN = "0";
   prevRunsDir = process.env.COWORK_HARNESS_RUNS_DIR;
   runsRoot = mkdtempSync(join(tmpdir(), "layout-e2e-"));
   process.env.COWORK_HARNESS_RUNS_DIR = runsRoot;
 });
 afterEach(() => {
+  if (prevForbid === undefined) delete process.env.COWORK_HARNESS_FORBID_SPAWN;
+  else process.env.COWORK_HARNESS_FORBID_SPAWN = prevForbid;
   if (prevRunsDir === undefined) delete process.env.COWORK_HARNESS_RUNS_DIR;
   else process.env.COWORK_HARNESS_RUNS_DIR = prevRunsDir;
   rmSync(runsRoot, { recursive: true, force: true });
@@ -84,7 +96,7 @@ function sourcedProtocolScenario(name: string) {
   return parseScenarioFile(f);
 }
 
-describe.skipIf(!CLAUDE_AVAILABLE)("a REAL run produces the per-turn layout on disk", () => {
+describe.skipIf(!RUN_HOST_E2E)("a REAL run produces the per-turn layout on disk", () => {
   it(
     "writes turns/1/ with the per-turn artifacts, and NO root compat copy",
     async () => {
@@ -131,7 +143,7 @@ describe.skipIf(!CLAUDE_AVAILABLE)("a REAL run produces the per-turn layout on d
   );
 });
 
-describe.skipIf(!CLAUDE_AVAILABLE)("a REAL two-turn resume — the actual path both shipped defects lived in", () => {
+describe.skipIf(!RUN_HOST_E2E)("a REAL two-turn resume — the actual path both shipped defects lived in", () => {
   // Every other test in this suite (and every fabricated-dir test elsewhere) drives at most ONE turn.
   // Both shipped defects — turn 1 unaddressable on a mixed dir, and `currentTurn` going BACKWARDS
   // (2 -> 1) on a resume — are RESUME-path defects, so a single-turn e2e cannot catch either. This drives
@@ -213,7 +225,7 @@ describe("the sampler can actually WRITE where beginTurn puts it", () => {
   });
 });
 
-describe.skipIf(!CLAUDE_AVAILABLE)("resuming a PRE-LAYOUT dir does not destroy the prior turn", () => {
+describe.skipIf(!RUN_HOST_E2E)("resuming a PRE-LAYOUT dir does not destroy the prior turn", () => {
   // The shape every published-1.6.0 run dir has on disk: the four artifacts at the root, no `turns/`.
   // A user upgrading to the per-turn layout and resuming an existing session hits exactly this path.
   //

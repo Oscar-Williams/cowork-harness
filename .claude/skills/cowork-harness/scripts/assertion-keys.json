@@ -256,6 +256,16 @@
       "success",
       "error"
     ],
+    "assert.tool_called.scope": [
+      "main",
+      "subagent",
+      "any"
+    ],
+    "assert.tool_not_called.scope": [
+      "main",
+      "subagent",
+      "any"
+    ],
     "execution": [
       "local",
       "cloud-describe"

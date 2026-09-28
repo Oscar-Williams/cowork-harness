@@ -320,6 +320,77 @@ const toolGlob = z
     message: "tool glob looks like a regex or brace-expansion — only * and ? are special (no .* | [] {})",
   });
 
+/** The fields the STRUCTURED (object) form of `tool_called` / `tool_not_called` shares. The string form
+ *  is a name glob over the main agent's calls and nothing else; this form also reads each call's INPUT,
+ *  WHERE it ran, and its PAIRED result — the only way to assert what a command actually ran, since every
+ *  `transcript_*` key reads top-level prose and never a tool_use. Every regex here is case-insensitive
+ *  and unanchored, like `transcript_matches`. */
+const toolCallObjectFields = {
+  tool: z
+    .union([toolGlob, z.array(toolGlob).min(1, "tool list is empty — it names no tool and matches nothing")])
+    .describe(
+      "tool-name glob, or a LIST of globs (any-of) — same glob and legacy-spelling rules as the string form. List both shells (`[Bash, mcp__workspace__bash]`) for a claim that must hold at every tier: hostloop routes shell through mcp__workspace__bash",
+    ),
+  input: z
+    .record(z.string(), z.string().min(1, "an empty input regex matches every value and passes vacuously"))
+    .optional()
+    .describe(
+      "top-level input field → regex (case-insensitive, unanchored); ALL must match. A missing field is no match; a non-string value is matched against its JSON. Each field is captured up to 10 KB",
+    ),
+  input_any: z
+    .string()
+    .min(1, "an empty input_any regex matches every call and passes vacuously")
+    .optional()
+    .describe("regex (case-insensitive, unanchored) that must match SOME top-level input field (non-strings as JSON)"),
+  result: z
+    .strictObject({
+      matches: z.string().min(1).optional().describe("regex (case-insensitive) the paired result text must match"),
+      not_matches: z.string().min(1).optional().describe("regex (case-insensitive) the paired result text must NOT match"),
+      is_error: z.boolean().optional().describe("the paired result's error flag must equal this"),
+    })
+    .optional()
+    .describe(
+      "predicates on the call's PAIRED tool_result (joined by toolUseId; 10 KB of text). An unpaired call never satisfies them, and a truncated result that cannot settle a predicate is evidence-unavailable, never a pass",
+    ),
+  scope: z
+    .enum(["main", "subagent", "any"])
+    .optional()
+    .describe(
+      "which calls count. `main` (default): the main agent, including a Skill's or Agent(fork)'s children — the set the string form reads. `subagent`: calls whose parent is a sub-agent dispatch this run recorded, at any nesting depth. `any`: every call, including one whose parent is NOT a recorded dispatch (e.g. a Skill invoked inside a sub-agent)",
+    ),
+  subagent_type: z
+    .string()
+    .min(1)
+    .optional()
+    .describe(
+      "with `scope: subagent`: regex over the call's IMMEDIATE parent dispatch — its dispatch type, resolved type, or description (same matching as subagent_dispatch_healthy.type)",
+    ),
+};
+
+const subagentTypeNeedsSubagentScope = (o: { scope?: string; subagent_type?: string }) =>
+  o.subagent_type === undefined || o.scope === "subagent";
+const subagentTypeScopeMessage = { message: "`subagent_type` applies only with `scope: subagent`", path: ["subagent_type"] };
+
+export const ToolCalledObject = z
+  .strictObject({
+    ...toolCallObjectFields,
+    count: z
+      .strictObject({
+        min: z.number().int().nonnegative().optional().describe("minimum satisfying calls (default 1)"),
+        max: z.number().int().nonnegative().optional().describe("maximum satisfying calls"),
+      })
+      .refine((c) => c.min === undefined || c.max === undefined || c.min <= c.max, {
+        message: "count.min is greater than count.max — no number of calls can satisfy it",
+      })
+      .optional()
+      .describe("how many calls must satisfy every predicate; default `{min: 1}`"),
+  })
+  .refine(subagentTypeNeedsSubagentScope, subagentTypeScopeMessage);
+export type ToolCalledObject = z.infer<typeof ToolCalledObject>;
+
+export const ToolNotCalledObject = z.strictObject(toolCallObjectFields).refine(subagentTypeNeedsSubagentScope, subagentTypeScopeMessage);
+export type ToolNotCalledObject = z.infer<typeof ToolNotCalledObject>;
+
 // `cowork-harness assertions --list` (which reads `Assertion.shape[k].description`) — the list can never drift
 // from the schema. Keep descriptions one line.
 export const Assertion = z.strictObject({
@@ -380,15 +451,17 @@ export const Assertion = z.strictObject({
     .describe(
       "a file exists AND is under a user-visible prefix. Write the path workRoot-relative (e.g. `outputs/x.md`), NOT with an `mnt/` prefix: the accepted prefixes are `outputs/`, each connected-folder mount (`<folder>/`), or the legacy `.projects` fallback (pre-1.14271.0). (At fidelity tiers the workRoot is the `mnt/` mount, so the file lands at `mnt/outputs/…` on disk, but the assertion value is the relative form.)",
     ),
-  tool_called: toolGlob
+  tool_called: z
+    .union([toolGlob, ToolCalledObject])
     .optional()
     .describe(
-      "a called tool matched this glob (* = any run, ? = one char; exact when literal; anchored, case-sensitive) — e.g. mcp__workspace__*. Legacy tool spellings the agent binary canonicalizes (Task/Agent, KillShell/TaskStop, ...) match either way",
+      "a called tool matched this glob (* = any run, ? = one char; exact when literal; anchored, case-sensitive) — e.g. mcp__workspace__*. Legacy tool spellings the agent binary canonicalizes (Task/Agent, KillShell/TaskStop, ...) match either way. OBJECT form `{tool, input, input_any, result, scope, subagent_type, count}` asserts what the call carried, where it ran and what its paired result said — use it, not transcript_*, to check a command that RAN",
     ),
-  tool_not_called: toolGlob
+  tool_not_called: z
+    .union([toolGlob, ToolNotCalledObject])
     .optional()
     .describe(
-      "NO called tool matched this glob (* / ?; exact when literal; anchored, case-sensitive; legacy spellings match as in tool_called). A LITERAL naming a tool the tier does not serve (Bash/WebFetch/NotebookEdit at hostloop; mcp__workspace__bash at container/microvm) is refused at load — it could never be violated",
+      "NO called tool matched this glob (* / ?; exact when literal; anchored, case-sensitive; legacy spellings match as in tool_called). A LITERAL naming a tool the tier does not serve (Bash/WebFetch/NotebookEdit at hostloop; mcp__workspace__bash at container/microvm) is refused at load — it could never be violated. OBJECT form (as tool_called, no count): no call satisfies every predicate; an unpaired or truncated candidate is evidence-unavailable. Redaction hazard: a committed cassette's inputs are redacted, so an input regex naming a redactable literal (a home path, an email) cannot be checked on replay — lint warns",
     ),
   reference_read: z
     .string()
@@ -1327,6 +1400,15 @@ export interface OutputsFsDiff {
   findings: string[];
 }
 
+/** One observed tool call — see `RunResult.toolCalls`. */
+export interface ToolCallRecord {
+  toolUseId?: string;
+  name: string;
+  input: Record<string, { text: string; truncated?: boolean }>;
+  origin: "main" | "subagent" | "unknown";
+  parentToolUseId?: string;
+}
+
 export interface RunResult {
   $schema?: string;
   generator?: string;
@@ -1965,7 +2047,24 @@ export interface RunResult {
   /** Tool-result text at assertion-fidelity cap (10 KB per result). Used by `tool_result_contains` /
    *  `tool_result_not_contains`. `assertText` is preferred when present; falls back to `text` (500-char
    *  display cap) for cassettes recorded before this field was added. */
-  toolResults?: { toolUseId?: string; isError: boolean; text: string; assertText?: string }[];
+  toolResults?: {
+    toolUseId?: string;
+    isError: boolean;
+    text: string;
+    assertText?: string;
+    /** `assertText` was cut at the 10 KB cap — a search that misses may have missed past the cut, so the
+     *  object form of tool_called/tool_not_called fails a result predicate it cannot settle closed.
+     *  Absent when not truncated, and on a result recorded before the field was typed. */
+    assertTextTruncated?: boolean;
+  }[];
+  /** Every non-synthetic tool call the run observed, in stream order, with its top-level input fields
+   *  (each capped at 10 KB, `truncated` when cut; a non-string value as its JSON) and WHERE it ran:
+   *  `main` = top-level or a fork-scoped parent (Skill / Agent(fork)) — the set `toolCounts` counts;
+   *  `subagent` = the parent is a dispatch this run recorded (any nesting depth); `unknown` = the parent
+   *  is not a recorded dispatch. Backs the object form of `tool_called` / `tool_not_called`. Undefined on
+   *  a result.json written before the field existed — that form then fails evidence-unavailable. Holds
+   *  the same inputs `events.jsonl` already carries, secret-scrubbed the same way. */
+  toolCalls?: ToolCallRecord[];
   /** true when L0 (protocol) ran with plugins that loaded via --settings/managed config instead of
    *  the operator's REAL config dir, so their installed plugins/skills/auto-memory/MCP servers were visible
    *  to the agent and may have answered instead of the thing under test. computeVerdict fails on this unless

@@ -1449,3 +1449,221 @@ def test_lint_skill_ignores_extra_findings(tmp_path, monkeypatch):
         code = scenario.main(["lint-skill", str(skill)])
     assert code == 0
     assert "scenario-invalid" not in buf.getvalue()
+
+
+# --- the object form of tool_called / tool_not_called, and the transcript_* command-shape rule ------
+
+CMD_RULE = "transcript-command-shaped"
+
+
+@pytest.mark.parametrize(
+    "key,value",
+    [
+        ("transcript_matches", "python3 scripts/x.py 129"),
+        ("transcript_matches", "fetch-lesson\\\\.js\\\\s+129"),  # a script filename, regex-escaped
+        ("transcript_contains", "ran fetch-lesson.js 129"),
+        ("transcript_not_matches", "ok && node build\\\\.mjs"),
+        ("transcript_not_contains", "$(bash deploy)"),
+    ],
+)
+def test_command_shaped_transcript_value_warns(key, value, tmp_path):
+    assert CMD_RULE in _rules(f"assert:\n  - {key}: '{value}'\n", tmp_path)
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "node count",  # bare interpreter word in prose: no operator before it, not at the start with an arg shape
+        "metrics\\\\.json",  # data files are not scripts
+        "the report\\\\.md was written",
+        "config\\\\.yaml",
+        "flagged the blank",
+        "nodes",
+    ],
+)
+def test_prose_transcript_value_is_clean(value, tmp_path):
+    assert CMD_RULE not in _rules(f"assert:\n  - transcript_matches: '{value}'\n", tmp_path)
+
+
+def test_command_shaped_fix_points_at_the_object_form(tmp_path):
+    f = tmp_path / "sc.yaml"
+    f.write_text(
+        "name: t\nbaseline: latest\nsession: (inline)\nfidelity: container\nprompt: hi\n"
+        "assert:\n  - transcript_matches: 'python3 scripts/x.py 129'\n",
+        encoding="utf-8",
+    )
+    [hit] = [x for x in scenario.lint_file(str(f)) if x.rule == CMD_RULE]
+    assert hit.severity == "WARN"
+    assert "tool_called" in hit.fix and "input" in hit.fix
+
+
+RED_RULE = "tool-input-regex-redactable"
+
+
+def test_negative_input_regex_naming_a_home_path_warns(tmp_path):
+    body = "assert:\n  - tool_not_called: { tool: Bash, input: { command: 'rm\\s+-rf\\s+/Users/acme' } }\n"
+    assert RED_RULE in _rules(body, tmp_path)
+
+
+def test_negative_input_any_naming_an_email_warns(tmp_path):
+    body = "assert:\n  - tool_not_called: { tool: '*', input_any: 'alice@example\\.com' }\n"
+    assert RED_RULE in _rules(body, tmp_path)
+
+
+def test_positive_or_clean_negative_is_not_redactable(tmp_path):
+    assert RED_RULE not in _rules("assert:\n  - tool_called: { tool: Bash, input: { command: '/Users/acme' } }\n", tmp_path)
+    assert RED_RULE not in _rules("assert:\n  - tool_not_called: { tool: Bash, input: { command: 'git\\s+push' } }\n", tmp_path)
+
+
+def test_redactable_rule_reads_a_policy_next_to_the_scenario(tmp_path):
+    # A custom policy literal the built-in shapes do not know about.
+    (tmp_path / ".cowork-redact.json").write_text(json.dumps({"patterns": [{"regex": "Acme(?:Corp)?", "label": "customer"}]}))
+    body = "assert:\n  - tool_not_called: { tool: Bash, input: { command: 'deploy AcmeCorp' } }\n"
+    assert RED_RULE in _rules(body, tmp_path)
+
+
+def test_redactable_rule_survives_the_repos_own_policy(tmp_path):
+    # Every pattern in the repo's .cowork-redact.json uses variable-width lookbehind, which Python's `re`
+    # cannot compile. The rule must not crash, and must still fire on a home-path literal.
+    (tmp_path / ".cowork-redact.json").write_text((REPO / ".cowork-redact.json").read_text())
+    body = "assert:\n  - tool_not_called: { tool: Bash, input: { command: 'cat /Users/acme/notes' } }\n"
+    assert RED_RULE in _rules(body, tmp_path)
+
+
+def test_dict_tool_not_called_is_held_to_the_tier_table(tmp_path):
+    assert "tool-not-called-tier-vacuous" in _rules_at("hostloop", "assert:\n  - tool_not_called: { tool: Bash }\n", tmp_path)
+    assert "tool-not-called-tier-vacuous" in _rules_at(
+        "hostloop", "assert:\n  - tool_not_called: { tool: [Bash, WebFetch], input: { command: x } }\n", tmp_path
+    )
+    # one served member keeps it satisfiable
+    assert "tool-not-called-tier-vacuous" not in _rules_at(
+        "hostloop", "assert:\n  - tool_not_called: { tool: [Bash, mcp__workspace__bash] }\n", tmp_path
+    )
+
+
+def test_dict_tool_called_still_arms_the_gate_witness(tmp_path):
+    body = "assert:\n  - gate_answers_delivered: true\n  - tool_called: { tool: AskUserQuestion }\n"
+    assert RULE not in _rules(body, tmp_path)
+    # ...but a floor of zero witnesses nothing
+    body0 = "assert:\n  - gate_answers_delivered: true\n  - tool_called: { tool: AskUserQuestion, count: { min: 0 } }\n"
+    assert RULE in _rules(body0, tmp_path)
+
+
+def test_literal_bash_command_check_at_hostloop_suggests_both_shells(tmp_path):
+    body = "assert:\n  - tool_called: { tool: Bash, input: { command: 'build\\.py' } }\n"
+    assert "tool-input-shell-tier" in _rules_at("hostloop", body, tmp_path)
+    assert "tool-input-shell-tier" in _rules_at("cowork", body, tmp_path)
+    assert "tool-input-shell-tier" not in _rules_at("container", body, tmp_path)
+    listed = "assert:\n  - tool_called: { tool: [Bash, mcp__workspace__bash], input: { command: 'build\\.py' } }\n"
+    assert "tool-input-shell-tier" not in _rules_at("hostloop", listed, tmp_path)
+
+
+# --- the redaction policy, read OFFLINE: JS-only syntax is translated, never silently skipped --------
+
+
+def test_every_pattern_in_the_repos_policy_translates_to_python():
+    pats = json.loads((REPO / ".cowork-redact.json").read_text())["patterns"]
+    compiled = [scenario._compile_js_redaction_pattern(p["regex"], p.get("flags", "")) for p in pats]
+    assert all(c is not None for c in compiled), [p["regex"] for p, c in zip(pats, compiled) if c is None]
+    assert len(compiled) == 18
+
+
+def test_translated_slug_pattern_matches_a_project_slug():
+    pats = json.loads((REPO / ".cowork-redact.json").read_text())["patterns"]
+    slug = scenario._compile_js_redaction_pattern(pats[16]["regex"], pats[16].get("flags", ""))
+    assert slug.search("cat /root/.claude/projects/-Users-acme-secret/x.jsonl")
+
+
+def test_project_slug_literal_in_a_negative_regex_warns(tmp_path):
+    body = "assert:\n  - tool_not_called: { tool: Bash, input: { command: 'projects/-Users-acme' } }\n"
+    assert RED_RULE in _rules(body, tmp_path)
+
+
+def test_an_untranslatable_policy_pattern_warns_instead_of_staying_silent(tmp_path):
+    (tmp_path / ".cowork-redact.json").write_text(json.dumps({"patterns": [{"regex": "\\p{Lu}{3,}Corp", "flags": "gu"}]}))
+    f = tmp_path / "sc.yaml"
+    f.write_text(
+        "name: t\nbaseline: latest\nsession: (inline)\nfidelity: container\nprompt: hi\n"
+        "assert:\n  - tool_not_called: { tool: Bash, input: { command: 'deploy' } }\n",
+        encoding="utf-8",
+    )
+    hits = [x for x in scenario.lint_file(str(f)) if x.rule == RED_RULE]
+    assert len(hits) == 1
+    assert hits[0].severity == "WARN"
+    assert "could not be checked offline" in hits[0].message
+
+
+def test_untranslatable_pattern_is_quiet_without_a_negative_input_regex(tmp_path):
+    (tmp_path / ".cowork-redact.json").write_text(json.dumps({"patterns": [{"regex": "\\p{Lu}{3,}Corp", "flags": "gu"}]}))
+    assert RED_RULE not in _rules("assert:\n  - tool_called: { tool: Bash, input: { command: 'deploy' } }\n", tmp_path)
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "Node\\.js",
+        "uses Next\\.js",
+        "python 3\\.12",
+        "python 3\\.11 or newer",
+        "node v22\\.1 is installed",
+        "the \\.ts files",
+        "make sure the totals match",  # `make` is deliberately NOT a command verb: prose starts with it
+        "node count",
+    ],
+)
+def test_prose_about_tools_is_not_command_shaped(value, tmp_path):
+    assert CMD_RULE not in _rules(f"assert:\n  - transcript_matches: '{value}'\n", tmp_path)
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "npm test",
+        "npx tsc --noEmit",
+        "git push origin main",
+        "pip install requests",
+        "curl https://example\\.com/x",
+        "bash deploy",
+        "ran npm test and it passed; then git push origin main",
+    ],
+)
+def test_tool_invocations_are_command_shaped(value, tmp_path):
+    assert CMD_RULE in _rules(f"assert:\n  - transcript_matches: '{value}'\n", tmp_path)
+
+
+@pytest.mark.parametrize("key", ["tool_called", "tool_not_called"])
+def test_object_form_scope_enum_is_checked_offline(key, tmp_path):
+    # The scope enum lives inside an anyOf arm of the published schema; the generated enum map must reach it.
+    assert "enum-value-invalid" in _rules(f"assert:\n  - {key}: {{ tool: Bash, scope: everywhere }}\n", tmp_path)
+    assert "enum-value-invalid" not in _rules(f"assert:\n  - {key}: {{ tool: Bash, scope: any }}\n", tmp_path)
+
+
+def test_generated_enum_map_reaches_union_arms():
+    enums = json.loads(KEYS_JSON.read_text(encoding="utf-8"))["enums"]
+    assert enums["assert.tool_called.scope"] == ["main", "subagent", "any"]
+    assert enums["assert.tool_not_called.scope"] == ["main", "subagent", "any"]
+
+
+def test_negative_regex_naming_an_anthropic_key_prefix_warns(tmp_path):
+    # The operator-secret scrubber rewrites the whole key to [REDACTED], so `sk-ant-` is never visible offline.
+    body = "assert:\n  - tool_not_called: { tool: Bash, input: { command: 'sk-ant-' } }\n"
+    assert RED_RULE in _rules(body, tmp_path)
+
+
+def test_negative_regex_naming_a_scrub_value_warns(tmp_path, monkeypatch):
+    monkeypatch.setenv("COWORK_HARNESS_SCRUB_VALUES", "hunter2-proxy-pass")
+    body = "assert:\n  - tool_not_called: { tool: Bash, input: { command: 'hunter2-proxy' } }\n"
+    assert RED_RULE in _rules(body, tmp_path)
+
+
+def test_negative_regex_naming_a_scrub_key_value_warns(tmp_path, monkeypatch):
+    monkeypatch.setenv("MY_PROXY_TOKEN", "tok-9f8e7d6c5b")
+    monkeypatch.setenv("COWORK_HARNESS_SCRUB_KEYS", "MY_PROXY_TOKEN")
+    body = "assert:\n  - tool_not_called: { tool: Bash, input: { command: 'tok-9f8e7d' } }\n"
+    assert RED_RULE in _rules(body, tmp_path)
+
+
+def test_count_min_zero_without_max_is_flagged_as_always_passing(tmp_path):
+    body = "assert:\n  - tool_called: { tool: Bash, count: { min: 0 } }\n"
+    assert "tool-called-always-passes" in _rules(body, tmp_path)
+    assert "tool-called-always-passes" not in _rules("assert:\n  - tool_called: { tool: Bash, count: { min: 0, max: 2 } }\n", tmp_path)

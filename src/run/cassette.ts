@@ -22,6 +22,7 @@ import { runsWriteRoot } from "./trace-view.js";
 import { join, dirname, relative, isAbsolute, resolve, sep, extname } from "node:path";
 import {
   type Scenario,
+  type ToolNotCalledObject,
   type RunResult,
   type Assertion,
   type Fingerprint,
@@ -61,6 +62,7 @@ import {
   type RunHooks,
   type RunRecord,
   unionReferenceAccesses,
+  capToolCallInput,
 } from "./run.js";
 import {
   parseMessage,
@@ -86,7 +88,7 @@ import { isVmSessionsPath } from "../vm-paths.js";
 /** Upper bound for `record --concurrency`. Above a handful, concurrent runs exhaust Docker's default address
  *  pool (each run creates two networks) and press model API rate limits — both surface as actionable errors. */
 const MAX_RECORD_CONCURRENCY = 8;
-import { evaluate, budgetFields, HOSTLOOP_ONLY_KEYS, type AssertContext } from "../assert.js";
+import { evaluate, budgetFields, toolResultEvidence, HOSTLOOP_ONLY_KEYS, type AssertContext } from "../assert.js";
 import {
   planMutationsWithStats,
   summarizeMutationPlan,
@@ -96,6 +98,10 @@ import {
   type MutationCoverage,
 } from "./mutate.js";
 import { anyGlobMatches } from "../glob.js";
+import { compileUserRegex } from "../regex.js";
+import { toolNameSpellings } from "./tool-name-canonicalization.js";
+import { toolCallObjectRegexes } from "../tool-call-assert.js";
+import { hasRedactionToken } from "../redactable-literal.js";
 import { extractComputerLinks } from "./computer-links.js";
 import { makeRenderer, renderFooter, type RenderPlan } from "./renderer.js";
 import { jsonEnvelope, jsonPayloadEnvelope, fail, isJsonOutput, pkgVersion } from "./envelope.js";
@@ -390,7 +396,14 @@ export interface Cassette {
 //  The only value that currently needs v11 is `lane: "remote"` (changes replay-verdict semantics a
 //  pre-lane reader doesn't know about); `lane: "local"`/omitted — nearly every existing scenario — still
 //  stamps v10, unchanged. No hashing or manifest-shape change; HASH_FORMAT_EPOCH stays at v8.
-export const CASSETTE_VERSION = 12;
+// v12: the hash-format epoch (jcs1) — see HASH_FORMAT_EPOCH.
+// v13: the object form of `tool_called` / `tool_not_called` (input / scope / paired-result predicates).
+//  A value-aware interpretation floor only (KEY_REQUIRED_VERSION.assert): a cassette whose frozen scenario
+//  uses the object form stamps v13, so a v12 `verify-cassettes` refuses it as "too new; upgrade" rather than
+//  as an unrecognized assertion to re-record. (A v12 `replay` still evaluated before refusing, and crashes on
+//  the object form — the reason replay now refuses a future cassette before evaluating anything.) Every other
+//  scenario still stamps v12. No hashing or shape change; HASH_FORMAT_EPOCH stays at 12.
+export const CASSETTE_VERSION = 13;
 
 /** Minimum cassette format version this build will read. Pre-1.0.0: no legacy-format compatibility is
  *  maintained below this floor — an older cassette must be re-recorded, not silently tolerated. Raising
@@ -448,12 +461,24 @@ export const KEY_REQUIRED_VERSION: Record<string, (v: unknown) => number> = {
   answers: () => 0,
   on_unanswered: () => 0,
   expect_denied: () => 0,
-  assert: () => 0,
+  // The object form of tool_called / tool_not_called (v13) reads inputs, scope and paired results; a v12
+  // reader's strict assertion schema rejects it as UNRECOGNIZED and tells the user to re-record, which is
+  // the wrong remedy. Stamping v13 routes it to the future-cassette path ("too new; upgrade") instead —
+  // on verify-cassettes; a v12 `replay` evaluates before refusing and crashes (see CASSETTE_VERSION).
+  // String-form assertions need nothing.
+  assert: (v) => (Array.isArray(v) && v.some(usesToolCallObjectForm) ? 13 : 0),
   skills: () => 0,
   requires_capabilities: () => 0,
   allow_host_writes: () => 0,
   allow_host_hooks: () => 0,
 };
+
+/** Does this (possibly loose, on-disk) assertion use the v13 object form of tool_called/tool_not_called? */
+function usesToolCallObjectForm(a: unknown): boolean {
+  if (!a || typeof a !== "object") return false;
+  const o = a as Record<string, unknown>;
+  return [o.tool_called, o.tool_not_called].some((v) => v !== null && typeof v === "object");
+}
 
 /** The minimum cassette format version a reader needs to correctly interpret this scenario — what gets
  *  STAMPED at every write site (record, rehash). NOT "which recorder wrote it" (see the CASSETTE_VERSION
@@ -2167,6 +2192,7 @@ function minimalRec(): RunRecord {
     mcpErrors: [],
     hookEvents: [],
     fileToolAttempts: [],
+    toolCalls: [],
     pathDenials: [],
     presentedFiles: [],
     presentFilesCalls: 0,
@@ -2395,6 +2421,150 @@ const NOOP_DECIDER: Decider = {
     return ABSTAIN;
   },
 };
+
+/** Frozen tool_result text by tool_use_id (string or text-block content), for the record-time guard. */
+function frozenToolResults(events: string[]): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const l of Array.isArray(events) ? events : []) {
+    let m: unknown;
+    try {
+      m = JSON.parse(l);
+    } catch {
+      continue;
+    }
+    const content = (m as { message?: { content?: unknown } })?.message?.content;
+    if (!Array.isArray(content)) continue;
+    for (const b of content) {
+      if (!b || typeof b !== "object" || (b as { type?: unknown }).type !== "tool_result") continue;
+      const id = (b as { tool_use_id?: unknown }).tool_use_id;
+      const c = (b as { content?: unknown }).content;
+      const text =
+        typeof c === "string"
+          ? c
+          : Array.isArray(c)
+            ? c.map((x) => (x && typeof x === "object" ? String((x as { text?: unknown }).text ?? "") : "")).join(" ")
+            : "";
+      if (typeof id === "string") out.set(id, text);
+    }
+  }
+  return out;
+}
+
+/** The frozen tool_use blocks of an events stream, in order: `{id, name, input}` per block. */
+function frozenToolUses(
+  events: string[],
+): Array<{ id?: string; name: string; input: Record<string, { text: string; truncated?: boolean }> }> {
+  const out: Array<{ id?: string; name: string; input: Record<string, { text: string; truncated?: boolean }> }> = [];
+  for (const l of Array.isArray(events) ? events : []) {
+    let m: unknown;
+    try {
+      m = JSON.parse(l);
+    } catch {
+      continue;
+    }
+    const content = (m as { message?: { content?: unknown } })?.message?.content;
+    if (!Array.isArray(content)) continue;
+    for (const b of content)
+      if (b && typeof b === "object" && (b as { type?: unknown }).type === "tool_use")
+        out.push({
+          id: typeof (b as { id?: unknown }).id === "string" ? (b as { id: string }).id : undefined,
+          name: String((b as { name?: unknown }).name ?? ""),
+          input: capToolCallInput((b as { input?: unknown }).input),
+        });
+  }
+  return out;
+}
+
+/** RECORD-TIME guard for the negative object form (`tool_not_called: {input | input_any}`): the EXACT
+ *  check, since both copies of the stream exist here. Redaction rewrites the frozen tool inputs, and (when
+ *  its literal is covered) the frozen regex too — so a negative input check that could see its target in
+ *  the live bytes looks at rewritten bytes on replay. The evaluator fails those closed on replay; this
+ *  names the cause at the moment it is created. Reports:
+ *   - a negative input regex the policy itself REWROTE (it is no longer the author's pattern);
+ *   - a negative input regex that matched a tool_use field BEFORE redaction and no longer matches it after.
+ *  `base` and `redacted` are the same cassette before/after `redactCassette`, whose line-for-line mapping
+ *  of `events` is what lets tool_use blocks pair up by position. Positive forms are not reported: they
+ *  fail loudly on replay by themselves. */
+export function redactionRewroteNegativeToolInputs(base: Cassette, redacted: Cassette): string[] {
+  const findings: string[] = [];
+  const baseAsserts = (base.scenario?.assert ?? []) as Array<Record<string, unknown>>;
+  const redAsserts = (redacted.scenario?.assert ?? []) as Array<Record<string, unknown>>;
+  const before = frozenToolUses(base.events);
+  const after = frozenToolUses(redacted.events);
+  baseAsserts.forEach((a, i) => {
+    const v = a?.tool_not_called;
+    if (!v || typeof v !== "object") return;
+    const o = v as ToolNotCalledObject;
+    const redO = redAsserts[i]?.tool_not_called as ToolNotCalledObject | undefined;
+    const inputRegexes = toolCallObjectRegexes(o).filter((r) => r.where.startsWith("input"));
+    const redRegexes = redO && typeof redO === "object" ? toolCallObjectRegexes(redO) : [];
+    for (const r of inputRegexes) {
+      const redSrc = redRegexes.find((x) => x.where === r.where)?.source;
+      if (redSrc !== undefined && hasRedactionToken(redSrc) && !hasRedactionToken(r.source))
+        findings.push(
+          `assert[${i}] tool_not_called.${r.where} "${r.source}" was itself rewritten by the redaction policy — the committed cassette no longer carries the pattern you wrote, so replay reports it evidence-unavailable`,
+        );
+    }
+    const globs = Array.isArray(o.tool) ? o.tool : [o.tool];
+    const named = (n: string) => toolNameSpellings(n).some((sp) => anyGlobMatches(globs, sp));
+    // The COMMON case, which neither rule above catches: redaction put a token into a field (or the paired
+    // result) this check reads, whatever its regex. Replay then reports the check evidence-unavailable (a
+    // tokened miss is unknown), and the verdict-divergence check refuses the write — say why, once per
+    // assertion, with the ways out. (Scope is not applied here: the frozen stream carries no dispatch
+    // classification, so this counts every call of the named tool — the conservative side.)
+    const readFields = (b: (typeof before)[number]) => (o.input_any !== undefined ? Object.keys(b.input) : Object.keys(o.input ?? {}));
+    const afterResults = o.result?.matches !== undefined ? frozenToolResults(redacted.events) : undefined;
+    const beforeResults = afterResults ? frozenToolResults(base.events) : undefined;
+    const tokened = new Map<string, number>();
+    for (let k = 0; k < before.length && k < after.length; k++) {
+      const b = before[k];
+      if (!named(b.name)) continue;
+      for (const f of readFields(b)) {
+        const post = after[k].input[f]?.text;
+        if (post !== undefined && hasRedactionToken(post) && !hasRedactionToken(b.input[f]?.text ?? "")) {
+          const where = `\`${f}\``;
+          tokened.set(where, (tokened.get(where) ?? 0) + 1);
+        }
+      }
+      if (afterResults && b.id !== undefined) {
+        const post = afterResults.get(b.id);
+        if (post !== undefined && hasRedactionToken(post) && !hasRedactionToken(beforeResults!.get(b.id) ?? ""))
+          tokened.set("the paired result", (tokened.get("the paired result") ?? 0) + 1);
+      }
+    }
+    if (tokened.size)
+      findings.push(
+        `assert[${i}] tool_not_called on ${globs.join(" | ")}: ` +
+          [...tokened]
+            .map(
+              ([where, n]) =>
+                `${n} ${globs.join(" | ")} call${n === 1 ? "" : "s"} ${n === 1 ? "carries" : "carry"} a redaction token in ${where}`,
+            )
+            .join("; ") +
+          ` — a field this check reads, so on the committed cassette replay can only report it evidence-unavailable. ` +
+          `Ways out: narrow the check (\`scope:\`, or a \`tool\` list those calls are not in) so no redacted call is a candidate; ` +
+          `use the string form (\`tool_not_called: <tool>\`), which reads no input; or accept that this check is live-only`,
+      );
+    for (let k = 0; k < before.length && k < after.length; k++) {
+      const b = before[k];
+      if (!named(b.name)) continue;
+      for (const r of inputRegexes) {
+        const c = compileUserRegex(r.source);
+        if ("error" in c) continue;
+        const fields = r.where === "input_any" ? Object.keys(b.input) : [r.where.slice("input.".length)];
+        for (const f of fields) {
+          const pre = b.input[f]?.text;
+          const post = after[k].input[f]?.text;
+          if (pre !== undefined && c.re.test(pre) && (post === undefined || !c.re.test(post)))
+            findings.push(
+              `assert[${i}] tool_not_called.${r.where} "${r.source}" matched ${b.name} ${b.id ?? `#${k}`} field \`${f}\` before redaction and no longer matches it after — on the committed cassette this check cannot see what it is looking for`,
+            );
+        }
+      }
+    }
+  });
+  return findings;
+}
 
 /** Apply CONTENT redaction (the opt-in policy) across the WHOLE cassette surface: events/controlOut
  *  protocol lines (structurally — string leaves AND object keys, keeping JSON valid + the question/answer
@@ -2965,20 +3135,20 @@ export function readCassette(path: string): { cassette: Cassette } | { error: st
   if (cassette.fingerprint !== undefined) {
     const fmt = cassette.fingerprint.hashFormat;
     const shown = fmt === undefined ? "(absent)" : `'${fmt}'`;
-    // KNOWN versions only, both directions. A future v13/`jcs2` is NOT judged here — that belongs to the
+    // KNOWN versions only, both directions. A future v14/`jcs2` is NOT judged here — that belongs to the
     // future-cassette policy below, which is the surface that knows how to talk about versions this build
     // does not understand. The check applies to a baseline-only fingerprint too: `hashFormat` is stamped on
     // every buildFingerprint return path, so its absence at the current version is a genuine inconsistency
     // rather than a shape this build ever writes.
-    // Bound to HASH_FORMAT_EPOCH, not CASSETTE_VERSION. They are equal today and will not stay so: the
-    // next SHAPE-only bump moves CASSETTE_VERSION to 13 and leaves the epoch at 12. Keyed on the shape
-    // version, a v12 fingerprint missing `hashFormat` would start loading again, D7's "absent ⇒ legacy"
+    // Bound to HASH_FORMAT_EPOCH, not CASSETTE_VERSION: every KNOWN version from the epoch up (v12, and
+    // v13 — a shape/interpretation-only bump that left the epoch at 12) is written with `jcs1`. Keyed on
+    // the shape version alone, a v12 fingerprint missing `hashFormat` would load, D7's "absent ⇒ legacy"
     // would apply to an epoch-stamped document, and live `jcs1` digests would be compared as though they
     // were the same algorithm. `requiredVersionFor` derives its BASE from the epoch for this same reason.
-    if (recordedVersion === HASH_FORMAT_EPOCH && fmt !== "jcs1") {
+    if (recordedVersion >= HASH_FORMAT_EPOCH && recordedVersion <= CASSETTE_VERSION && fmt !== "jcs1") {
       return {
         error:
-          `cassette is stamped v${recordedVersion} but its fingerprint carries hashFormat ${shown} — a v${HASH_FORMAT_EPOCH} ` +
+          `cassette is stamped v${recordedVersion} but its fingerprint carries hashFormat ${shown} — a v${HASH_FORMAT_EPOCH}+ ` +
           `cassette must record 'jcs1'. The stamp and the digests disagree, so neither can be trusted; re-record`,
       };
     }
@@ -4705,6 +4875,13 @@ async function recordScenarioObject(
   let cassette = base;
   if (policy.patterns.length || policy.keyNames.length) {
     const redacted = redactCassette(base, policy);
+    // BEFORE the divergence check: when a negative tool-input check is hit by redaction, the redacted replay
+    // reports it evidence-unavailable, the verdicts diverge, and the check below refuses the write. This
+    // line is what tells the author WHY.
+    for (const f of redactionRewroteNegativeToolInputs(base, redacted))
+      warn(
+        `::warning:: record: ${f}. Assert on a literal the policy does not rewrite (lint: tool-input-regex-redactable), or keep this check on a live gate.\n`,
+      );
     await assertRedactionVerdictPreserved(base, redacted, dirname(cassettePath));
     cassette = redacted;
   }
@@ -4888,6 +5065,7 @@ function replayErrorResult(file: string): RunResult {
     mcpErrors: undefined, // live-only — this early-bail lane never drives a session
     hookEvents: undefined, // no rec to read from on this early-bail lane
     fileToolAttempts: undefined, // no rec to read from on this early-bail lane
+    toolCalls: undefined, // no rec to read from on this early-bail lane
     pathDenials: undefined, // no rec to read from on this early-bail lane
     presentedFiles: undefined, // no rec to read from on this early-bail lane
     presentFilesCalls: undefined, // ditto
@@ -5278,6 +5456,15 @@ async function writeReassertedAssertBlock(
   // Only manage expect_denied when it's meaningful — avoid gratuitously adding an empty field to a cassette
   // that never had one (keep the diff to what actually changed).
   if (nextExpectDenied.length || scn.expect_denied !== undefined) scn.expect_denied = nextExpectDenied;
+  // A new assert block can need a newer READER (the object form of tool_called → v13): restamp exactly as
+  // record does, or an older CLI meets a v12-stamped cassette carrying v13 semantics and says "re-record"
+  // instead of "too new". Never LOWER the stamp: the rest of the cassette was written for the old one.
+  const raw = rawCassette as { cassetteVersion?: number; $schema?: string };
+  const stamp = Math.max(raw.cassetteVersion ?? 0, requiredVersionFor(rawCassette.scenario));
+  if (stamp !== raw.cassetteVersion) {
+    raw.cassetteVersion = stamp;
+    raw.$schema = cassetteSchemaUrl(stamp);
+  }
   writeFileAtomic(cassetteFile, JSON.stringify(rawCassette, null, 2)); // atomic — no partial cassette on a crash
   warn(`::notice:: [replay --write] ${cassetteFile}: wrote the re-asserted block back to the cassette (events/controlOut unchanged)\n`);
 }
@@ -6384,7 +6571,12 @@ export function cmdRehash(args: string[]): void {
     // mis-read it forever.
     // Same binding as the read boundary, and deliberately NOT gated on `skillHash`: a baseline-only v12
     // fingerprint without `hashFormat` is just as inconsistent, and gating would skip it as "current".
-    if (recordedVersion === HASH_FORMAT_EPOCH && cassette.fingerprint !== undefined && cassette.fingerprint.hashFormat !== "jcs1") {
+    if (
+      recordedVersion >= HASH_FORMAT_EPOCH &&
+      recordedVersion <= CASSETTE_VERSION &&
+      cassette.fingerprint !== undefined &&
+      cassette.fingerprint.hashFormat !== "jcs1"
+    ) {
       results.push({
         file,
         action: "error",
@@ -6951,6 +7143,21 @@ export async function replayCassette(
     }
   }
 
+  // Refuse BEFORE driving or evaluating anything (after the unknown-key notice above, which is part of
+  // the refusal's explanation). A future cassette is exactly the one that carries assertion shapes this
+  // build cannot evaluate; evaluating first and refusing after is how 3.10.0 crashed on a v13 cassette
+  // instead of saying "too new". Only `--best-effort-future-cassette` goes further.
+  if (futureVersionMsg && !opts.bestEffortFutureCassette) {
+    const assertions: RunResult["assertions"] = [];
+    assertions.push({
+      assertion: {} as Assertion,
+      pass: false,
+      source: "cassette-format",
+      message: `cassette format too new: ${futureVersionMsg} (pass --best-effort-future-cassette to attempt replay anyway)`,
+    });
+    return { ...replayErrorResult(cassette.scenario?.name ?? "(unnamed cassette)"), assertions };
+  }
+
   const session = new CassetteAgentSession(cassette.events, cassette.controlOut);
 
   // cassette→skill/baseline staleness tripwire. Mirrors `asarFingerprint` — warn by default; `--strict`
@@ -7318,7 +7525,8 @@ export async function replayCassette(
       toolResultTexts: rec.toolResults.map((r) => r.assertText ?? r.text),
       toolResultsTruncated: rec.toolResults.map((r) => r.assertText === undefined),
       // content-class, same as toolResultTexts above — pairing info for subagent_file_write.
-      toolResults: rec.toolResults.map((r) => ({ toolUseId: r.toolUseId, isError: r.isError })),
+      toolResults: rec.toolResults.map(toolResultEvidence),
+      toolCalls: rec.toolCalls, // content-class: re-derived from the frozen tool_use blocks by the re-drive
       toolErrors: rec.toolErrors,
       redundantToolCalls: rec.redundantToolCalls,
       truncatedPaths: replayTruncatedPaths,
@@ -7519,15 +7727,8 @@ export async function replayCassette(
           source: "staleness",
         });
 
-    // future cassette version — hard failure under --strict (forward semantics may not be
-    // correctly interpreted here, so a green replay would be a false-green).
-    if (futureVersionMsg && !opts.bestEffortFutureCassette)
-      assertions.push({
-        assertion: {} as Assertion,
-        pass: false,
-        source: "cassette-format",
-        message: `cassette format too new: ${futureVersionMsg} (pass --best-effort-future-cassette to attempt replay anyway)`,
-      });
+    // (A future cassette without --best-effort-future-cassette never reaches here: it is refused at the top,
+    // before anything is evaluated.)
 
     // differing duplicate request_ids in control-out are CONTRADICTORY protocol data — an
     // UNCONDITIONAL cassette-corruption failure (no longer strict-only). --strict stays reserved for
@@ -7733,6 +7934,7 @@ export async function replayCassette(
       // Content-class: the tool_use blocks live in the ordinary events stream (not controlOut), so the
       // re-drive reproduces fileToolAttempts automatically — same reasoning as presentedFiles below.
       fileToolAttempts: rec.fileToolAttempts,
+      toolCalls: rec.toolCalls, // content-class too: re-derived from the frozen tool_use blocks
       // reconstructed above (beside replayHookEvents) from cassette.events + controlOut, pairing the
       // pretooluse/can_use_tool sources with their controlOut reply and merging the permission_denied
       // source from the re-drive; undefined when controlOut is absent.

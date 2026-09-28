@@ -880,8 +880,8 @@ Covered-surface changes follow semver as of `1.0.0` — see [RELEASING.md](./REL
   shape (`results:[]` / `error.category`) it falls back to on a thrown failure; renaming or removing a
   key is breaking, adding one is not. The `checks[].id` set itself is NOT covered — it grows with new
   tiers/checks.
-- **Cassette format** — the maximum `cassetteVersion` this build writes/reads is **12**
-  (`schema/cassette.v12.json`) and its verdict-modifier assertion keys.
+- **Cassette format** — the maximum `cassetteVersion` this build writes/reads is **13**
+  (`schema/cassette.v13.json`) and its verdict-modifier assertion keys.
 
   `cassetteVersion` means **the minimum reader for the whole cassette**, which covers how its digests are
   computed as well as which `scenario` keys it uses: a reader older than the cassette's hash format
@@ -894,12 +894,16 @@ Covered-surface changes follow semver as of `1.0.0` — see [RELEASING.md](./REL
   It is not which recorder wrote it: `record` stamps `requiredVersionFor`, the value-aware minimum for that
   scenario, floored at the hash-format epoch. The value-aware part means the stamp reads a field's actual
   VALUE rather than its presence — `lane: "local"`/omitted asks for semantics any older reader already
-  gives, so it lifts nothing, while `lane: "remote"` would. Today the epoch floor dominates, so cassettes
-  stamp **v12**; the differential decides anything above it. The minimum supported read version is **v9**
+  gives, so it lifts nothing, while `lane: "remote"` would. The epoch floor dominates most scenarios, so
+  cassettes stamp **v12**; the differential decides anything above it — today one value does: an `assert`
+  entry using the object form of `tool_called` / `tool_not_called` stamps **v13**. A v12 `verify-cassettes`
+  refuses that cassette as too new; a v12 `replay` (3.10.0 and earlier) warns the assertion is tolerated and
+  then crashes evaluating it, so upgrade before replaying one. From v13 on, `replay` refuses a newer-format
+  cassette before evaluating any assertion. The minimum supported read version is **v9**
   (`MIN_SUPPORTED_CASSETTE_VERSION`): a cassette below the floor is refused at load time with a
   re-record error (a pre-1.0 decision — no compatibility is maintained for formats below v9, and
   their schema files are no longer shipped; the retained schema files are `schema/cassette.v9.json`
-  through `schema/cassette.v12.json`). A cassette whose stamped version exceeds what a given build understands is
+  through `schema/cassette.v13.json`). A cassette whose stamped version exceeds what a given build understands is
   refused loudly by both `replay` and `verify-cassettes`; `replay` alone offers an opt-in override
   (`--best-effort-future-cassette`), which `verify-cassettes` does not accept — a verification gate has no
   "read it anyway" path. `record --rerecord-stale`'s selection and `rehash`'s own version check accept a

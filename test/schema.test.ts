@@ -226,6 +226,9 @@ describe("scenario.py assertion-keys.json is in sync with the zod Assertion sche
         "assert.question_options.order",
         "assert.hook_event_fired",
         "assert.hook_event_blocked",
+        // reached through a union arm (the object form of tool_called / tool_not_called)
+        "assert.tool_called.scope",
+        "assert.tool_not_called.scope",
       ].sort(),
     );
     expect(enums.fidelity).toEqual([...FIDELITY_TIERS]);

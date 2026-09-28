@@ -147,7 +147,7 @@ import {
 } from "./run/matrix.js";
 import { pMapBounded } from "./async-pool.js";
 import { computeVerdict } from "./run/verdict.js";
-import { evaluate, hostMatches, budgetFields, type AssertContext, expandExpectDenied } from "./assert.js";
+import { evaluate, hostMatches, budgetFields, toolResultEvidence, type AssertContext, expandExpectDenied } from "./assert.js";
 import { spawnChannel, fileChannel, streamGates, answerGate, readGate, type DecisionChannel } from "./decide/external-channel.js";
 
 // Synchronous writes (fd 1/2): `process.stdout.write` + `process.exit()` truncates on a PIPE, which
@@ -4338,7 +4338,11 @@ async function cmdVerifyRun(args: string[]) {
     toolResultsTruncated: (result.toolResults ?? []).map((r) => r.assertText === undefined),
     // undefined (not []) when result.toolResults itself is absent — an old/partial result.json,
     // distinct from a genuine empty array — mirrors toolResultsMissing's own undefined-preserving convention.
-    toolResults: result.toolResults?.map((r) => ({ toolUseId: r.toolUseId, isError: r.isError })),
+    toolResults: result.toolResults?.map(toolResultEvidence),
+    // Read, never re-derived: `Run` is the one place that classifies a call's origin. An older result.json
+    // has no field — the object form of tool_called then fails evidence-unavailable (toolCallsMissing).
+    toolCalls: result.toolCalls,
+    toolCallsMissing: result.toolCalls === undefined,
     toolErrors: result.toolErrors,
     transcriptMissing: sidecarTranscript === null,
     questionsMissing: sidecarQuestions === null,

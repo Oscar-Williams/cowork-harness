@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { hashSkillDirs, hashSharedOnly } from "../src/run/skill-hash.js";
-import { buildFingerprint, checkStaleness, CASSETTE_VERSION, type Cassette } from "../src/run/cassette.js";
+import { buildFingerprint, checkStaleness, requiredVersionFor, type Cassette } from "../src/run/cassette.js";
 import { loadBaseline } from "../src/baseline.js";
 
 // Dynamic so a baseline bump keeps the green round-trip stable (checkStaleness compares the record's
@@ -211,6 +211,8 @@ describe("v6 cassette with skillHash mismatch reports older-format message", () 
     } as unknown as Cassette;
     const msgs = checkStaleness(v6Cassette, root);
     // Must say "older hash format" referencing v6 → current, NOT "content changed"
-    expect(msgs.join(" ")).toMatch(new RegExp("hash format v6.*v" + String(CASSETTE_VERSION)));
+    // "now vN" names the HASH-FORMAT EPOCH (the stamp floor), not CASSETTE_VERSION: a shape-only bump
+    // (v13) leaves the epoch at 12.
+    expect(msgs.join(" ")).toMatch(new RegExp("hash format v6.*v" + String(requiredVersionFor({}))));
   });
 });

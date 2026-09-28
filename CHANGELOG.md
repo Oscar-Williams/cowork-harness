@@ -6,6 +6,45 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Upgrade notes
+
+- **`lint` reports two new WARNs.** `transcript-command-shaped` flags a `transcript_*` value that looks
+  like a shell command: it checks what the agent *said*, not what *ran*. `tool-input-regex-redactable`
+  flags a negative tool-input check that a committed (redacted) cassette cannot evaluate. A CI step
+  using `--strict --min-severity WARN` turns red on either.
+- **A cassette whose scenario uses the object form of `tool_called` / `tool_not_called` is stamped v13.**
+  `verify-cassettes` on an older CLI refuses it as too new. `replay` on 3.10.0 or earlier does **not** refuse
+  cleanly: it warns that the object-form assertion is tolerated, then crashes evaluating it (exit 2). Upgrade
+  every CLI that replays these cassettes first. Every other cassette still stamps v12. From this release,
+  `replay` refuses a newer-format cassette before evaluating any assertion, so the next format bump cannot
+  crash it the same way.
+
+### Added
+
+- **Object form of `tool_called` / `tool_not_called`:** `{tool, input, input_any, result, scope,
+  subagent_type, count}`. It asserts what a call carried (top-level input fields, as regexes), where it
+  ran (`main` by default, `subagent` at any depth, or `any`), and what its paired result said.
+  `transcript_*` cannot see any of this. `tool` takes a list, so `[Bash, mcp__workspace__bash]` holds at
+  every tier. It fails closed: an unpaired call, a truncated result or input that cannot settle a
+  predicate, or a result.json without the new evidence reports *evidence unavailable*, never a pass.
+  `{tool: X}` alone behaves exactly like `tool_called: X`. The tier refusal and load-time regex checks
+  cover the new form.
+- **`RunResult.toolCalls`:** every observed tool call with its top-level inputs (each capped at 10 KB,
+  flagged when truncated) and its origin. **`RunResult.toolResults[].assertTextTruncated`** is now part
+  of the typed result shape.
+- **Cassette format v13** (`schema/cassette.v13.json`), stamped only by scenarios that use the object
+  form.
+- **Lint:** `transcript-command-shaped` (WARN), `tool-input-regex-redactable` (WARN), and
+  `tool-input-shell-tier` (INFO: a `Bash` command check at `hostloop`/`cowork` should list both shells).
+  The tier-vacuity and gate-witness lints now read the object form.
+- **`record` warns** when redaction rewrote a negative tool-input regex, the bytes it matched, or any
+  field (or paired result) such a check reads — the common host-path case — and names the ways out:
+  narrow the check with `scope`/`tool`, use the string form, or keep it live-only. It prints the warning
+  before the existing redaction-verdict check refuses the write. This record-time
+  comparison is the exact guard. `lint` resolves the policy differently: it reads `.cowork-redact.json`
+  from the current directory and the scenario's directory only, while `record` also reads the cassette's
+  directory, so a policy that sits only next to the cassette is invisible to `lint`.
+
 ## [3.10.0] — 2026-09-27
 
 ### Upgrade notes

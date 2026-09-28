@@ -50,7 +50,9 @@ import {
 } from "../runtime/image-capabilities.js";
 import { instanceName, VM_WORK_HOST } from "../runtime/lima.js";
 import { ResourceSampler, makeSampleOnce, foldResources, resolveIntervalMs } from "../runtime/resource-sampler.js";
-import { tierVacuousTool, tierVacuousMessage } from "./tier-vacuous-tools.js";
+import { tierVacuousTool, tierVacuousMessage, objectFormTierVacuous } from "./tier-vacuous-tools.js";
+import { toolCallObjectRegexes } from "../tool-call-assert.js";
+import { assertSpawnAllowed } from "../spawn-guard.js";
 import { decideLoopFromBaseline, readGateFlag, readGateNumber, resolveSkillDiscoveryGates } from "../loop-decision.js";
 import { makeWebFetchDedupCache } from "../hostloop/webfetch-dedup.js";
 import type { WebFetchProvenance } from "../hostloop/workspace-handler.js";
@@ -60,6 +62,7 @@ import {
   evaluate,
   hostMatches,
   budgetFields,
+  toolResultEvidence,
   runSemanticJudges,
   type AssertContext,
   type SemanticJudge,
@@ -614,8 +617,12 @@ export async function executeScenario(scenario: Scenario, opts: ExecuteOptions =
     // greening the sub-agent form of the identical claim.
     for (const key of ["tool_not_called", "subagent_tool_absent"] as const) {
       const pattern = a[key];
-      if (typeof pattern !== "string") continue;
-      const finding = tierVacuousTool(pattern, effectiveFidelity, viaApiForVacuity);
+      if (pattern === undefined) continue;
+      // The object form of tool_not_called is refused only when EVERY listed tool is unserved.
+      const finding =
+        typeof pattern === "string"
+          ? tierVacuousTool(pattern, effectiveFidelity, viaApiForVacuity)
+          : objectFormTierVacuous(pattern, effectiveFidelity, viaApiForVacuity);
       if (finding) throw new UsageError(tierVacuousMessage(finding, key, scenario.name));
     }
   }
@@ -825,6 +832,12 @@ export async function executeScenario(scenario: Scenario, opts: ExecuteOptions =
   // Resolved HERE (session is in scope) and threaded into spawnContainer/spawnHostLoop via `opts` below —
   // neither spawn function receives `session` itself.
   const { suggestSkillsEnabled, proactiveSkillSuggestEnabled } = resolveSkillDiscoveryGates(baseline, session.skills);
+
+  // Top of the stage/launch step: everything above is a load-time refusal or pure bookkeeping (the launch
+  // PLAN is computed, not executed); from here down the run probes images, acquires the egress sidecar,
+  // and spawns the agent. The unit lane sets COWORK_HARNESS_FORBID_SPAWN so a scenario a refusal should
+  // have caught fails red instead of launching a real agent.
+  assertSpawnAllowed(`scenario "${scenario.name}"`);
 
   // Pre-flight: if the skill DECLARES required capabilities and the image provably omits one, FAIL FAST here
   // — before any paid agent run — instead of burning ~12 min to reach a verdict the post-run guard already
@@ -1471,7 +1484,9 @@ export async function executeScenario(scenario: Scenario, opts: ExecuteOptions =
       toolResultsTruncated: record.toolResults.map((r) => r.assertText === undefined),
       // Minimal pairing info (toolUseId/isError, no text) for subagent_file_write's causal pairing
       // against fileToolAttempts. Always defined live — an empty array is a real "no tool results" signal.
-      toolResults: record.toolResults.map((r) => ({ toolUseId: r.toolUseId, isError: r.isError })),
+      toolResults: record.toolResults.map(toolResultEvidence),
+      // Every observed call with capped inputs + origin — the object form of tool_called reads it.
+      toolCalls: record.toolCalls,
       toolErrors: record.toolErrors,
       redundantToolCalls: record.redundantToolCalls,
       skillsInvoked: record.skillsInvoked,
@@ -1780,6 +1795,7 @@ export async function executeScenario(scenario: Scenario, opts: ExecuteOptions =
       mcpErrors: record.mcpErrors, // uncollapsed — an empty [] is the real "no MCP errors" signal no_mcp_error needs
       hookEvents: record.hookEvents, // uncollapsed — an empty [] on a no-Task scenario is the real "nothing hook-blocked" signal no_hook_blocked needs
       fileToolAttempts: record.fileToolAttempts, // uncollapsed — content-class, same as toolResults/decisions above
+      toolCalls: record.toolCalls, // uncollapsed — [] is a real "no calls"; undefined only on a result.json that predates it
       pathDenials: record.pathDenials, // uncollapsed — content-class, same as fileToolAttempts above
       presentedFiles: record.presentedFiles, // uncollapsed — an empty [] is the real "nothing presented" signal no_scratchpad_leak's vacuous pass needs
       presentFilesCalls: record.presentFilesCalls,
@@ -1982,6 +1998,8 @@ export function loadScenarioPure(path: string, hooks: { onFidelityDefaulted?: (n
   return scenario;
 }
 
+export { assertSpawnAllowed } from "../spawn-guard.js";
+
 /** Every nested `{ …: <regex> }` leaf in the Assertion schema, derived from zod rather than enumerated.
  *
  *  A leaf qualifies when it is a string field of a nested object whose own `.describe()` says "regex" — the
@@ -2025,6 +2043,13 @@ export function nestedRegexLeaves(a: Assertion): [label: string, pattern: string
     if (holder === undefined || holder === null || typeof holder !== "object") continue;
     const v = (holder as Record<string, unknown>)[child];
     if (typeof v === "string") out.push([`${parent}.${child}`, v]);
+  }
+  // The object form of tool_called / tool_not_called nests regexes up to two levels down (`input.<field>`,
+  // `result.matches`), under author-chosen field names — so it is enumerated by the SAME helper its
+  // evaluator compiles from, never by a table row.
+  for (const key of ["tool_called", "tool_not_called"] as const) {
+    const v = a[key];
+    if (v !== undefined && typeof v === "object") for (const r of toolCallObjectRegexes(v)) out.push([`${key}.${r.where}`, r.source]);
   }
   return out;
 }
@@ -2402,6 +2427,7 @@ export function buildPartialResult(args: {
     mcpErrors: record.mcpErrors, // uncollapsed — an empty [] is the real "no MCP errors" signal no_mcp_error needs
     hookEvents: record.hookEvents, // uncollapsed — an empty [] on a no-Task scenario is the real "nothing hook-blocked" signal no_hook_blocked needs
     fileToolAttempts: record.fileToolAttempts, // uncollapsed — content-class, same as toolResults/decisions above
+    toolCalls: record.toolCalls, // uncollapsed — [] is a real "no calls"; undefined only on a result.json that predates it
     pathDenials: record.pathDenials, // uncollapsed — content-class, same as fileToolAttempts above
     presentedFiles: record.presentedFiles, // uncollapsed — an empty [] is the real "nothing presented" signal no_scratchpad_leak's vacuous pass needs
     presentFilesCalls: record.presentFilesCalls,
