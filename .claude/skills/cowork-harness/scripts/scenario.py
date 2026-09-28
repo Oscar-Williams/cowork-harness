@@ -364,6 +364,8 @@ _EMBEDDED_ENUMS = {
     "assert.path_denied.source": ["pretooluse", "can_use_tool", "permission_denied"],
     "assert.path_denied.agent_scope": ["main", "subagent", "any"],
     "assert.question_options.order": ["exact", "any"],
+    "assert.tool_called.scope": ["main", "subagent", "any"],
+    "assert.tool_not_called.scope": ["main", "subagent", "any"],
     "assert.hook_event_fired": list(_FALLBACK_KNOWN_HOOK_EVENTS_ORDERED),
     "assert.hook_event_blocked": list(_FALLBACK_KNOWN_HOOK_EVENTS_ORDERED),
 }
@@ -1161,6 +1163,12 @@ def lint_doc(doc, path, raw_lines):
                     _f = _enum_finding(f"assert.path_denied.{_key}", _value, path)
                     if _f is not None:
                         findings.append(_f)
+        for _tk in ("tool_called", "tool_not_called"):
+            _tv = _item.get(_tk)
+            if isinstance(_tv, dict) and "scope" in _tv:
+                _f = _enum_finding(f"assert.{_tk}.scope", _tv["scope"], path)
+                if _f is not None:
+                    findings.append(_f)
         _question_options = _item.get("question_options")
         if isinstance(_question_options, dict):
             if "order" in _question_options:
