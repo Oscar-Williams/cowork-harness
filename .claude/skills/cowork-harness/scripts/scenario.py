@@ -543,6 +543,129 @@ def _is_positional_choose(choose):
     return any(isinstance(v, str) and (v == "first" or v.isdigit()) for v in vals)
 
 
+# Cassette evidence is deliberately opt-in. A scenario linter run commonly has no committed recordings,
+# and guessing a cassette from the scenario name would be wrong when `record --out` chose a custom path.
+# When a caller supplies `--cassette-dir`, the records below are matched by the cassette's persisted
+# `scenarioSource`, never by filename. This is the Python-side equivalent of replay's evidence-shape gate;
+# keeping it here means text/JSON output and the exit code agree.
+_MISSING = object()
+
+
+def _valid_string_list(value):
+    return isinstance(value, list) and all(isinstance(x, str) for x in value)
+
+
+def _valid_manifest(value):
+    """Return whether `artifacts` has enough shape to be trusted as replay evidence.
+
+    Presence alone is not evidence: a malformed list must not make the linter hide an advisory. An empty
+    manifest is valid for the two diff assertions whose replayable green case is an empty tree.
+    """
+    if not isinstance(value, list):
+        return False
+    for entry in value:
+        if not isinstance(entry, dict):
+            return False
+        if not isinstance(entry.get("path"), str):
+            return False
+        size = entry.get("bytes")
+        if isinstance(size, bool) or not isinstance(size, (int, float)):
+            return False
+        if not isinstance(entry.get("sha256"), str):
+            return False
+    return True
+
+
+def _valid_pre_run_hashes(value):
+    return isinstance(value, dict) and all(
+        isinstance(key, str) and (item is None or isinstance(item, str)) for key, item in value.items()
+    )
+
+
+def _cassette_checkability(raw):
+    """Mirror replay's cassette evidence preconditions for the advisory keys.
+
+    The returned map is intentionally per-key. `no_unexpected_files` and `input_unmodified` need their
+    own pre-run baselines; they cannot share the generic non-empty-artifacts test used by other manifest
+    assertions. Invalid field shapes are never treated as present evidence.
+    """
+    artifacts = raw.get("artifacts", _MISSING)
+    if artifacts is _MISSING:
+        artifact_state = "missing"
+    elif _valid_manifest(artifacts):
+        artifact_state = "empty" if not artifacts else "present"
+    else:
+        artifact_state = "invalid"
+
+    control_out = raw.get("controlOut", _MISSING)
+    if control_out is _MISSING:
+        control_state = "missing"
+    elif _valid_string_list(control_out):
+        control_state = "present" if control_out else "empty"
+    else:
+        control_state = "invalid"
+
+    pre_run_paths = raw.get("preRunPaths", _MISSING)
+    pre_paths_valid = pre_run_paths is not _MISSING and _valid_string_list(pre_run_paths)
+    pre_run_hashes = raw.get("preRunHashes", _MISSING)
+    pre_hashes_valid = pre_run_hashes is not _MISSING and _valid_pre_run_hashes(pre_run_hashes)
+
+    return {
+        key: (
+            (artifact_state == "present")
+            if key not in ("no_unexpected_files", "input_unmodified")
+            else (artifact_state in ("empty", "present") and pre_paths_valid)
+            if key == "no_unexpected_files"
+            else (artifact_state in ("empty", "present") and pre_hashes_valid)
+        )
+        for key in MANIFEST_KEYS
+    } | {key: control_state == "present" for key in GATE_KEYS}
+
+
+def _cassette_records(location):
+    """Read an opt-in cassette file or a non-recursive cassette directory.
+
+    Directory mode follows the repository's existing cassette-directory convention and considers JSON
+    files, including custom `record --out foo.json` names. A custom extension can be supplied directly as
+    a file. Unreadable or malformed records are ignored here; because they cannot yield a matching,
+    trusted provenance record, the corresponding INFO remains in place (fail closed).
+    """
+    if not location:
+        return []
+    root = Path(location)
+    try:
+        if root.is_file():
+            paths = [root]
+        elif root.is_dir():
+            paths = sorted(p for p in root.iterdir() if p.is_file() and p.suffix.lower() == ".json")
+        else:
+            return []
+    except OSError:
+        return []
+
+    records = []
+    for path in paths:
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, ValueError):
+            continue
+        if not isinstance(raw, dict):
+            continue
+        source = raw.get("scenarioSource")
+        if not isinstance(source, str) or not source or Path(source).is_absolute():
+            continue
+        source_path = os.path.normcase(os.path.abspath(os.path.normpath(str(path.parent / source))))
+        records.append({"source": source_path, "checkable": _cassette_checkability(raw)})
+    return records
+
+
+def _all_matching_cassettes_prove(records, scenario_path, key):
+    """True only when at least one exact-provenance cassette exists and every one proves `key`."""
+    target = os.path.normcase(os.path.abspath(os.path.normpath(str(scenario_path))))
+    matching = [record for record in records if record["source"] == target]
+    return bool(matching) and all(record["checkable"].get(key, False) for record in matching)
+
+
 # Single-segment absolute paths that legitimately appear in prompt prose. A `/word` from this set is a
 # path, not a slash command, so it never raises the not-leading warning below.
 _SLASH_PATH_WORDS = frozenset(
@@ -868,7 +991,7 @@ def _lint_tool_call_object_form(items, fidelity, path):
     return out
 
 
-def lint_doc(doc, path, raw_lines):
+def lint_doc(doc, path, raw_lines, cassette_records=None):
     findings = []
     if not isinstance(doc, dict):
         findings.append(
@@ -1451,6 +1574,10 @@ def lint_doc(doc, path, raw_lines):
     manifest_present = sorted(assert_keys & MANIFEST_KEYS)
     if lane == "remote":
         manifest_present = [k for k in manifest_present if k not in LANE_REMOTE_INCOMPATIBLE_KEYS]
+    if cassette_records is not None:
+        manifest_present = [
+            key for key in manifest_present if not _all_matching_cassettes_prove(cassette_records, path, key)
+        ]
     if manifest_present:
         findings.append(
             Finding(
@@ -1459,10 +1586,12 @@ def lint_doc(doc, path, raw_lines):
                 f"assertion(s) {manifest_present} evaluate on replay only when the cassette carries an "
                 "`artifacts` manifest (`record` snapshots one). A manifest-less cassette skips them "
                 "(with a loud warning).",
-                "No action needed if you have a current cassette — `record` has snapshotted a manifest "
-                "since 0.24. This is advisory only (the linter never reads your cassettes, so it cannot "
-                "tell); re-record only if yours predates that. `lint --min-severity WARN` silences the "
-                "whole INFO class in CI.",
+                "No action is needed when every matching cassette carries the evidence required by each "
+                "listed assertion: a non-empty `artifacts` manifest for file/content assertions, or "
+                "the appropriate pre-run baseline for diff assertions. Pass `--cassette-dir <dir>` "
+                "(or one cassette file) to let lint prove that; otherwise re-record only if the cassette "
+                "predates the manifest. "
+                "`lint --min-severity WARN` silences the whole INFO class in CI.",
                 path,
             )
         )
@@ -1495,6 +1624,8 @@ def lint_doc(doc, path, raw_lines):
 
     # I: gate keys need a controlOut cassette on replay
     gate_present = sorted(assert_keys & GATE_KEYS)
+    if cassette_records is not None:
+        gate_present = [key for key in gate_present if not _all_matching_cassettes_prove(cassette_records, path, key)]
     if gate_present:
         findings.append(
             Finding(
@@ -1502,10 +1633,10 @@ def lint_doc(doc, path, raw_lines):
                 "gate-needs-controlout",
                 f"gate assertion(s) {gate_present} only evaluate on replay when the cassette has "
                 "controlOut (full-fidelity). An old cassette excludes them (with a loud warning).",
-                "No action needed if you have a current cassette — one recorded by a current harness "
-                "carries controlOut. This is advisory only (the linter never reads your cassettes, so it "
-                "cannot tell); re-record only if yours is old. `lint --min-severity WARN` silences the "
-                "whole INFO class in CI.",
+                "No action is needed when every matching cassette has non-empty `controlOut` evidence. "
+                "Pass `--cassette-dir <dir>` (or one cassette file) to let lint prove that; otherwise "
+                "re-record only if the cassette is old. `lint --min-severity WARN` silences the whole "
+                "INFO class in CI.",
                 path,
             )
         )
@@ -1609,7 +1740,7 @@ def _require_yaml():
             sys.exit(2)
 
 
-def lint_file(path):
+def lint_file(path, cassette_records=None):
     yaml = _require_yaml()
     p = Path(path)
     if not p.is_file():
@@ -1626,7 +1757,7 @@ def lint_file(path):
         return quoting + [
             Finding("ERROR", "parse", f"YAML parse error: {msg}", "Fix the YAML syntax.", path)
         ]
-    return lint_doc(doc, path, raw_lines)
+    return lint_doc(doc, path, raw_lines, cassette_records)
 
 
 SEV_ORDER = {"ERROR": 0, "WARN": 1, "INFO": 2}
@@ -1723,6 +1854,10 @@ def cmd_lint(args):
         else:
             expanded.append(arg)
     args.files = expanded
+    # Cassette inspection is opt-in: without the flag the linter remains entirely static, preserving the
+    # existing CI behavior. With it, one index is shared across all scenario files in this invocation.
+    cassette_location = getattr(args, "cassette_dir", None)
+    cassette_records = _cassette_records(cassette_location) if cassette_location else None
     # Linter self-check: a valid schema key the replay-class sets don't classify can't be linted
     # correctly — surface it as a hard ERROR so it fails the gate (and --strict) until someone classifies it.
     if UNCLASSIFIED_KEYS:
@@ -1737,7 +1872,7 @@ def cmd_lint(args):
             )
         )
     for f in args.files:
-        all_findings.extend(lint_file(f))
+        all_findings.extend(lint_file(f, cassette_records))
     all_findings.extend(_wrapper_loader_findings())
     # Filter BEFORE rendering AND before the exit computation — deliberately, so --min-severity narrows
     # what the run actually cares about. Filtering at render only would make `--strict --min-severity ERROR`
@@ -3077,6 +3212,12 @@ def main(argv=None):
         "(default: INFO = keep everything; WARN under --strict). --json is filtered identically. So "
         "`--strict --min-severity ERROR` behaves exactly like a plain lint, rather than reporting "
         "0 findings and still exiting 1.",
+    )
+    lp.add_argument(
+        "--cassette-dir",
+        metavar="PATH",
+        help="optionally inspect a cassette file or a directory of *.json cassettes by exact scenarioSource; "
+        "INFO advice is suppressed only when every matching cassette proves the relevant replay evidence",
     )
     lp.set_defaults(func=cmd_lint)
 

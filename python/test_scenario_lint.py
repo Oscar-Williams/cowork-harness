@@ -584,6 +584,129 @@ def test_min_severity_filters_json_identically(tmp_path):
     assert all(f["severity"] in ("ERROR", "WARN") for f in json.loads(filtered))
 
 
+# --- opt-in cassette evidence for replay advisories -----------------------------------------------
+
+
+def _write_cassette(path, scenario_source, **fields):
+    cassette = {"scenarioSource": scenario_source, **fields}
+    path.write_text(json.dumps(cassette), encoding="utf-8")
+
+
+def _lint_with_cassettes(tmp_path, body, cassettes):
+    scenarios = tmp_path / "scenarios"
+    cassettes_dir = tmp_path / "cassettes"
+    scenarios.mkdir()
+    cassettes_dir.mkdir()
+    f = scenarios / "authored.yaml"
+    f.write_text(
+        "name: a different display name\nbaseline: latest\nsession: (inline)\nfidelity: container\n"
+        "prompt: hi\n" + body,
+        encoding="utf-8",
+    )
+    for name, fields in cassettes:
+        _write_cassette(cassettes_dir / name, "../scenarios/authored.yaml", **fields)
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        code = scenario.main(["lint", str(f), "--cassette-dir", str(cassettes_dir), "--json"])
+    return code, json.loads(buf.getvalue()), f
+
+
+def _valid_artifact(path="outputs/result.json"):
+    return [{"path": path, "bytes": 2, "sha256": "a" * 64, "body": "{}"}]
+
+
+def test_cassette_evidence_suppresses_only_proven_replay_advice(tmp_path):
+    body = (
+        "answers:\n  - when_question: '.*'\n    choose: first\n"
+        "assert:\n  - file_exists: outputs/result.json\n  - question_asked: '.*'\n"
+    )
+    code, findings, _ = _lint_with_cassettes(
+        tmp_path,
+        body,
+        [("healthy.cassette.json", {"artifacts": _valid_artifact(), "controlOut": ["{}"]})],
+    )
+    rules = {f["rule"] for f in findings}
+    assert code == 0
+    assert "manifest-needs-snapshot" not in rules
+    assert "gate-needs-controlout" not in rules
+    assert "positional-choose-order" in rules
+
+
+def test_cassette_provenance_must_resolve_to_the_linted_file(tmp_path):
+    body = "assert:\n  - file_exists: outputs/result.json\n  - question_asked: '.*'\n"
+    scenarios = tmp_path / "scenarios"
+    cassettes_dir = tmp_path / "cassettes"
+    scenarios.mkdir()
+    cassettes_dir.mkdir()
+    f = scenarios / "authored.yaml"
+    f.write_text(
+        "name: same-name\nbaseline: latest\nsession: (inline)\nfidelity: container\nprompt: hi\n" + body,
+        encoding="utf-8",
+    )
+    _write_cassette(
+        cassettes_dir / "wrong-source.cassette.json",
+        "../scenarios/other.yaml",
+        artifacts=_valid_artifact(),
+        controlOut=["{}"],
+    )
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        scenario.main(["lint", str(f), "--cassette-dir", str(cassettes_dir), "--json"])
+    rules = {finding["rule"] for finding in json.loads(buf.getvalue())}
+    assert "manifest-needs-snapshot" in rules
+    assert "gate-needs-controlout" in rules
+
+
+def test_duplicate_matching_cassettes_must_all_prove_each_advisory(tmp_path):
+    body = "assert:\n  - file_exists: outputs/result.json\n  - question_asked: '.*'\n"
+    code, findings, _ = _lint_with_cassettes(
+        tmp_path,
+        body,
+        [
+            ("healthy.cassette.json", {"artifacts": _valid_artifact(), "controlOut": ["{}"]}),
+            ("legacy.cassette.json", {"artifacts": [], "controlOut": []}),
+        ],
+    )
+    rules = {f["rule"] for f in findings}
+    assert code == 0
+    assert "manifest-needs-snapshot" in rules
+    assert "gate-needs-controlout" in rules
+
+
+def test_empty_manifest_with_baselines_is_checkable_for_diff_assertions(tmp_path):
+    body = (
+        "assert:\n  - no_unexpected_files: true\n  - input_unmodified: outputs/result.json\n"
+        "  - question_asked: '.*'\n"
+    )
+    code, findings, _ = _lint_with_cassettes(
+        tmp_path,
+        body,
+        [
+            (
+                "clean.cassette.json",
+                {"artifacts": [], "preRunPaths": [], "preRunHashes": {}, "controlOut": ["{}"]},
+            )
+        ],
+    )
+    rules = {f["rule"] for f in findings}
+    assert code == 0
+    assert "manifest-needs-snapshot" not in rules
+    assert "gate-needs-controlout" not in rules
+
+
+def test_malformed_cassette_evidence_fails_closed(tmp_path):
+    body = "assert:\n  - file_exists: outputs/result.json\n  - question_asked: '.*'\n"
+    code, findings, _ = _lint_with_cassettes(
+        tmp_path,
+        body,
+        [("malformed.cassette.json", {"artifacts": {"path": "outputs/result.json"}, "controlOut": "{}"})],
+    )
+    rules = {f["rule"] for f in findings}
+    assert code == 0
+    assert "manifest-needs-snapshot" in rules
+    assert "gate-needs-controlout" in rules
+
+
 # --- vacuous-gate-assert: gate_answers_delivered needs a PRESENCE companion -------------------------
 # `gate_answers_delivered` checks that every gate which fired was delivered non-error, and ZERO gates
 # fired passes VACUOUSLY (gate firing is model-dependent). So the assertion that looks like it guards

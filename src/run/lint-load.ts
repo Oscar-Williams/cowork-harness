@@ -78,8 +78,8 @@ export function expandLintInputs(paths: string[]): string[] {
 }
 
 /** The positional (path) arguments of a `lint` command line, after `--output-format` was stripped. Flags
- *  and `--min-severity`'s value are dropped; anything after `--` is positional. A token misclassified here
- *  is harmless: `expandLintInputs` skips any path that does not exist. */
+ *  and value-taking lint options are dropped; anything after `--` is positional. A token misclassified
+ *  here is harmless: `expandLintInputs` skips any path that does not exist. */
 export function lintPositionals(args: string[]): string[] {
   const out: string[] = [];
   let rest = false;
@@ -87,7 +87,8 @@ export function lintPositionals(args: string[]): string[] {
     const a = args[i];
     if (rest) out.push(a);
     else if (a === "--") rest = true;
-    else if (a === "--min-severity") i++;
+    else if (a === "--min-severity" || a === "--cassette-dir") i++;
+    else if (a.startsWith("--min-severity=") || a.startsWith("--cassette-dir=")) continue;
     else if (!a.startsWith("-")) out.push(a);
   }
   return out;
