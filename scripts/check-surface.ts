@@ -75,18 +75,42 @@ export function diffSurfaces(baseline: unknown, current: unknown): SurfaceDiff {
     if (!baseFlat.has(path)) added.push(path);
     else if (baseFlat.get(path) !== curVal) changed.push(path);
   }
-  for (const [path, baseVal] of baseFlat) {
-    if (curFlat.has(path)) continue;
-    // `…<parent>.<leafKey>` → is there a `…<parent><anyOf|oneOf:k>.<leafKey>` with the same value?
+  // A removed leaf may have moved under a union arm (`a.x.type` → `a.x<anyOf:k>.type`). That is a WIDENING
+  // only when the arm carries exactly the old scalar's direct leaves with the same values — nothing more. An
+  // arm that adds a constraint (minLength, an enum, a pattern) on the same field NARROWS it: `changed`.
+  const escape = (t: string) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const directLeaves = (m: Map<string, string>, prefix: string) =>
+    new Map([...m].filter(([p]) => p.startsWith(prefix) && !/[.<]/.test(p.slice(prefix.length).replace(/\[[^\]]*\]$/, ""))));
+  const consumedArmLeaves = new Set<string>();
+  const decided = new Map<string, "widened" | "changed">();
+  for (const path of baseFlat.keys()) {
+    if (curFlat.has(path) || decided.has(path)) continue;
     const dot = path.lastIndexOf(".");
-    const parent = dot === -1 ? "" : path.slice(0, dot);
-    const leafKey = dot === -1 ? path : path.slice(dot + 1);
-    const armRe = new RegExp(
-      `^${parent.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}<(?:anyOf|oneOf):\\d+>\\.${leafKey.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`,
-    );
-    const keptAsArm = [...curFlat].some(([p, v]) => v === baseVal && !baseFlat.has(p) && armRe.test(p));
-    (keptAsArm ? widened : removed).push(path);
+    if (dot === -1) continue;
+    const parent = path.slice(0, dot);
+    const oldLeaves = directLeaves(baseFlat, parent + ".");
+    const armRe = new RegExp(`^${escape(parent)}<(?:anyOf|oneOf):\\d+>\\.`);
+    const arms = new Set([...curFlat.keys()].filter((p) => armRe.test(p)).map((p) => p.slice(0, p.indexOf(">", parent.length) + 2)));
+    let verdict: "widened" | "changed" | undefined;
+    for (const arm of arms) {
+      const armLeaves = directLeaves(curFlat, arm);
+      const keepsAll = [...oldLeaves].every(([p, v]) => armLeaves.get(arm + p.slice(parent.length + 1)) === v);
+      if (!keepsAll) continue;
+      if (armLeaves.size === oldLeaves.size) {
+        verdict = "widened";
+        for (const p of armLeaves.keys()) consumedArmLeaves.add(p);
+        break;
+      }
+      verdict = "changed"; // keeps the scalar but adds a constraint on it — a narrowing
+    }
+    if (verdict) for (const p of oldLeaves.keys()) if (!curFlat.has(p)) decided.set(p, verdict);
   }
+  for (const path of baseFlat.keys()) {
+    if (curFlat.has(path)) continue;
+    const v = decided.get(path);
+    (v === "widened" ? widened : v === "changed" ? changed : removed).push(path);
+  }
+  for (let i = added.length - 1; i >= 0; i--) if (consumedArmLeaves.has(added[i])) added.splice(i, 1);
 
   added.sort();
   removed.sort();
