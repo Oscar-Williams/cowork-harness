@@ -22,6 +22,7 @@ import { runsWriteRoot } from "./trace-view.js";
 import { join, dirname, relative, isAbsolute, resolve, sep, extname } from "node:path";
 import {
   type Scenario,
+  type ToolNotCalledObject,
   type RunResult,
   type Assertion,
   type Fingerprint,
@@ -61,6 +62,7 @@ import {
   type RunHooks,
   type RunRecord,
   unionReferenceAccesses,
+  capToolCallInput,
 } from "./run.js";
 import {
   parseMessage,
@@ -96,6 +98,10 @@ import {
   type MutationCoverage,
 } from "./mutate.js";
 import { anyGlobMatches } from "../glob.js";
+import { compileUserRegex } from "../regex.js";
+import { toolNameSpellings } from "./tool-name-canonicalization.js";
+import { toolCallObjectRegexes } from "../tool-call-assert.js";
+import { REDACTION_TOKEN_MARK } from "../redactable-literal.js";
 import { extractComputerLinks } from "./computer-links.js";
 import { makeRenderer, renderFooter, type RenderPlan } from "./renderer.js";
 import { jsonEnvelope, jsonPayloadEnvelope, fail, isJsonOutput, pkgVersion } from "./envelope.js";
@@ -2414,6 +2420,84 @@ const NOOP_DECIDER: Decider = {
   },
 };
 
+/** The frozen tool_use blocks of an events stream, in order: `{id, name, input}` per block. */
+function frozenToolUses(
+  events: string[],
+): Array<{ id?: string; name: string; input: Record<string, { text: string; truncated?: boolean }> }> {
+  const out: Array<{ id?: string; name: string; input: Record<string, { text: string; truncated?: boolean }> }> = [];
+  for (const l of Array.isArray(events) ? events : []) {
+    let m: unknown;
+    try {
+      m = JSON.parse(l);
+    } catch {
+      continue;
+    }
+    const content = (m as { message?: { content?: unknown } })?.message?.content;
+    if (!Array.isArray(content)) continue;
+    for (const b of content)
+      if (b && typeof b === "object" && (b as { type?: unknown }).type === "tool_use")
+        out.push({
+          id: typeof (b as { id?: unknown }).id === "string" ? (b as { id: string }).id : undefined,
+          name: String((b as { name?: unknown }).name ?? ""),
+          input: capToolCallInput((b as { input?: unknown }).input),
+        });
+  }
+  return out;
+}
+
+/** RECORD-TIME guard for the negative object form (`tool_not_called: {input | input_any}`): the EXACT
+ *  check, since both copies of the stream exist here. Redaction rewrites the frozen tool inputs, and (when
+ *  its literal is covered) the frozen regex too — so a negative input check that could see its target in
+ *  the live bytes looks at rewritten bytes on replay. The evaluator fails those closed on replay; this
+ *  names the cause at the moment it is created. Reports:
+ *   - a negative input regex the policy itself REWROTE (it is no longer the author's pattern);
+ *   - a negative input regex that matched a tool_use field BEFORE redaction and no longer matches it after.
+ *  `base` and `redacted` are the same cassette before/after `redactCassette`, whose line-for-line mapping
+ *  of `events` is what lets tool_use blocks pair up by position. Positive forms are not reported: they
+ *  fail loudly on replay by themselves. */
+export function redactionRewroteNegativeToolInputs(base: Cassette, redacted: Cassette): string[] {
+  const findings: string[] = [];
+  const baseAsserts = (base.scenario?.assert ?? []) as Array<Record<string, unknown>>;
+  const redAsserts = (redacted.scenario?.assert ?? []) as Array<Record<string, unknown>>;
+  const before = frozenToolUses(base.events);
+  const after = frozenToolUses(redacted.events);
+  baseAsserts.forEach((a, i) => {
+    const v = a?.tool_not_called;
+    if (!v || typeof v !== "object") return;
+    const o = v as ToolNotCalledObject;
+    const redO = redAsserts[i]?.tool_not_called as ToolNotCalledObject | undefined;
+    const inputRegexes = toolCallObjectRegexes(o).filter((r) => r.where.startsWith("input"));
+    const redRegexes = redO && typeof redO === "object" ? toolCallObjectRegexes(redO) : [];
+    for (const r of inputRegexes) {
+      const redSrc = redRegexes.find((x) => x.where === r.where)?.source;
+      if (redSrc !== undefined && redSrc.includes(REDACTION_TOKEN_MARK) && !r.source.includes(REDACTION_TOKEN_MARK))
+        findings.push(
+          `assert[${i}] tool_not_called.${r.where} "${r.source}" was itself rewritten by the redaction policy — the committed cassette no longer carries the pattern you wrote, so replay reports it evidence-unavailable`,
+        );
+    }
+    const globs = Array.isArray(o.tool) ? o.tool : [o.tool];
+    const named = (n: string) => toolNameSpellings(n).some((sp) => anyGlobMatches(globs, sp));
+    for (let k = 0; k < before.length && k < after.length; k++) {
+      const b = before[k];
+      if (!named(b.name)) continue;
+      for (const r of inputRegexes) {
+        const c = compileUserRegex(r.source);
+        if ("error" in c) continue;
+        const fields = r.where === "input_any" ? Object.keys(b.input) : [r.where.slice("input.".length)];
+        for (const f of fields) {
+          const pre = b.input[f]?.text;
+          const post = after[k].input[f]?.text;
+          if (pre !== undefined && c.re.test(pre) && (post === undefined || !c.re.test(post)))
+            findings.push(
+              `assert[${i}] tool_not_called.${r.where} "${r.source}" matched ${b.name} ${b.id ?? `#${k}`} field \`${f}\` before redaction and no longer matches it after — on the committed cassette this check cannot see what it is looking for`,
+            );
+        }
+      }
+    }
+  });
+  return findings;
+}
+
 /** Apply CONTENT redaction (the opt-in policy) across the WHOLE cassette surface: events/controlOut
  *  protocol lines (structurally — string leaves AND object keys, keeping JSON valid + the question/answer
  *  strings in sync), artifact bodies, the scenario prompt/answers/assert metadata, and the diagnostic
@@ -4723,6 +4807,13 @@ async function recordScenarioObject(
   let cassette = base;
   if (policy.patterns.length || policy.keyNames.length) {
     const redacted = redactCassette(base, policy);
+    // BEFORE the divergence check: when a negative tool-input check is hit by redaction, the redacted replay
+    // reports it evidence-unavailable, the verdicts diverge, and the check below refuses the write. This
+    // line is what tells the author WHY.
+    for (const f of redactionRewroteNegativeToolInputs(base, redacted))
+      warn(
+        `::warning:: record: ${f}. Assert on a literal the policy does not rewrite (lint: tool-input-regex-redactable), or keep this check on a live gate.\n`,
+      );
     await assertRedactionVerdictPreserved(base, redacted, dirname(cassettePath));
     cassette = redacted;
   }
