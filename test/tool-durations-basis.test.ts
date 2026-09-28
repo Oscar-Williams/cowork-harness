@@ -36,6 +36,15 @@ describe("replay lane (a real recorded stream)", () => {
     expect(d.Bash?.calls).toBeGreaterThan(0);
   });
 
+  it("the id-less synthetic MCP echoes in a real timeline are not counted as unpaired calls", async () => {
+    // Arming: the recorded timeline really carries id-less tool_use events (the MCP handshake echoes).
+    const echoes = (FIXTURE.timeline ?? []).filter((e) => e.type === "tool_use" && !e.toolUseId);
+    expect(echoes.length).toBeGreaterThan(0);
+    const r = await replayCassette(FIXTURE, [], { cassetteDir: DIR });
+    for (const e of echoes) expect(r.toolDurations?.[(e as { name: string }).name]).toBeUndefined();
+    expect(Object.values(r.toolDurations ?? {}).reduce((n, d) => n + d.unpaired, 0)).toBe(0);
+  });
+
   it("a cassette with no frozen timeline → neither field", async () => {
     const r = await replayCassette({ ...FIXTURE, timeline: undefined } as Cassette, [], { cassetteDir: DIR });
     expect(r.toolDurations).toBeUndefined();
