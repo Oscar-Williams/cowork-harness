@@ -247,3 +247,50 @@ describe.skipIf(!can)("replay --reassert --write — directory (per-cassette sib
     expect(replay(cwd, ["c2.cassette.json", "--output-format", "json"]).json?.ok).toBe(true);
   });
 });
+
+// `--reassert --write` changes the frozen `assert`, so it changes what reader the cassette NEEDS. Writing an
+// object-form tool_called into a v12 cassette and leaving it stamped v12 makes a 3.10.0 CLI say
+// "unrecognized assertion … re-record" instead of "too new; upgrade". Exercised on a COPY of the committed
+// v12 example (never the original).
+import { cpSync } from "node:fs";
+
+describe.skipIf(!can)("replay --reassert --write restamps the cassette version", () => {
+  const copyExamples = () => {
+    const d = tmp();
+    cpSync(resolve("examples"), join(d, "examples"), { recursive: true });
+    return d;
+  };
+  const cassettePath = (d: string) => join(d, "examples", "replays", "example-pdf-skill.cassette.json");
+  const scenarioPath = (d: string) => join(d, "examples", "scenarios", "example-pdf-skill.yaml");
+
+  it("an object-form assert written into a v12 cassette lifts it to v13, $schema included", () => {
+    const d = copyExamples();
+    expect(JSON.parse(readFileSync(cassettePath(d), "utf8")).cassetteVersion).toBe(12);
+    const y = readFileSync(scenarioPath(d), "utf8");
+    writeFileSync(
+      scenarioPath(d),
+      y.replace("  - tool_called: Write\n", "  - tool_called: Write\n  - tool_called: { tool: Bash, input: { command: 'ls\\s+-la' } }\n"),
+    );
+    const w = replay(d, [cassettePath(d), "--reassert", "--write"]);
+    expect(w.stderr).toMatch(/wrote the re-asserted block/);
+    const c = JSON.parse(readFileSync(cassettePath(d), "utf8"));
+    expect(c.cassetteVersion).toBe(13);
+    expect(c.$schema).toMatch(/cassette\.v13\.json$/);
+  });
+
+  it("never LOWERS the stamp: dropping the object form from a v13 cassette keeps it at v13", () => {
+    const d = tmp();
+    write(
+      d,
+      "c.cassette.json",
+      JSON.stringify({
+        ...JSON.parse(cassetteJson({ assert: [{ tool_called: { tool: "Bash", input: { command: "x" } } }] })),
+        cassetteVersion: 13,
+      }),
+    );
+    write(d, "c.yaml", scenarioYaml("  - transcript_contains: hello\n"));
+    const w = replay(d, ["c.cassette.json", "--reassert", "--write"]);
+    expect(w.stderr).toMatch(/wrote the re-asserted block/);
+    expect(readCassette(d).cassetteVersion).toBe(13);
+  });
+});
