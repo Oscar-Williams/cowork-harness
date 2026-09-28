@@ -14,6 +14,13 @@ import { runsRoot } from "./trace-view.js";
  *  the same one-liner, kept local so the extraction stays leaf-only. */
 const log = (s: string) => writeAllSync(2, s + "\n");
 
+/** Exit code for a `--max-budget-usd` refusal. On `record` it is `1`, like every other pre-spend refusal
+ *  of a scenario that loaded, so `2` there always means "did not load" (SPEC.md §11). `skill` and `run`
+ *  keep `fail()`'s `runtime` default of `2`. The category stays `runtime` on every command. */
+function budgetRefusalExitCode(command: string): 1 | undefined {
+  return command === "record" ? 1 : undefined;
+}
+
 /** Worst observed cost for a scenario, or `undefined` when it has never been priced. The WORST rather
  *  than the median: these are refusal gates, and an estimate that under-predicts lets through exactly
  *  the expensive run the flag was reached for. */
@@ -60,6 +67,7 @@ export function preflightBudget(command: string, scenario: string, maxBudgetUsd:
       `--max-budget-usd $${maxBudgetUsd.toFixed(4)} refused before spending: "${scenario}" has cost up to $${worst.toFixed(4)} across ${history.length} prior run(s).`,
       `Raise the cap, or drop --max-budget-usd to run anyway. This is a PRE-flight estimate from history — a single run cannot be aborted mid-flight on cost (no live cost signal exists).`,
       json,
+      budgetRefusalExitCode(command),
     );
 }
 
@@ -208,5 +216,6 @@ export function preflightBatchBudget(command: string, scenarios: string[], maxBu
       `--max-budget-usd $${maxBudgetUsd.toFixed(4)} refused before spending: this batch of ${scenarios.length} scenario(s) has cost up to $${known.toFixed(4)} in prior runs.`,
       `Raise the cap, narrow the batch, or drop --max-budget-usd to run anyway. This is a PRE-flight estimate summed from per-scenario history — costs are not abortable mid-run (no live cost signal exists).`,
       json,
+      budgetRefusalExitCode(command),
     );
 }

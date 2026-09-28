@@ -3683,7 +3683,7 @@ export const RECORD_USAGE =
   "       --dry-run: resolve and CHECK without recording. A single scenario file runs every pre-spend refusal the real record runs (prompt policy, assert contradictions, host-inventory, slug collision) and refuses identically — same --out, same flags, so the verdict is binding. A DIRECTORY reports the path-dependent ones as advisory 'would-refuse'/'would-warn' notes instead, labelled by verdict kind (a dir target takes no --out, so the destination is a guess), and gates only on the path-independent ones.\n" +
   "       --allow-host-inventory-findings: write a recording the scan DID flag. The separate, louder decision; needed only when the captured inventory is genuinely part of the fixture.\n" +
   "       --concurrency <N>: record a dir/ batch (or --rerecord-stale) N at a time (default 1, max 8). Runs are fully isolated; the bound is for Docker address pool + API rate limits.\n" +
-  "       --max-budget-usd <x>: refuse before spending if prior-run history says this scenario (or, on a batch, the whole batch) has cost more than x.\n" +
+  "       --max-budget-usd <x>: refuse before spending if prior-run history says this scenario (or, on a batch, the whole batch) has cost more than x (exit 1, like the other pre-spend refusals).\n" +
   "                             At --concurrency 1 a running total also stops the batch once x is reached; above that it is a pre-flight estimate only.\n" +
   '       answer gates LIVE: [--decider-dir <dir>] (single scenario only) | [--decider-llm [--intent "<one line>"] [--decider-model <id>]] | [--on-unanswered fail|first]\n' +
   "       (a live decider flags the cassette non-deterministic — re-recording may drift; replay stays deterministic. --rerecord-stale rejects these flags.)\n" +
@@ -4120,8 +4120,8 @@ export async function cmdRecord(args: string[]) {
     // here, with the other refusals, not after the payload. It used to run below the envelope, which put
     // two envelopes on stdout with the FIRST one `ok: true` — the exact false green the comment above
     // says was designed out for `dryRefusal`, reintroduced three lines later by a gate that also exits.
-    // Its own exit code is unchanged (2, `runtime`-category): the real `record`'s budget refusal exits 2
-    // as well, so moving it keeps preview and real path agreeing, which is the property that matters.
+    // It exits 1, like the refusals above, on the preview and the real `record` alike (`budget.ts`), so
+    // moving it keeps preview and real path agreeing, which is the property that matters.
     if (maxBudgetUsd !== undefined) preflightBudget("record", scenario.name, maxBudgetUsd, asJson);
     if (asJson) {
       out(

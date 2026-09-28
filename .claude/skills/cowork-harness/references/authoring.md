@@ -245,7 +245,8 @@ scenario.py lint` run directly stays offline and lenient: there an unknown key i
 on a schema error; a directory reports each `✗ broken:` file and exits 1). **Read the exit code, not just
 its sign:** `record <file>` — with or without
 `--dry-run` — answers `2` for "did not load" and `1` for "loaded fine, but this record is refused" (a
-pre-spend policy refusal; `--max-budget-usd` is the one refusal that keeps exit 2). Treating any non-zero
+pre-spend policy refusal, including `--max-budget-usd`, which exited 2 before 4.0.0; `skill`/`run` still
+exit 2 on it). Treating any non-zero
 as "scenario broken" mis-reports every refused-but-valid scenario. Corollary: **the loader** fails LOUD on an unknown key (never silently).
 `replay` reads a frozen scenario from a cassette, and what an OLDER CLI does with a key it doesn't know is
 decided when the cassette is recorded. A key that changes what a verdict means (e.g. `lane: remote`) raises
