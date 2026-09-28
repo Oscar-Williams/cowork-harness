@@ -51,11 +51,21 @@ export function toolCallObjectRegexes(o: ToolCalledObject | ToolNotCalledObject)
 const all = (xs: Status[]): Status => (xs.includes("no") ? "no" : xs.includes("unknown") ? "unknown" : "yes");
 
 /** A regex MISS over `text` that cannot be trusted as absence: the text was cut, or it carries a
- *  redaction token and the regex names a literal of the kind redaction rewrites (so the bytes it looks
- *  for may be exactly the ones replaced). */
-function missIsUnknown(text: string, truncated: boolean | undefined, source: string): boolean {
-  return truncated === true || (text.includes(REDACTION_TOKEN_MARK) && regexNamesRedactableLiteral(source));
+ *  redaction token. For a NEGATIVE-direction predicate (a miss is what lets the check pass) ANY token
+ *  makes the miss unknown: the replaced bytes are unknowable, and no offline heuristic knows every policy
+ *  (a custom literal, a wholesale `keys:` rule). For a positive-direction predicate a miss only fails, so
+ *  it stays a plain "no" unless the regex names a literal of a kind redaction rewrites — which just makes
+ *  the red say "could not look" instead of "not called". */
+function missIsUnknown(text: string, truncated: boolean | undefined, source: string, negativeDirection: boolean): boolean {
+  if (truncated === true) return true;
+  if (!text.includes(REDACTION_TOKEN_MARK)) return false;
+  return negativeDirection || regexNamesRedactableLiteral(source);
 }
+
+/** A passing evidence line never quotes a redaction token: it would present rewritten bytes as though
+ *  they were what the check saw. */
+const REDACTION_TOKEN_RE = /\[REDACTED:[^\]]*\]/g;
+const scrubTokens = (s: string): string => s.replace(REDACTION_TOKEN_RE, "(redacted)");
 
 export function checkToolCallObject(
   key: Key,
@@ -113,13 +123,13 @@ export function checkToolCallObject(
       const v = c.input[f];
       if (!v) parts.push("no");
       else if (compiled.get(`input.${f}`)!.test(v.text)) parts.push("yes");
-      else parts.push(missIsUnknown(v.text, v.truncated, src) ? "unknown" : "no");
+      else parts.push(missIsUnknown(v.text, v.truncated, src, negative) ? "unknown" : "no");
     }
     if (o.input_any !== undefined) {
       const re = compiled.get("input_any")!;
       const fields = Object.values(c.input);
       if (fields.some((v) => re.test(v.text))) parts.push("yes");
-      else parts.push(fields.some((v) => missIsUnknown(v.text, v.truncated, o.input_any!)) ? "unknown" : "no");
+      else parts.push(fields.some((v) => missIsUnknown(v.text, v.truncated, o.input_any!, negative)) ? "unknown" : "no");
     }
     return all(parts);
   };
@@ -136,7 +146,7 @@ export function checkToolCallObject(
       parts.push(
         compiled.get("result.matches")!.test(text)
           ? "yes"
-          : missIsUnknown(text, r.assertTextTruncated, o.result.matches)
+          : missIsUnknown(text, r.assertTextTruncated, o.result.matches, negative)
             ? "unknown"
             : "no",
       );
@@ -144,7 +154,7 @@ export function checkToolCallObject(
       parts.push(
         compiled.get("result.not_matches")!.test(text)
           ? "no"
-          : missIsUnknown(text, r.assertTextTruncated, o.result.not_matches)
+          : missIsUnknown(text, r.assertTextTruncated, o.result.not_matches, !negative)
             ? "unknown"
             : "yes",
       );
@@ -219,7 +229,7 @@ export function checkToolCallObject(
   if (n >= min && (max === undefined || n + unknown.length <= max))
     return {
       pass: true,
-      evidence: `tool_called: ${n} ${shownTool} call(s) in scope ${scope} satisfied every predicate: ${sample(satisfied)}`,
+      evidence: scrubTokens(`tool_called: ${n} ${shownTool} call(s) in scope ${scope} satisfied every predicate: ${sample(satisfied)}`),
     };
   if (max !== undefined && n > max)
     return fail(`tool called too often: ${n} ${shownTool} call(s) satisfied every predicate (max ${max}): ${sample(satisfied)}`);

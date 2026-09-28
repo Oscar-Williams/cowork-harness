@@ -71,9 +71,19 @@ describe("negative object form over a redacted cassette", () => {
     expect(v.message).toMatch(/evidence unavailable/);
   });
 
-  it("a negative whose literal redaction does NOT touch still passes on the redacted cassette", async () => {
+  it("the cost, stated: ANY redacted text in a candidate's field makes a negative miss unknown — even a regex redaction never touches", async () => {
+    // `git push` cannot be hidden inside `/Users/acme/project/tmp`, but the evaluator cannot know what a
+    // token replaced, so it does not guess. A negative still PASSES when no in-scope candidate carries a
+    // token (next case) — only a call whose bytes were rewritten is "could not look".
     const clean = { tool_not_called: { tool: "Bash", input: { command: "git\\s+push" } } };
     const red = redactCassette(cassette([clean]), POLICY);
+    const v = await verdictOf(red);
+    expect(v.pass).toBe(false);
+    expect(v.message).toMatch(/evidence unavailable/);
+  });
+
+  it("a negative over a redacted cassette still passes when no candidate of THAT tool carries a token", async () => {
+    const red = redactCassette(cassette([{ tool_not_called: { tool: "Write", input: { content: "secret" } } }]), POLICY);
     expect((await verdictOf(red)).pass).toBe(true);
   });
 });
