@@ -345,3 +345,30 @@ describe("scope classifier (synthetic streams — pins the classifier, not the b
     expect(w.input.n).toEqual({ text: "3" });
   });
 });
+
+describe("empty predicates are no predicates", () => {
+  // `input: {}` / `result: {}` / `count: {}` constrain nothing — an empty conjunction is true — so the
+  // form is `{tool: X}` and is routed to the string evaluator, which works on every lane (including a
+  // result.json that predates toolCalls).
+  const c = ctx({ toolCalls: undefined, toolCallsMissing: true, toolsCalled: new Set(["Bash"]) });
+  it.each([
+    [{ tool_called: { tool: "Bash", input: {} } }, true],
+    [{ tool_called: { tool: "Bash", result: {} } }, true],
+    [{ tool_called: { tool: "Bash", count: {} } }, true],
+    [{ tool_called: { tool: "Bash", input: {}, result: {}, scope: "main" } }, true],
+    [{ tool_not_called: { tool: "Bash", input: {} } }, false],
+  ])("%j routes to the string evaluator", (a, expected) => {
+    expect(one(a, c).pass).toBe(expected);
+  });
+});
+
+describe("count: {min: 0} evidence", () => {
+  it("says what satisfied the check when nothing had to", () => {
+    const r = one(
+      { tool_called: { tool: "Bash", input: { command: "nope" }, count: { min: 0 } } },
+      ctx({ toolCalls: [call("b1", "Bash", { command: "ls" })] }),
+    );
+    expect(r.pass).toBe(true);
+    expect((r as { evidence?: string }).evidence).toMatch(/0 .*count\.min 0.*1 name-matching call/);
+  });
+});
