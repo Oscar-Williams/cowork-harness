@@ -598,16 +598,38 @@ def _lint_prompt_slash(doc, path):
 # --- the object form of tool_called / tool_not_called, and transcript_* values shaped like a command ---
 
 # `transcript_*` reads top-level assistant prose ONLY — never a tool_use — so a value shaped like a shell
-# command checks what the agent SAID it ran, not what ran. Two shapes, and only these:
-#   · an interpreter token at the start of the value or right after a shell operator (`;` `&&` `|` `$(`),
-#     followed by an argument — bare `node` in prose (`'node count'`) has no operator before it and is
-#     not a command start, so the start-of-value case also requires the argument to look like a path/flag;
-#   · a script filename (`.js .mjs .cjs .ts .py .sh`), regex-escaped or not. Data files (.json .md .yaml
-#     .csv) are what a transcript legitimately NAMES, so they are excluded.
-_INTERP = r"(?:python3?|node|bash|sh|npx|tsx|deno)"
-_CMD_AFTER_OPERATOR = re.compile(r"(?:;|&&|\|\||\||\$\()\s*" + _INTERP + r"\s+\S")
-_CMD_AT_START = re.compile(r"^\s*" + _INTERP + r"\s+(?:-|\S*[/.])")
-_SCRIPT_FILE = re.compile(r"\.(?:js|mjs|cjs|ts|py|sh)\b")
+# command checks what the agent SAID it ran, not what ran. A command shape is recognised at the START of the
+# value, after a shell operator (`;` `&&` `||` `|` `$(`), or after "ran"/"run"/"then", in three forms:
+#   · a tool verb that never opens English prose (npm, npx, pnpm, yarn, pip, git, curl, wget, docker, uv),
+#     followed by an argument;
+#   · a shell (bash, sh, zsh) followed by any non-version argument (`bash deploy`);
+#   · an interpreter (python3?, node, tsx, deno) followed by a flag or a file/path argument — NOT a bare
+#     word (`node count`) and NOT a version (`python 3.12`, `node v22.1`), which is how prose names them.
+# Plus a script FILENAME anywhere: a lowercase stem + .js/.mjs/.cjs/.ts/.py/.sh (`fetch-lesson.js`) — not a
+# product name (`Node.js`, `Next.js`), not a bare extension (`the .ts files`), not a data file (.json .md).
+# Deliberately NOT verbs: `make` (prose starts "make sure …"), so `make build` stays clean; and `node build`
+# stays clean for the same reason `node count` must.
+_CMD_LEAD = r"(?:^|;|&&|\|\||\||\$\(|\b(?:ran|run|then)\b)\s*"
+_VERSION_ARG = r"v?\d[\d.]*\b"
+_CMD_TOOL = re.compile(_CMD_LEAD + r"(?:npm|npx|pnpm|yarn|pip3?|git|curl|wget|docker|uv)\s+(?!" + _VERSION_ARG + r")[\w./:-]")
+_CMD_SHELL = re.compile(_CMD_LEAD + r"(?:bash|sh|zsh)\s+(?!" + _VERSION_ARG + r")[\w./-]")
+_CMD_INTERP = re.compile(
+    _CMD_LEAD + r"(?:python3?|node|tsx|deno)\s+(?!" + _VERSION_ARG + r")(?:-{1,2}[A-Za-z]|[\w.-]*/|[\w-]+\.\w)"
+)
+_PRODUCT_JS = r"(?:node|next|nuxt|vue|react|express|three|d3|chart|moment|angular|ember|svelte|solid)\.js"
+_SCRIPT_FILE_STEM_LOWER = re.compile(r"(?:^|(?<=[\s/'\"`(=]))[a-z0-9_][\w-]*\.(?:js|mjs|cjs|ts|py|sh)\b")
+
+
+def _command_shaped(lit):
+    if _CMD_TOOL.search(lit) or _CMD_SHELL.search(lit) or _CMD_INTERP.search(lit):
+        return True
+    # a script filename with a lowercase-led stem that is not a product name
+    for m in _SCRIPT_FILE_STEM_LOWER.finditer(lit):
+        if not re.fullmatch(_PRODUCT_JS, m.group(0), re.IGNORECASE):
+            return True
+    return False
+
+
 _TRANSCRIPT_KEYS = ("transcript_matches", "transcript_not_matches", "transcript_contains", "transcript_not_contains")
 
 
@@ -617,8 +639,11 @@ def _lint_transcript_command_shaped(items, path):
         for v in _assert_values(items, key):
             if not isinstance(v, str):
                 continue
-            lit = re.sub(r"\\(.)", r"\1", v)  # read `fetch-lesson\.js` as `fetch-lesson.js`
-            if _CMD_AFTER_OPERATOR.search(lit) or _CMD_AT_START.search(lit) or _SCRIPT_FILE.search(lit):
+            # Read the regex as prose: a class escape (`\s`, `\d`) becomes a space, and an escaped
+            # punctuation mark (`\.`, or an over-escaped `\\.`) becomes itself — `fetch-lesson\.js\s+129`
+            # reads as `fetch-lesson.js +129`.
+            lit = re.sub(r"\\+([^A-Za-z0-9])", r"\1", re.sub(r"\\+[A-Za-z]", " ", v))
+            if _command_shaped(lit):
                 out.append(
                     Finding(
                         "WARN",
