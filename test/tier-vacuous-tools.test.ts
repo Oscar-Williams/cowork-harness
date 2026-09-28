@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { tierVacuousTool, tierVacuousMessage } from "../src/run/tier-vacuous-tools";
+import { tierVacuousTool, tierVacuousMessage, objectFormTierVacuous } from "../src/run/tier-vacuous-tools";
 
 // `tool_not_called` on a tool the TIER never serves passes vacuously — it can never be violated. This
 // table is what the harness refuses at load. The tests that matter most are the NEGATIVE ones: the check
@@ -150,4 +150,37 @@ describe("executeScenario refuses a tier-vacuous tool_not_called at load", () =>
   // real container spawn — Docker, minutes, and a flaky unit test. The "must not reject" cases live in
   // the table describe above instead, which is where the decision is actually made: executeScenario
   // passes the pattern straight through, so a name absent from the table cannot be refused here.
+});
+
+describe("the object form of tool_not_called is held to the same tier table", () => {
+  it("rejects an object whose only tool is unserved (an input regex does not rescue it)", async () => {
+    await expect(
+      executeScenario(scenarioWith("hostloop", `  - tool_not_called: { tool: Bash, input: { command: 'rm\\s+-rf' } }\n`)),
+    ).rejects.toThrow(/can never be violated at fidelity `hostloop`[\s\S]*mcp__workspace__bash/);
+  });
+
+  it("rejects a LIST only when EVERY member is unserved", async () => {
+    await expect(
+      executeScenario(scenarioWith("hostloop", `  - tool_not_called: { tool: [Bash, WebFetch], input: { command: x } }\n`)),
+    ).rejects.toThrow(/can never be violated at fidelity `hostloop`/);
+  });
+  // A list with one served member ([Bash, mcp__workspace__bash]) is NOT refused — asserted on the pure
+  // table helper, since passing this check would continue into a real spawn.
+  it("a list with one served member is not vacuous", () => {
+    expect(objectFormTierVacuous({ tool: ["Bash", "mcp__workspace__bash"] }, "hostloop", false)).toBeUndefined();
+    expect(objectFormTierVacuous({ tool: ["Bash", "WebFetch"] }, "hostloop", false)?.tool).toBe("Bash");
+    expect(objectFormTierVacuous({ tool: "Ba*" }, "hostloop", false)).toBeUndefined();
+  });
+});
+
+describe("a bad regex nested in the object form is a load-time error, not a post-spend one", () => {
+  for (const [label, yaml] of [
+    ["input field", `  - tool_called: { tool: Bash, input: { command: '(' } }\n`],
+    ["input_any", `  - tool_called: { tool: Bash, input_any: '[' }\n`],
+    ["result.not_matches", `  - tool_not_called: { tool: Bash, result: { not_matches: '(' } }\n`],
+    ["subagent_type", `  - tool_called: { tool: Bash, scope: subagent, subagent_type: '(' }\n`],
+  ] as const)
+    it(label, () => {
+      expect(() => scenarioWith("container", yaml)).toThrow(/bad regex in tool_(not_)?called\./);
+    });
 });
