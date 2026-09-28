@@ -277,3 +277,37 @@ describe.skipIf(!can || !havePython)("a direct `scenario.py lint` names the load
     expect(r.stderr + r.stdout).not.toMatch(LOADER_SKIPPED);
   });
 });
+
+// `--strict` without `--min-severity` defaults the floor to WARN (4.0.0): it fails on ERROR and WARN and
+// hides INFO, as `lint-skill --strict` always has. Driven through the built CLI, since that is what the
+// packaged Action's `strict` input and a CI step call.
+describe.skipIf(!can || !havePython)("lint --strict defaults its floor to WARN", () => {
+  const INFO_ONLY = [...HEAD, "assert:", "  - file_exists: outputs/x.json"];
+
+  it("an INFO-only scenario passes bare `--strict`, and the INFO is not printed", () => {
+    const d = mkdtempSync(join(tmpdir(), "cwh-lint-strict-floor-"));
+    const f = scenario(d, "s.yaml", INFO_ONLY);
+    const plain = runCli(["lint", f]);
+    expect(plain.stdout, "the scenario must carry an INFO for this test to mean anything").toMatch(/manifest-needs-snapshot/);
+    const r = runCli(["lint", f, "--strict"]);
+    expect(r.code).toBe(0);
+    expect(r.stdout).not.toMatch(/manifest-needs-snapshot/);
+  });
+
+  it("`--strict --min-severity INFO` keeps the old gate: the INFO is printed and fails", () => {
+    const d = mkdtempSync(join(tmpdir(), "cwh-lint-strict-floor-"));
+    const f = scenario(d, "s.yaml", INFO_ONLY);
+    const r = runCli(["lint", f, "--strict", "--min-severity", "INFO"]);
+    expect(r.code).toBe(1);
+    expect(r.stdout).toMatch(/manifest-needs-snapshot/);
+  });
+
+  it("json mode agrees: bare `--strict` reports no INFO finding and ok:true", () => {
+    const d = mkdtempSync(join(tmpdir(), "cwh-lint-strict-floor-"));
+    const f = scenario(d, "s.yaml", INFO_ONLY);
+    const r = runCli(["lint", f, "--strict", "--output-format", "json"]);
+    expect(r.code).toBe(0);
+    expect(JSON.parse(r.stdout.trim()).ok).toBe(true);
+    expect(jsonFindings(r.stdout)).toEqual([]);
+  });
+});

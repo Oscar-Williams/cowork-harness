@@ -162,11 +162,11 @@ jobs:
             node dist/cli.js verify-cassettes "$c"
           done
       - name: Lint example scenarios (no-silent-false-green invariants)
-        # --strict makes a finding FAIL; --min-severity WARN scopes that to ERROR+WARN so the
-        # advisory INFO class stays advisory. Without the pair, every WARN-class rule was decoration:
-        # `cmd_lint` exits non-zero only on `has_error or (strict and findings)`, so a rule like
-        # vacuous-gate-assert could fire on the corpus and CI would still be green. Bare --strict
-        # would red today on 6 pre-existing INFOs.
+        # --strict makes a finding FAIL. Without it every WARN-class rule is decoration: `cmd_lint`
+        # exits non-zero only on `has_error or (strict and findings)`, so a rule like
+        # vacuous-gate-assert could fire on the corpus and CI would still be green. --min-severity WARN
+        # is --strict's own default floor since 4.0.0; it stays explicit so the step means the same
+        # thing on any CLI version (on 3.x, bare --strict also failed on the advisory INFO class).
         run: node dist/cli.js lint examples/scenarios/*.yaml examples/scenarios/trigger-accuracy-sweep/*.yaml e2e/scenarios/*.yaml --strict --min-severity WARN
 
   # ── Stage 1a: the heavy unit suite, SHARDED across parallel runners (the former `unit` 15-min pole).

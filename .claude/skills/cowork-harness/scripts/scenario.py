@@ -1733,7 +1733,11 @@ def cmd_lint(args):
     # what the run actually cares about. Filtering at render only would make `--strict --min-severity ERROR`
     # print "0 findings" and still exit 1 (because --strict keys off the unfiltered set), which is
     # indistinguishable from a bug. Applied identically to --json so the two output modes never disagree.
-    floor = SEV_ORDER[getattr(args, "min_severity", "INFO")]
+    # The DEFAULT floor depends on --strict: WARN under --strict (it fails on ERROR and WARN and hides INFO,
+    # the same rule `lint-skill --strict` has), INFO otherwise. An explicit --min-severity always wins, so
+    # `--strict --min-severity INFO` still prints and fails on INFO.
+    min_severity = getattr(args, "min_severity", None) or ("WARN" if args.strict else "INFO")
+    floor = SEV_ORDER[min_severity]
     all_findings = [x for x in all_findings if SEV_ORDER[x.severity] <= floor]
     if args.json:
         print(json.dumps([x.as_dict() for x in all_findings], indent=2))
@@ -3045,17 +3049,16 @@ def main(argv=None):
     lp.add_argument(
         "--strict",
         action="store_true",
-        help="exit non-zero on WARN/INFO too, not just ERROR. NOTE: this is STRICTER than `lint-skill "
-        "--strict`, which never fails on INFO — the two flags share a name and do not share a rule. "
-        "Pair with `--min-severity WARN` for the ERROR+WARN behaviour (what this repo's own CI uses, "
-        "because the advisory INFO class fires on scenarios that are perfectly fine).",
+        help="exit non-zero on WARN too, not just ERROR. Under --strict the default --min-severity is "
+        "WARN, so INFO findings are neither printed nor failing — the same rule as `lint-skill "
+        "--strict`, which never fails on INFO. Pass `--min-severity INFO` to see and fail on INFO too.",
     )
     lp.add_argument(
         "--min-severity",
         choices=("ERROR", "WARN", "INFO"),
-        default="INFO",
+        default=None,
         help="drop findings below this severity BEFORE printing and before the exit computation "
-        "(default INFO = keep everything, unchanged). --json is filtered identically. So "
+        "(default: INFO = keep everything; WARN under --strict). --json is filtered identically. So "
         "`--strict --min-severity ERROR` behaves exactly like a plain lint, rather than reporting "
         "0 findings and still exiting 1.",
     )
@@ -3107,9 +3110,9 @@ def main(argv=None):
         "--strict",
         action="store_true",
         help="exit non-zero on WARN too, not just ERROR (CI-recommended invocation; plain lint-skill is "
-        "advisory-only). NEVER fails on INFO — unlike `lint --strict`, which does; the two flags share a "
-        "name and not a rule. See the subparser description for why the INFO-class subagent_type findings "
-        "are deliberately unfailable.",
+        "advisory-only). NEVER fails on INFO — the same default as `lint --strict` (which, unlike this "
+        "flag, can be widened with `--min-severity INFO`). See the subparser description for why the "
+        "INFO-class subagent_type findings are deliberately unfailable.",
     )
     lsp.set_defaults(func=cmd_lint_skill)
 

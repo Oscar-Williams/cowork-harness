@@ -221,7 +221,9 @@ authorable). Reach for this list when debugging a run's behavior, that one while
     rejects outright (`lane-remote-incompatible-key`, an ERROR), so the INFO would be redundant advice
     about a key the scenario can never even load with. `gate-needs-controlout` has no such exception. *Fix:*
     `lint --min-severity WARN` in CI (≥1.11.0) — the INFO advisories stay one flag away for interactive use.
-    `--strict --min-severity ERROR` behaves as a plain lint, not a contradiction.
+    From 4.0.0 WARN is `--strict`'s default floor, so bare `lint --strict` hides and passes INFO; add
+    `--min-severity INFO` to fail on it. `--strict --min-severity ERROR` behaves as a plain lint, not a
+    contradiction.
 23. **`verify-cassettes`/`replay` report a `discovery-surface` note on cassettes you just recorded fine.**
     *Why:* the cassette froze its `system/init` tool inventory from before the skills/plugins discovery
     servers existed at that tier (added 1.10.0). It is a non-gating **note**, never a finding — it cannot
