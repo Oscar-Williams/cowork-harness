@@ -2422,6 +2422,34 @@ const NOOP_DECIDER: Decider = {
   },
 };
 
+/** Frozen tool_result text by tool_use_id (string or text-block content), for the record-time guard. */
+function frozenToolResults(events: string[]): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const l of Array.isArray(events) ? events : []) {
+    let m: unknown;
+    try {
+      m = JSON.parse(l);
+    } catch {
+      continue;
+    }
+    const content = (m as { message?: { content?: unknown } })?.message?.content;
+    if (!Array.isArray(content)) continue;
+    for (const b of content) {
+      if (!b || typeof b !== "object" || (b as { type?: unknown }).type !== "tool_result") continue;
+      const id = (b as { tool_use_id?: unknown }).tool_use_id;
+      const c = (b as { content?: unknown }).content;
+      const text =
+        typeof c === "string"
+          ? c
+          : Array.isArray(c)
+            ? c.map((x) => (x && typeof x === "object" ? String((x as { text?: unknown }).text ?? "") : "")).join(" ")
+            : "";
+      if (typeof id === "string") out.set(id, text);
+    }
+  }
+  return out;
+}
+
 /** The frozen tool_use blocks of an events stream, in order: `{id, name, input}` per block. */
 function frozenToolUses(
   events: string[],
@@ -2479,6 +2507,44 @@ export function redactionRewroteNegativeToolInputs(base: Cassette, redacted: Cas
     }
     const globs = Array.isArray(o.tool) ? o.tool : [o.tool];
     const named = (n: string) => toolNameSpellings(n).some((sp) => anyGlobMatches(globs, sp));
+    // The COMMON case, which neither rule above catches: redaction put a token into a field (or the paired
+    // result) this check reads, whatever its regex. Replay then reports the check evidence-unavailable (a
+    // tokened miss is unknown), and the verdict-divergence check refuses the write — say why, once per
+    // assertion, with the ways out. (Scope is not applied here: the frozen stream carries no dispatch
+    // classification, so this counts every call of the named tool — the conservative side.)
+    const readFields = (b: (typeof before)[number]) => (o.input_any !== undefined ? Object.keys(b.input) : Object.keys(o.input ?? {}));
+    const afterResults = o.result?.matches !== undefined ? frozenToolResults(redacted.events) : undefined;
+    const beforeResults = afterResults ? frozenToolResults(base.events) : undefined;
+    const tokened = new Map<string, number>();
+    for (let k = 0; k < before.length && k < after.length; k++) {
+      const b = before[k];
+      if (!named(b.name)) continue;
+      for (const f of readFields(b)) {
+        const post = after[k].input[f]?.text;
+        if (post !== undefined && hasRedactionToken(post) && !hasRedactionToken(b.input[f]?.text ?? "")) {
+          const where = `\`${f}\``;
+          tokened.set(where, (tokened.get(where) ?? 0) + 1);
+        }
+      }
+      if (afterResults && b.id !== undefined) {
+        const post = afterResults.get(b.id);
+        if (post !== undefined && hasRedactionToken(post) && !hasRedactionToken(beforeResults!.get(b.id) ?? ""))
+          tokened.set("the paired result", (tokened.get("the paired result") ?? 0) + 1);
+      }
+    }
+    if (tokened.size)
+      findings.push(
+        `assert[${i}] tool_not_called on ${globs.join(" | ")}: ` +
+          [...tokened]
+            .map(
+              ([where, n]) =>
+                `${n} ${globs.join(" | ")} call${n === 1 ? "" : "s"} ${n === 1 ? "carries" : "carry"} a redaction token in ${where}`,
+            )
+            .join("; ") +
+          ` — a field this check reads, so on the committed cassette replay can only report it evidence-unavailable. ` +
+          `Ways out: narrow the check (\`scope:\`, or a \`tool\` list those calls are not in) so no redacted call is a candidate; ` +
+          `use the string form (\`tool_not_called: <tool>\`), which reads no input; or accept that this check is live-only`,
+      );
     for (let k = 0; k < before.length && k < after.length; k++) {
       const b = before[k];
       if (!named(b.name)) continue;

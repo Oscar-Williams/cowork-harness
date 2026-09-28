@@ -98,8 +98,12 @@ describe("record-time warning (the exact guard)", () => {
     expect(findings.join("\n")).toMatch(/b1/);
   });
 
-  it("is silent when redaction leaves every negative input regex and its matches alone", () => {
-    const clean = cassette([{ tool_not_called: { tool: "Bash", input: { command: "git\\s+push" } } }]);
+  it("is silent when redaction touches neither the regex nor any field the check reads", () => {
+    // The command carries no redactable literal, so nothing the check reads was rewritten.
+    const clean = {
+      ...cassette([{ tool_not_called: { tool: "Bash", input: { command: "git\\s+push" } } }]),
+      events: streamWith("git status", "ok"),
+    } as Cassette;
     expect(redactionRewroteNegativeToolInputs(clean, redactCassette(clean, POLICY))).toEqual([]);
   });
 
