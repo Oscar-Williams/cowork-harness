@@ -245,8 +245,10 @@ on a schema error; a directory reports each `✗ broken:` file and exits 1). **R
 its sign:** `record <file>` — with or without
 `--dry-run` — answers `2` for "did not load" and `1` for "loaded fine, but this record is refused" (a
 pre-spend policy refusal; `--max-budget-usd` is the one refusal that keeps exit 2). Treating any non-zero
-as "scenario broken" mis-reports every refused-but-valid scenario. Corollary: **the loader** fails LOUD on an unknown key (never silently) —
-but **`replay` does not**: a frozen top-level key it doesn't recognize (e.g. `lane:` recorded pre-1.16.0) is
-silently ignored and can flip a lane-sensitive verdict green; only frozen **assertion** keys stay
-hard-rejected there. Full split + the v11 version-regime:
+as "scenario broken" mis-reports every refused-but-valid scenario. Corollary: **the loader** fails LOUD on an unknown key (never silently).
+`replay` reads a frozen scenario from a cassette, and what an OLDER CLI does with a key it doesn't know is
+decided when the cassette is recorded. A key that changes what a verdict means (e.g. `lane: remote`) raises
+the cassette's version stamp, so the older `replay` / `verify-cassettes` refuses it as too new instead of
+evaluating it (`replay --best-effort-future-cassette` overrides that and names the key). A meaning-neutral
+key leaves the stamp alone and is ignored by design. Full split:
 [docs/scenario.md](https://github.com/yaniv-golan/cowork-harness/blob/main/docs/scenario.md#unknown-keys-the-loader-is-strict-lint-is-lenient).

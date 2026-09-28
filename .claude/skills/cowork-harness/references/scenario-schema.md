@@ -52,11 +52,11 @@ lane: local                         # OPTIONAL — which Cowork lane's DELIVERY 
                                     # NEEDS >= 1.14.0: on an older CLI a scenario carrying `lane:` does NOT
                                     # load (`Unrecognized key: "lane"`, exit 2) — it is NOT reinterpreted as
                                     # `lane: local`. Adopting the key means raising your floor. That
-                                    # guarantee is LOADER-ONLY: replay reads a frozen scenario as
-                                    # passthrough, so an unrecognized `lane:` there is silently ignored,
-                                    # not refused — UNLESS the cassette is v11 (lane: remote, recorded
-                                    # >= 1.16.0), which replay/verify-cassettes on an older CLI DO refuse
-                                    # loudly (`--best-effort-future-cassette` overrides that refusal).
+                                    # guarantee is the LOADER's. On replay the cassette's stamp decides:
+                                    # `lane: remote` raises it (v11+), so an older replay/verify-cassettes
+                                    # refuses the cassette as too new (`--best-effort-future-cassette`
+                                    # overrides that on replay); `lane: local` means what an older CLI
+                                    # already does, so it lifts nothing.
 on_unanswered: fail                 # policy for unscripted gates: fail | prompt | first | llm — run rejects prompt
                                     # ("agent" is retired — no longer a valid value)
 

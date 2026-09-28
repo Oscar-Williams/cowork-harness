@@ -105,7 +105,7 @@ they report it, and the difference matters:
 | the **loader** — `run`, `skill`, `record` | **hard error**: `Unrecognized key: "<k>"`; the scenario does not run at all | `2` (a directory target reports each `✗ broken:` file and exits `1`) |
 | **`cowork-harness lint`** | ✗ `ERROR [scenario-invalid]` (the loader's own error) plus ⚠ `WARN [unknown-top-key]` with the list of valid keys | `1` |
 | `python3 scenario.py lint` (run directly) | ⚠ `WARN [unknown-top-key]` only — the script is offline and does not run the loader | `0` |
-| **`replay`** (frozen scenario) | **silently ignored** — carried in the cassette but never consulted; can flip a lane-sensitive assertion's verdict, see below | `0` |
+| **`replay`** (frozen scenario, older CLI) | decided by the cassette's version stamp: a key that changes what a verdict means raised it, so the older CLI **refuses the cassette as too new**; a meaning-neutral key is **ignored by design** — see below | `1` refused · `0` ignored |
 
 Two consequences worth internalising:
 
@@ -123,11 +123,16 @@ Two consequences worth internalising:
   it is the hint for fixing it (the valid keys, a rename).
 - **Unknown *top-level* scenario keys are handled differently by the two paths.** The **loader**
   (`run`/`skill`/`record`, reading scenario YAML) rejects one outright: exit 2 for a single file, or exit 1
-  for a directory, which reports each `✗ broken:` file. **`replay` does not.** A cassette's frozen scenario
-  is read as a passthrough object, so a top-level key the running CLI does not know is carried in the file
-  but never consulted — replay behaves exactly as if it were absent. Where that key conditions assertions
-  (as `lane:` does), the result is not merely quiet: **a stale CLI can report green on a cassette the
-  current CLI fails.** Since `replay` is the token-free CI gate, pin the floor in CI.
+  for a directory, which reports each `✗ broken:` file. **`replay` does not reject the key itself — the
+  cassette's version stamp decides.** A cassette's frozen scenario is read as a passthrough object, so a
+  top-level key the running CLI does not know is carried in the file but never consulted. That is only
+  safe when the key does not change what a verdict means, and the recorder is what guarantees it: a key
+  that does (`lane: remote`, for one) raises the cassette's `cassetteVersion` stamp, so an older `replay`
+  or `verify-cassettes` **refuses the cassette as too new** instead of evaluating it without the key. A
+  meaning-neutral key leaves the stamp alone and is **ignored by design** — that forward tolerance is what
+  lets an older CLI keep replaying a newer cassette that only added bookkeeping. The residual is a
+  recorder that classifies a meaning-changing key as neutral; that is checked when the key is added, not
+  at replay.
 
   *Frozen **assertions** are not loose:* an assertion key this CLI does not recognise, in a cassette
   recorded at this version or older, is a hard reject (exit 2) rather than a silent drop.
@@ -199,11 +204,11 @@ cloud** / **On your computer**"), with cloud the default for new sessions. They 
 > **`lane:` needs cowork-harness ≥ 1.14.0.** On an older CLI a scenario carrying it does **not** load —
 > `Unrecognized key: "lane"`, exit 2 — rather than falling back to `lane: local`. So adopting the key means
 > raising your floor (`npx "cowork-harness@^1.14.0"` <!-- floor-historical: illustrates the 1.14.0 feature gate, not the current floor -->, or the `npm i -g` pin in your CI recipe); it will
-> not silently mean something different on an older runner **at the loader**. That guarantee is
-> loader-only: on `replay`, a frozen `lane:` an older CLI doesn't recognize is **silently ignored**, not
-> refused — unless the cassette itself is stamped v11 (recorded ≥ 1.16.0 with `lane: remote`), which
-> `replay` and `verify-cassettes` on an older CLI both refuse loudly instead (`replay` alone takes
-> `--best-effort-future-cassette` to override that refusal). See
+> not silently mean something different on an older runner **at the loader**. On `replay` the cassette's
+> stamp carries the same guarantee: a cassette recorded ≥ 1.16.0 with `lane: remote` is stamped v11 or
+> later, which `replay` and `verify-cassettes` on an older CLI both refuse as too new (`replay` alone takes
+> `--best-effort-future-cassette` to override that refusal). `lane: local` means what an older CLI already
+> does, so it raises nothing. See
 > [Unknown keys](#unknown-keys-the-loader-is-strict-lint-is-lenient).
 
 `lane` is orthogonal to **`fidelity`** (which isolation tier the harness runs in) and to **`execution`**
