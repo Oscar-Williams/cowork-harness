@@ -15,7 +15,6 @@
 // Given both before and after the subcommand, or twice after it, is a usage error: there is no ordering
 // between two explicit values that a reader could predict.
 import { existsSync, readFileSync } from "node:fs";
-import { resolve } from "node:path";
 import { parseDotenv, DotenvReadError } from "../dotenv.js";
 import { expandUserPath } from "../session.js";
 import type { ArgSpec, ParsedArgs } from "../cli-args.js";
@@ -83,7 +82,8 @@ export function applyCommandGlobal(command: string, flag: CommandGlobalFlag, val
       undefined,
       json,
     );
-  if (loaded.length) log(`[env] loaded ${loaded.length} var(s) from ${resolve(value)}: ${loaded.join(", ")}`);
+  // The same line, and the same condition (an explicit --dotenv always reports), as the leading form in main().
+  if (loaded.length) log(`[env] loaded ${loaded.length} var(s): ${loaded.join(", ")}`);
 }
 
 /** For a `parseArgs` command: accept the two flags (repeatable, so a duplicate is reported rather than

@@ -184,3 +184,16 @@ describe.skipIf(!can)("a --dotenv-shaped token that is another flag's VALUE is n
     expect(r.out).not.toMatch(/--run-dir/);
   });
 });
+
+describe.skipIf(!can)("the trailing --dotenv reports what it loaded the way the leading form does", () => {
+  it("same `[env] loaded` line (keys only — no absolute path) before or after the subcommand", () => {
+    const d = mkdtempSync(join(tmpdir(), "cmd-globals-log-"));
+    writeFileSync(join(d, "e.env"), "CWH_LOG_PROBE_KEY=1\n");
+    const line = (out: string) => out.split("\n").find((l) => l.startsWith("[env] loaded"));
+    const after = cli(["prune", "--dotenv", "e.env", "--run-dir", "/tmp/cwh-log-DOESNOTEXIST"], { cwd: d });
+    const before = cli(["--dotenv", "e.env", "prune", "--run-dir", "/tmp/cwh-log-DOESNOTEXIST"], { cwd: d });
+    expect(line(before.out)).toBe("[env] loaded 1 var(s): CWH_LOG_PROBE_KEY");
+    expect(line(after.out)).toBe(line(before.out));
+    expect(after.out).not.toContain(d);
+  });
+});
