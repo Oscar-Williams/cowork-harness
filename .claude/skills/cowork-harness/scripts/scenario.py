@@ -64,7 +64,8 @@ Run directly, this script stays offline and never parses with the loader, so pre
 when it is installed.
 
 Designed for agents and CI: non-interactive, --help, --json, meaningful exit codes,
-idempotent. `lint` exits 1 on any ERROR (or any finding with --strict); else 0.
+idempotent. `lint` exits 1 on any ERROR, or with --strict on any finding at or above the
+--min-severity floor (WARN by default under --strict); else 0.
 
 Uses PyYAML — a pure-Python copy is bundled under `_vendor/`, so no separate install is needed; a
 system PyYAML is preferred when present.
