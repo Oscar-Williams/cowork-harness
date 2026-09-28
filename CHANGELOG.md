@@ -141,7 +141,9 @@ All notable changes to this project are documented here. The format is based on
   `docs/scenario.md` said such a key (e.g. `lane:`) is "silently ignored" and "can flip a verdict". The
   cassette's version stamp decides instead: a key that changes what a verdict means raises the stamp,
   so an older `replay` / `verify-cassettes` refuses the cassette as too new; a meaning-neutral key is
-  ignored by design.
+  ignored by design. For `lane: "remote"` the stamp is raised (v11) only when the cassette was recorded
+  on ≥ 1.16.0 — one recorded by 1.14.0/1.15.0 is v10, a pre-`lane` CLI ignores the key there, and
+  `rehash` re-stamps it.
 
 ## [3.10.0] — 2026-09-27
 

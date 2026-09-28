@@ -48,3 +48,35 @@ describe("replay's unknown-frozen-key contract is stated as the stamp mechanism,
     }
   });
 });
+
+// A `lane: remote` cassette is stamped v11 only when RECORDED on >= 1.16.0: one recorded by 1.14.0/1.15.0 is
+// v10, and a pre-`lane` CLI ignores the key there. Every sentence that credits the stamp with the refusal
+// has to carry that qualifier, or it overclaims in the other direction.
+describe("the lane: remote stamp claim carries its recorded-on-1.16.0 qualifier", () => {
+  const unreleased = (() => {
+    const c = readFileSync("CHANGELOG.md", "utf8");
+    return c.slice(c.indexOf("## [Unreleased]"), c.indexOf("\n## [", c.indexOf("## [Unreleased]") + 1));
+  })();
+  const SITES: Array<[string, string]> = [
+    ["references/authoring.md", readFileSync(join(REFS, "authoring.md"), "utf8")],
+    ["references/scenario-schema.md", readFileSync(join(REFS, "scenario-schema.md"), "utf8")],
+    ["docs/scenario.md", readFileSync("docs/scenario.md", "utf8")],
+    ["CHANGELOG [Unreleased]", unreleased],
+  ];
+  for (const [name, text] of SITES)
+    it(`${name}: every "lane: remote raises the stamp" claim names 1.16.0`, () => {
+      const claims = [...text.matchAll(/lane: (?:"?remote"?)[`)]*[^]{0,120}?\b(?:raises|raised)\b/g)];
+      expect(claims.length, `${name} no longer states the stamp mechanism — re-point this guard`).toBeGreaterThan(0);
+      for (const m of claims) {
+        const at = m.index ?? 0;
+        const window = text.slice(Math.max(0, at - 300), at + 400);
+        expect(window, `${name}: …${text.slice(at, at + 120)}…`).toMatch(/1\.16\.0/);
+      }
+    });
+
+  it("docs/scenario.md gives each command's too-new exit code: verify-cassettes 3, replay 1", () => {
+    const doc = readFileSync("docs/scenario.md", "utf8");
+    expect(doc).toMatch(/`verify-cassettes`[^\n]{0,80}`3`/);
+    expect(doc).toMatch(/`replay`[^\n]{0,80}`1`/);
+  });
+});

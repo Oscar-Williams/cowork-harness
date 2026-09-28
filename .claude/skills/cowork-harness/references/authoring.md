@@ -250,6 +250,8 @@ as "scenario broken" mis-reports every refused-but-valid scenario. Corollary: **
 `replay` reads a frozen scenario from a cassette, and what an OLDER CLI does with a key it doesn't know is
 decided when the cassette is recorded. A key that changes what a verdict means (e.g. `lane: remote`) raises
 the cassette's version stamp, so the older `replay` / `verify-cassettes` refuses it as too new instead of
-evaluating it (`replay --best-effort-future-cassette` overrides that and names the key). A meaning-neutral
-key leaves the stamp alone and is ignored by design. Full split:
+evaluating it (`replay --best-effort-future-cassette` overrides that and names the key). For `lane: remote`
+that holds for a cassette recorded on ≥ 1.16.0 (stamped v11); one recorded by 1.14.0 or 1.15.0 is stamped
+v10, a pre-`lane` CLI ignores the key there, and `rehash` re-stamps it. A meaning-neutral key leaves the
+stamp alone and is ignored by design. Full split:
 [docs/scenario.md](https://github.com/yaniv-golan/cowork-harness/blob/main/docs/scenario.md#unknown-keys-the-loader-is-strict-lint-is-lenient).

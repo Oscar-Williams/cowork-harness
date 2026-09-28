@@ -105,7 +105,7 @@ they report it, and the difference matters:
 | the **loader** — `run`, `skill`, `record` | **hard error**: `Unrecognized key: "<k>"`; the scenario does not run at all | `2` (a directory target reports each `✗ broken:` file and exits `1`) |
 | **`cowork-harness lint`** | ✗ `ERROR [scenario-invalid]` (the loader's own error) plus ⚠ `WARN [unknown-top-key]` with the list of valid keys | `1` |
 | `python3 scenario.py lint` (run directly) | ⚠ `WARN [unknown-top-key]` only — the script is offline and does not run the loader | `0` |
-| **`replay`** (frozen scenario, older CLI) | decided by the cassette's version stamp: a key that changes what a verdict means raised it, so the older CLI **refuses the cassette as too new**; a meaning-neutral key is **ignored by design** — see below | `1` refused · `0` ignored |
+| **`replay`** / **`verify-cassettes`** (frozen scenario, older CLI) | decided by the cassette's version stamp: a key that changes what a verdict means raised it, so the older CLI **refuses the cassette as too new**; a meaning-neutral key is **ignored by design** — see below (for `lane: remote`, only a cassette recorded on ≥ 1.16.0 carries the raised stamp) | refused: `replay` exits `1`, `verify-cassettes` exits `3` (could not verify) · ignored: `0` |
 
 Two consequences worth internalising:
 
@@ -127,8 +127,9 @@ Two consequences worth internalising:
   cassette's version stamp decides.** A cassette's frozen scenario is read as a passthrough object, so a
   top-level key the running CLI does not know is carried in the file but never consulted. That is only
   safe when the key does not change what a verdict means, and the recorder is what guarantees it: a key
-  that does (`lane: remote`, for one) raises the cassette's `cassetteVersion` stamp, so an older `replay`
-  or `verify-cassettes` **refuses the cassette as too new** instead of evaluating it without the key. A
+  that does (`lane: remote`, for one, when recorded on ≥ 1.16.0 — see below for the 1.14.0/1.15.0 window)
+  raises the cassette's `cassetteVersion` stamp, so an older `replay` (exit `1`) or `verify-cassettes`
+  (exit `3`) **refuses the cassette as too new** instead of evaluating it without the key. A
   meaning-neutral key leaves the stamp alone and is **ignored by design** — that forward tolerance is what
   lets an older CLI keep replaying a newer cassette that only added bookkeeping. The residual is a
   recorder that classifies a meaning-changing key as neutral; that is checked when the key is added, not
