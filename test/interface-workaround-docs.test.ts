@@ -19,6 +19,7 @@ export const WORKAROUND_NEEDLES: Array<[string, RegExp]> = [
   ["put --dotenv before the subcommand", /put it BEFORE the subcommand/i],
   ["two different scaffold tools", /Two different `scaffold` tools/i],
   ["native scaffold rejects --name", /unknown flag: --name/],
+  ["scenario.py scaffold presented as a separate tool", /scenario\.py scaffold[^\n]*distinct from `cowork-harness scaffold/],
   [
     "the skill lane cannot use allow_stall",
     /`skill` lane cannot use it|Scenario-only:\*\* an open-ended `skill` run has no `assert:` block, so it cannot opt out/,
@@ -31,6 +32,7 @@ const FILES = [
   join(SKILL, "SKILL.md"),
   ...readdirSync(join(SKILL, "references")).map((f) => join(SKILL, "references", f)),
   "README.md",
+  "llms.txt",
   ...readdirSync("docs")
     .filter((f) => f.endsWith(".md"))
     .map((f) => join("docs", f)),
@@ -56,6 +58,7 @@ describe("no doc still warns around an interface that has been fixed", () => {
       "**`--dotenv` is a GLOBAL flag — put it BEFORE the subcommand.**",
       "**Two different `scaffold` tools — don't confuse them.**",
       "Passing that section's flag set to the native command fails with `unknown flag: --name` (exit 2).",
+      "`python3 …/scenario.py scaffold --name <name>` — a skeleton from scratch (distinct from `cowork-harness scaffold <run-id | run-dir>`)",
       "27. **`allow_stall: true` is a scenario assertion, so the `skill` lane cannot use it.**",
       "Passing one where the other command wants it fails as an unrecognized flag — they don't interchange.",
     ];
