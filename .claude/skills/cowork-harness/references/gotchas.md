@@ -255,8 +255,8 @@ authorable). Reach for this list when debugging a run's behavior, that one while
     **quarantined** to `<runs-root>/quarantine/` with a `.findings.txt` naming what leaked, and the command
     fails without writing the path you asked for (the recording is not discarded — you paid for it).
     `verify-cassettes --allow-host-inventory <regex>` is unrelated: a per-finding suppressor for the
-    scanner's `host-inventory` class on an already-committed cassette. Passing one where the other command
-    wants it fails as an unrecognized flag — they don't interchange. Depth: `references/ci-recipe.md`.
+    scanner's `host-inventory` class on an already-committed cassette. They don't interchange: passing one
+    to the other command is a usage error that names the command owning it. Depth: `references/ci-recipe.md`.
 
 26. **A `skill`-lane `PASS` does not mean the skill ran, or that the run was the one you wanted.** *Why:*
     an open-ended `skill` run has no `assert:` block, so its verdict reports only that **no guard fired**

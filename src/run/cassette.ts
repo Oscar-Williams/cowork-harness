@@ -3692,6 +3692,32 @@ export const RECORD_USAGE =
 /** `record <scenario.yaml | dir> [--out <file>] [--rerecord-stale] [--no-redact] [--allow-failing]` —
  *  run live + save a cassette. A single file records one; a dir batches; --rerecord-stale treats
  *  the dir as committed cassettes and re-records only those whose fingerprint drifted. */
+/** Route a host-inventory flag given to the wrong command. Three flags share a prefix across two commands —
+ *  `record --allow-host-inventory-fixture` (proceed past the pre-flight refusal), `record
+ *  --allow-host-inventory-findings` (write a recording the scan flagged) and `verify-cassettes
+ *  --allow-host-inventory <regex>` (suppress one finding on a committed cassette) — so a bare `unknown flag`
+ *  leaves the user hunting for the sibling. Keyed on parseArgs' exact `unknown flag: <name>` message (the name
+ *  is the part before any `=`), so an unrelated unknown flag gets no invented hint. Returns the hint or
+ *  undefined. */
+export function hostInventoryFlagHint(command: "record" | "replay" | "verify-cassettes", message: string): string | undefined {
+  const flag = /^unknown flag: (\S+)$/.exec(message)?.[1];
+  if (!flag) return undefined;
+  if (command !== "record" && (flag === "--allow-host-inventory-fixture" || flag === "--allow-host-inventory-findings"))
+    return (
+      `${flag} is a \`record\` flag: \`cowork-harness record <scenario.yaml> ${flag}\`` +
+      (command === "verify-cassettes"
+        ? ". On verify-cassettes the host-inventory flag is --allow-host-inventory <regex>, which suppresses one finding on an already-committed cassette."
+        : ".")
+    );
+  if (command === "record" && flag === "--allow-host-inventory")
+    return (
+      "--allow-host-inventory is a `verify-cassettes` flag: `verify-cassettes --allow-host-inventory <regex>` suppresses one " +
+      "host-inventory finding on an already-committed cassette. On record, --allow-host-inventory-fixture proceeds past the " +
+      "pre-flight refusal and --allow-host-inventory-findings writes a recording the scan flagged."
+    );
+  return undefined;
+}
+
 export async function cmdRecord(args: string[]) {
   // Computed up front (isJsonOutput, not a bare p.options read) so every error path — including a
   // parseArgs throw before options are known — emits the shared JSON error envelope in JSON mode.
@@ -3710,7 +3736,8 @@ export async function cmdRecord(args: string[]) {
       aliases: { "-q": "--quiet" },
     });
   } catch (e) {
-    return fail("record", "usage", (e as Error).message, undefined, asJson);
+    const msg = (e as Error).message;
+    return fail("record", "usage", msg, hostInventoryFlagHint("record", msg), asJson);
   }
   let maxArtifactBytes: number | undefined;
   const mab = p.options["--max-artifact-bytes"];
@@ -5548,7 +5575,8 @@ export async function cmdReplay(args: string[]) {
       aliases: { "-q": "--quiet" },
     });
   } catch (e) {
-    return fail("replay", "usage", String((e as Error).message), undefined, asJson);
+    const msg = String((e as Error).message);
+    return fail("replay", "usage", msg, hostInventoryFlagHint("replay", msg), asJson);
   }
   const target = p.positionals[0];
   if (!target) {
@@ -6086,7 +6114,8 @@ export async function cmdVerifyCassettes(args: string[]) {
       aliases: { "-q": "--quiet" },
     });
   } catch (e) {
-    return fail("verify-cassettes", "usage", String((e as Error).message), undefined, asJson);
+    const msg = String((e as Error).message);
+    return fail("verify-cassettes", "usage", msg, hostInventoryFlagHint("verify-cassettes", msg), asJson);
   }
   const json = p.options["--output-format"] === "json";
   // Ship A escape hatch, same contract as `replay --session`: supplies a SESSION (so `staleness.hash_ignore`
