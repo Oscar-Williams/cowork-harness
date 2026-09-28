@@ -87,9 +87,9 @@ reproducibility; `--decider-dir` is for the driving-agent workflow and flags the
 On `record` it answers gates live during authoring instead of scripting `answers:` up front — single
 scenario only, not a `dir/` batch — see [cassette.md](./cassette.md#answering-gates-during-recording).)
 
-Pin the run's output location up front with the **global** `--run-dir <path>` flag (it must precede the
-subcommand) if the driver will also need to find the run dir once the process is backgrounded — e.g. to
-watch overall progress with `status --follow` alongside the gate stream (see step (b)).
+Pin the run's output location up front with `--run-dir <path>` (before or after the subcommand) if the
+driver will also need to find the run dir once the process is backgrounded — e.g. to watch overall progress
+with `status --follow` alongside the gate stream (see step (b)).
 
 ### (b) Arm one Monitor on the gate stream
 

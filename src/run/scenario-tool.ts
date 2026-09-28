@@ -6,6 +6,7 @@ import { spawnSync } from "node:child_process";
 import { fail, isJsonOutput, jsonError, jsonPayloadEnvelope, parseOutputFormat } from "./envelope.js";
 import { writeAllSync } from "../io.js";
 import { lintPrepass, type LintFinding } from "./lint-load.js";
+import { stripCommandGlobals } from "./command-globals.js";
 
 // Synchronous fd write (match envelope.ts/cli.ts/doctor.ts): writeAllSync retries EAGAIN and loops on
 // short writes so the whole payload lands before process.exit on a pipe (see src/io.ts).
@@ -114,6 +115,8 @@ function runLintLike(subcommand: "lint" | "lint-skill", args: string[], prepass:
   } catch (e) {
     fail(subcommand, "usage", String((e as Error).message), undefined, isJsonOutput(args));
   }
+  // --dotenv / --run-dir after the subcommand: applied here (python knows neither), then not forwarded.
+  args = stripCommandGlobals(subcommand, args, ["--min-severity", "--output-format"], isJsonOutput(args));
   resolveScenarioScript(); // fail on a missing script before the loader pre-pass does any work
   const json = isJsonOutput(args);
   const pyArgs = stripOutputFormatFlag(args);
@@ -242,6 +245,12 @@ export const PY_SCAFFOLD_FLAGS = [
   "--no-validate",
 ] as const;
 const PY_SCAFFOLD_BOOLEANS: readonly string[] = ["--no-delete", "--no-validate"];
+/** Every spaced value-taking flag of either `scaffold` form — what a scan must skip over as a value. */
+export const SCAFFOLD_VALUE_FLAGS: readonly string[] = [
+  ...PY_SCAFFOLD_FLAGS.filter((f) => !PY_SCAFFOLD_BOOLEANS.includes(f)),
+  "--out",
+  "--output-format",
+];
 
 const flagName = (a: string): string => (a.startsWith("--") && a.includes("=") ? a.slice(0, a.indexOf("=")) : a);
 

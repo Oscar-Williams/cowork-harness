@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { SKILL_FLAG_SURFACE, CRITIQUE_ONLY_FLAGS } from "../src/run/skill-flag-surface.js";
+import { COMMAND_GLOBAL_FLAGS } from "../src/run/command-globals.js";
 
 // `critique` spawns `skill` turns, and its parser used to be a hand-rolled SUBSET of skill's flags — so a
 // new skill flag was silently unavailable to critique, with nothing failing. The spec module's required
@@ -38,6 +39,8 @@ function skillLaneFlags(): Set<string> {
     const region = raw.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
     for (const m of region.matchAll(/(?:name|a|flag)\s*===\s*"(--?[a-z][a-z0-9-]*)"/g)) out.add(m[1]!);
     for (const m of region.matchAll(/\.startsWith\("(--?[a-z][a-z0-9-]*)="\)/g)) out.add(m[1]!);
+    // `--dotenv` / `--run-dir` are recognized through the shared predicate, not a literal comparison.
+    if (/isCommandGlobalFlag\(/.test(region)) for (const f of COMMAND_GLOBAL_FLAGS) out.add(f);
   }
   return out;
 }
@@ -61,9 +64,7 @@ const KNOWN = new Set([...SPEC_NAMES, ...CRITIQUE_ONLY_FLAGS]);
 // whole-file scan that no longer exists, of which 39 were unreachable — each a latent excusal that would
 // have silently subtracted a future skill flag of that name from the parity check. Only add an entry after
 // confirming a scan actually produces it.
-const NOT_SKILL_LANE = new Set([
-  "--run-dir", // global, advertised in SKILL_HELP; has no per-command meaning anywhere
-]);
+const NOT_SKILL_LANE = new Set<string>([]);
 
 describe("skill flag surface ↔ critique disposition parity", () => {
   it("regionTripwire: the scan still finds the skill lane (never go green over an empty set)", () => {

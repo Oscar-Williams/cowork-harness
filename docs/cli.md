@@ -478,7 +478,7 @@ is the goal-first chooser. Mind the two axes in each key's row: which **tier** i
 
 ## What you get out (inspectable output)
 
-Every run writes to `~/.cowork-harness/runs/<scenario>/<sessionId>/` (out of any working tree; relocate with the global `--run-dir <path>` flag — it goes *before* the subcommand — or `COWORK_HARNESS_RUNS_DIR`). A `chat` run instead writes to `runs/chat/<sessionId>/` — the first path segment is the literal `chat`, not a scenario name:
+Every run writes to `~/.cowork-harness/runs/<scenario>/<sessionId>/` (out of any working tree; relocate with `--run-dir <path>`, before or after the subcommand, or `COWORK_HARNESS_RUNS_DIR`). A `chat` run instead writes to `runs/chat/<sessionId>/` — the first path segment is the literal `chat`, not a scenario name:
 
 ```
 events.jsonl        full stream-json event log (child→driver; the cassette source)
@@ -592,7 +592,7 @@ Most runs need **none** of these — the defaults are correct. They're grouped b
 
 ### Run output, evidence caps and status
 
-- `COWORK_HARNESS_RUNS_DIR` (or the `--run-dir <path>` flag — a **global** flag that must precede the subcommand — `--dotenv` follows the same rule everywhere except `critique`, which also takes it per-command) — override the default run-output root `~/.cowork-harness/runs` (kept out of any working tree so sensitive skill inputs/outputs don't land in a repo). Precedence: `--run-dir` > env > default. The root is flat and machine-global (shared across projects); pinned `--session-id` runs are guarded against cross-project overwrite, and `prune` never prunes them. In CI, set it to a workspace path (e.g. `runs`) so artifact upload can collect the runs.
+- `COWORK_HARNESS_RUNS_DIR` (or the `--run-dir <path>` flag, which every command takes before or after the subcommand, like `--dotenv`) — override the default run-output root `~/.cowork-harness/runs` (kept out of any working tree so sensitive skill inputs/outputs don't land in a repo). Precedence: `--run-dir` > env > default. The root is flat and machine-global (shared across projects); pinned `--session-id` runs are guarded against cross-project overwrite, and `prune` never prunes them. In CI, set it to a workspace path (e.g. `runs`) so artifact upload can collect the runs.
 - `COWORK_HARNESS_ALLOW_FOREIGN_RESUME=1` — overrides the guard that blocks `--resume` onto another project's pinned session.
 - `COWORK_HARNESS_PRERUN_HASH_CAP` — override the default cap on pre-run file hashing (bytes); raise it if `input_unmodified`/`no_unexpected_files` report evidence unavailable on a large connected folder.
 - `COWORK_HARNESS_MAX_ARTIFACT_BYTES` — override the inline-artifact-body cap (default 65536 bytes;

@@ -169,8 +169,8 @@ ignored.
 | `--skill <name>` | multi-skill **plugin** target: grade `skills/<name>/SKILL.md` (+ every `agents/**.md` it can dispatch, + any plugin-root `references/` file the skill actually links) instead of a missing plugin-root SKILL.md — see below |
 | `--fidelity container\|hostloop\|cowork` | container (default) or hostloop; `cowork` resolves via the baseline's loop gate to one of those two and pins BOTH turns to it. `microvm`/`protocol` refused with a reason — see [Known limitations](#known-limitations). At hostloop a writable `--folder` needs `--allow-host-writes` |
 | `--keep` | accepted as a no-op; runs are always kept |
-| `--dotenv <path>` | credentials — works **before** `critique` (the global form) or **after** it |
-| `--run-dir <path>` | **global, unlike `--dotenv`** — must still PRECEDE the subcommand; a trailing `critique … --run-dir` is rejected |
+| `--dotenv <path>` | credentials — works **before** `critique` or **after** it |
+| `--run-dir <path>` | relocate the runs root — works **before** `critique` or **after** it; both turns inherit it |
 
 **Refused, and why**
 

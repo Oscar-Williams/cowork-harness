@@ -1,3 +1,4 @@
+import { applyParsedCommandGlobals, withCommandGlobals } from "./command-globals.js";
 import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { basename, dirname, extname, join, resolve } from "node:path";
 import { parseArgs } from "../cli-args.js";
@@ -1192,14 +1193,18 @@ export async function cmdAnalyzeSkill(args: string[]): Promise<void> {
   const asJson = isJsonOutput(args);
   let p;
   try {
-    p = parseArgs(args, {
-      values: ["--output-format"],
-      enums: { "--output-format": ["text", "json"] },
-      booleans: ["--strict", "--runtime"],
-    });
+    p = parseArgs(
+      args,
+      withCommandGlobals({
+        values: ["--output-format"],
+        enums: { "--output-format": ["text", "json"] },
+        booleans: ["--strict", "--runtime"],
+      }),
+    );
   } catch (e) {
     return fail("analyze-skill", "usage", String((e as Error).message), undefined, asJson);
   }
+  applyParsedCommandGlobals("analyze-skill", p, asJson);
   const json = p.options["--output-format"] === "json";
   const strict = p.flags["--strict"] === true;
   const runtime = p.flags["--runtime"] === true;

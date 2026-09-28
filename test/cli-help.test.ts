@@ -36,16 +36,17 @@ describe.skipIf(!can)("cli --help: on_unanswered value can't regress", () => {
   });
 });
 
-// --run-dir is a GLOBAL, leading-only flag (rejected after the subcommand). skill/run --help must NOT
-// present it as an ordinary skill-local flag, or it tells the user to use a flag the command rejects.
-describe.skipIf(!can)("cli --help: --run-dir is shown as a global/leading flag", () => {
+// --run-dir / --dotenv are accepted before OR after the subcommand. skill/run --help list both as their own
+// flags and must no longer teach the old "must PRECEDE the subcommand" rule, which is now false.
+describe.skipIf(!can)("cli --help: --run-dir / --dotenv are listed as per-command flags", () => {
   for (const cmd of ["skill", "run"]) {
-    it(`\`${cmd} --help\` marks --run-dir as a global flag that precedes the subcommand`, () => {
+    it(`\`${cmd} --help\` lists both, and says either position works`, () => {
       const { code, text } = help(cmd);
       expect(code).toBe(0);
-      // the --run-dir entry itself must teach the leading position
-      expect(text).toMatch(/--run-dir <path>\s+GLOBAL/);
-      expect(text).toContain("PRECEDE the subcommand");
+      expect(text).toMatch(/^\s{2}--run-dir <path>/m);
+      expect(text).toMatch(/^\s{2}--dotenv <path>/m);
+      expect(text).toContain("Before or after the subcommand");
+      expect(text).not.toMatch(/PRECEDE the subcommand|GLOBAL flag/);
     });
   }
 });

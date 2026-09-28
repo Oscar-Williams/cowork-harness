@@ -17,6 +17,7 @@
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { lookupSkillFlag } from "../run/skill-flag-surface.js";
+import { applyCommandGlobal } from "../run/command-globals.js";
 import { gradedAliasPath, turnArtifactPath } from "../run/turn-layout.js";
 import { renderKnownLimitations } from "./limitations.js";
 import { observedSkillInvocation, slashCommandSkillInvocation, subagentSkillCalls } from "./skill-invocation.js";
@@ -89,6 +90,8 @@ export interface ParsedArgs {
    *  anti-pattern. Empty when not in corpus-only mode. */
   ignoredFlags: string[];
   dotenv?: string;
+  /** `--run-dir` given after the subcommand: applied to critique's own process, which both turns inherit. */
+  runDir?: string;
   /** The tier BOTH turns run at. Always a concrete tier — `--fidelity cowork` is resolved at parse time,
    *  never forwarded as-is. */
   fidelity: "container" | "hostloop";
@@ -167,7 +170,7 @@ Critique's own:
                             critique refuses the same targets before any spend; a non-git folder is measured
                             raw, as staging copies it.
   --dotenv <path>           credentials
-  Global --run-dir <path>   must PRECEDE the subcommand
+  --run-dir <path>          relocate runs/ output (both turns inherit it); also accepted before the subcommand
 
 Not accepted (each errors with its reason rather than being silently ignored):
   --session-id / --resume   critique mints and manages its own session internally
@@ -303,6 +306,7 @@ function parseArgs(
   const positional: string[] = [];
   let prompt: string | undefined;
   let dotenv: string | undefined;
+  let runDir: string | undefined;
   let fidelity = "container";
   let evaluatorModel: string | undefined;
   let outputFormat: "json" | "text" = "text";
@@ -343,6 +347,12 @@ function parseArgs(
       const { value: v, adv } = flagVal(argv, i, "--dotenv");
       dotenv = v;
       shapes("--dotenv");
+      i += adv;
+    } else if (a === "--run-dir" || a.startsWith("--run-dir=")) {
+      once("--run-dir");
+      const { value: v, adv } = flagVal(argv, i, "--run-dir");
+      runDir = v;
+      shapes("--run-dir");
       i += adv;
     } else if (a === "--fidelity" || a.startsWith("--fidelity=")) {
       once("--fidelity");
@@ -500,6 +510,7 @@ function parseArgs(
     corpusOnly,
     ignoredFlags: corpusOnly ? runShaping : [],
     dotenv,
+    runDir,
     fidelity: fidelity as ParsedArgs["fidelity"],
     requestedFidelity,
     evaluatorModel,
@@ -2141,6 +2152,7 @@ async function main(argv: string[] = process.argv.slice(2)): Promise<void> {
     process.exit(2);
     return;
   }
+  if (opts.runDir !== undefined) applyCommandGlobal("critique", "--run-dir", opts.runDir, opts.outputFormat === "json");
   // Announce a resolved `cowork` the same way `executeScenario` does, in the same shape and to the same
   // stream, so an operator reading a critique's stderr sees the tier decision in the form they already
   // know from a plain run — and so the resolution is on the record when the report is read later.

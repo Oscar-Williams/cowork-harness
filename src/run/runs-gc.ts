@@ -1,3 +1,4 @@
+import { applyParsedCommandGlobals, withCommandGlobals } from "./command-globals.js";
 import { existsSync, readdirSync, statSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { parseArgs } from "../cli-args.js";
@@ -64,14 +65,18 @@ const isRealRun = (dir: string) => {
 export function cmdRunsGc(args: string[]): void {
   let p;
   try {
-    p = parseArgs(args, {
-      booleans: ["--dry-run"],
-      values: ["--keep-last", "--pinned-older-than"],
-    });
+    p = parseArgs(
+      args,
+      withCommandGlobals({
+        booleans: ["--dry-run"],
+        values: ["--keep-last", "--pinned-older-than"],
+      }),
+    );
   } catch (e) {
     log((e as Error).message);
     return process.exit(2);
   }
+  applyParsedCommandGlobals("prune", p, false);
   if (p.positionals.length > 1) {
     log(`prune takes an optional <runs-dir> (got ${p.positionals.length}: ${p.positionals.join(", ")})`);
     return process.exit(2);

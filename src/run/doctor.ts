@@ -1,3 +1,4 @@
+import { applyParsedCommandGlobals, withCommandGlobals } from "./command-globals.js";
 import { FIDELITY_TIERS } from "../types.js";
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
@@ -589,7 +590,7 @@ export function runDoctorChecks(tier: Tier, probe: DoctorProbe = realProbe): Doc
       : protocolSelfSourced
         ? "likely fine as-is at this tier — if a run fails with 'Not logged in', put the token in ./.env: echo CLAUDE_CODE_OAUTH_TOKEN=$(claude setup-token) >> .env (required for container/microvm/hostloop, which use a managed CLAUDE_CONFIG_DIR)"
         : keychainOnly
-          ? "copy your Keychain token into ./.env — cowork-harness injects only env / .env into the agent, at every tier: echo CLAUDE_CODE_OAUTH_TOKEN=$(claude setup-token) >> .env — or, if the token is already in another file, point at it: cowork-harness --dotenv <path> <cmd> (the global --dotenv is honored by doctor too)"
+          ? "copy your Keychain token into ./.env — cowork-harness injects only env / .env into the agent, at every tier: echo CLAUDE_CODE_OAUTH_TOKEN=$(claude setup-token) >> .env — or, if the token is already in another file, point at it: cowork-harness --dotenv <path> <cmd> (doctor honors --dotenv too)"
           : worktreeEnv
             ? `the main checkout has a .env — point at it: cowork-harness --dotenv ${worktreeEnv} <cmd> (or set CLAUDE_CODE_OAUTH_TOKEN)`
             : "export CLAUDE_CODE_OAUTH_TOKEN=$(claude setup-token) (or set ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN), put it in ./.env, or point at another file: cowork-harness --dotenv <path> <cmd>",
@@ -627,16 +628,20 @@ const GLYPH: Record<Status, string> = { ok: "✓", fail: "✗", warn: "!", skip:
 export function cmdDoctor(args: string[]): void {
   let p;
   try {
-    p = parseArgs(args, {
-      values: ["--tier", "--output-format"],
-      enums: {
-        "--tier": [...FIDELITY_TIERS],
-        "--output-format": ["text", "json"],
-      },
-    });
+    p = parseArgs(
+      args,
+      withCommandGlobals({
+        values: ["--tier", "--output-format"],
+        enums: {
+          "--tier": [...FIDELITY_TIERS],
+          "--output-format": ["text", "json"],
+        },
+      }),
+    );
   } catch (e) {
     fail("doctor", "usage", (e as Error).message, undefined, isJsonOutput(args));
   }
+  applyParsedCommandGlobals("doctor", p, isJsonOutput(args));
   const tier = (p.options["--tier"] as Tier) ?? "container";
   const json = p.options["--output-format"] === "json";
 

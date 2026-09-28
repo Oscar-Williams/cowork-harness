@@ -1,3 +1,4 @@
+import { applyParsedCommandGlobals, withCommandGlobals } from "./command-globals.js";
 import { z } from "zod";
 import { parkIfTerminating } from "../termination.js";
 import { deriveModelProvenance, noModelProvenance } from "./model-provenance.js";
@@ -3724,21 +3725,25 @@ export async function cmdRecord(args: string[]) {
   const asJson = isJsonOutput(args);
   let p;
   try {
-    p = parseArgs(args, {
-      // --quiet suppresses only the --dry-run preview block (see below); --verbose remains a no-op
-      // (renderer plan is fixed). Both flag SETS are the exported RECORD_BOOLEAN_FLAGS/RECORD_VALUE_FLAGS
-      // consts above — do not fork this list back into a local literal (that's the drift P3 fixed).
-      booleans: [...RECORD_BOOLEAN_FLAGS],
-      values: [...RECORD_VALUE_FLAGS],
-      noDashValue: ["--out", "--decider-dir"],
-      enums: { "--output-format": ["text", "json"], "--on-unanswered": ["fail", "first"] },
-      // no `-V`: verbose is long-only everywhere (`-v` is version at the top level; the A3 shift-key-typo fix).
-      aliases: { "-q": "--quiet" },
-    });
+    p = parseArgs(
+      args,
+      withCommandGlobals({
+        // --quiet suppresses only the --dry-run preview block (see below); --verbose remains a no-op
+        // (renderer plan is fixed). Both flag SETS are the exported RECORD_BOOLEAN_FLAGS/RECORD_VALUE_FLAGS
+        // consts above — do not fork this list back into a local literal (that's the drift P3 fixed).
+        booleans: [...RECORD_BOOLEAN_FLAGS],
+        values: [...RECORD_VALUE_FLAGS],
+        noDashValue: ["--out", "--decider-dir"],
+        enums: { "--output-format": ["text", "json"], "--on-unanswered": ["fail", "first"] },
+        // no `-V`: verbose is long-only everywhere (`-v` is version at the top level; the A3 shift-key-typo fix).
+        aliases: { "-q": "--quiet" },
+      }),
+    );
   } catch (e) {
     const msg = (e as Error).message;
     return fail("record", "usage", msg, hostInventoryFlagHint("record", msg), asJson);
   }
+  applyParsedCommandGlobals("record", p, asJson);
   let maxArtifactBytes: number | undefined;
   const mab = p.options["--max-artifact-bytes"];
   if (mab !== undefined) {
@@ -5565,19 +5570,23 @@ export async function cmdReplay(args: string[]) {
   const asJson = isJsonOutput(args);
   let p;
   try {
-    p = parseArgs(args, {
-      // Both flag SETS are the exported REPLAY_BOOLEAN_FLAGS/REPLAY_VALUE_FLAGS consts above — do not
-      // fork this list back into a local literal (that's the drift P9 generalized P3's fix to prevent).
-      booleans: [...REPLAY_BOOLEAN_FLAGS],
-      values: [...REPLAY_VALUE_FLAGS],
-      repeated: [...REPLAY_REPEATED_FLAGS],
-      enums: { "--output-format": ["text", "json"] },
-      aliases: { "-q": "--quiet" },
-    });
+    p = parseArgs(
+      args,
+      withCommandGlobals({
+        // Both flag SETS are the exported REPLAY_BOOLEAN_FLAGS/REPLAY_VALUE_FLAGS consts above — do not
+        // fork this list back into a local literal (that's the drift P9 generalized P3's fix to prevent).
+        booleans: [...REPLAY_BOOLEAN_FLAGS],
+        values: [...REPLAY_VALUE_FLAGS],
+        repeated: [...REPLAY_REPEATED_FLAGS],
+        enums: { "--output-format": ["text", "json"] },
+        aliases: { "-q": "--quiet" },
+      }),
+    );
   } catch (e) {
     const msg = String((e as Error).message);
     return fail("replay", "usage", msg, hostInventoryFlagHint("replay", msg), asJson);
   }
+  applyParsedCommandGlobals("replay", p, asJson);
   const target = p.positionals[0];
   if (!target) {
     return fail("replay", "usage", REPLAY_USAGE, undefined, asJson);
@@ -6103,20 +6112,24 @@ export async function cmdVerifyCassettes(args: string[]) {
   const asJson = isJsonOutput(args);
   let p;
   try {
-    p = parseArgs(args, {
-      // Flag SETS are the exported VERIFY_CASSETTES_* consts above — do not fork this list back into a
-      // local literal (P9 generalized P3's fix here too).
-      booleans: [...VERIFY_CASSETTES_BOOLEAN_FLAGS],
-      values: [...VERIFY_CASSETTES_VALUE_FLAGS],
-      repeated: [...VERIFY_CASSETTES_REPEATED_FLAGS],
-      enums: { "--output-format": ["text", "json"] },
-      noDashValue: ["--allow-patterns-file"],
-      aliases: { "-q": "--quiet" },
-    });
+    p = parseArgs(
+      args,
+      withCommandGlobals({
+        // Flag SETS are the exported VERIFY_CASSETTES_* consts above — do not fork this list back into a
+        // local literal (P9 generalized P3's fix here too).
+        booleans: [...VERIFY_CASSETTES_BOOLEAN_FLAGS],
+        values: [...VERIFY_CASSETTES_VALUE_FLAGS],
+        repeated: [...VERIFY_CASSETTES_REPEATED_FLAGS],
+        enums: { "--output-format": ["text", "json"] },
+        noDashValue: ["--allow-patterns-file"],
+        aliases: { "-q": "--quiet" },
+      }),
+    );
   } catch (e) {
     const msg = String((e as Error).message);
     return fail("verify-cassettes", "usage", msg, hostInventoryFlagHint("verify-cassettes", msg), asJson);
   }
+  applyParsedCommandGlobals("verify-cassettes", p, asJson);
   const json = p.options["--output-format"] === "json";
   // Ship A escape hatch, same contract as `replay --session`: supplies a SESSION (so `staleness.hash_ignore`
   // and the rest of the boundary survive) for ONE relocated cassette. Refused for a batch — each cassette in a
@@ -6520,14 +6533,18 @@ export function cmdRehash(args: string[]): void {
   const asJson = isJsonOutput(args);
   let p;
   try {
-    p = parseArgs(args, {
-      booleans: ["--dry-run"],
-      values: ["--output-format", "--session"],
-      enums: { "--output-format": ["text", "json"] },
-    });
+    p = parseArgs(
+      args,
+      withCommandGlobals({
+        booleans: ["--dry-run"],
+        values: ["--output-format", "--session"],
+        enums: { "--output-format": ["text", "json"] },
+      }),
+    );
   } catch (e) {
     return fail("rehash", "usage", (e as Error).message, undefined, asJson);
   }
+  applyParsedCommandGlobals("rehash", p, asJson);
   const USAGE =
     "usage: rehash <dir/> [--dry-run] [--output-format text|json]   |   rehash <file.cassette.json> --session <session.yaml> [--dry-run]";
   if (p.positionals.length !== 1) {

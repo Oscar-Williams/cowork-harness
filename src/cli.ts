@@ -59,7 +59,15 @@ import { cmdRunsGc } from "./run/runs-gc.js";
 import { captureAuthoredFilesWithHealth, authoredFilesHealthNonEmpty } from "./run/artifacts.js";
 import { readPreRunManifestOrigin, readPreRunManifestStats } from "./run/pre-run-manifest.js";
 import { resolveInputs } from "./run/inputs.js";
-import { cmdLint, cmdLintSkill, cmdScaffoldFlagBuilt, isFlagBuiltScaffold } from "./run/scenario-tool.js";
+import { cmdLint, cmdLintSkill, cmdScaffoldFlagBuilt, isFlagBuiltScaffold, SCAFFOLD_VALUE_FLAGS } from "./run/scenario-tool.js";
+import {
+  applyCommandGlobal,
+  applyParsedCommandGlobals,
+  isCommandGlobalFlag,
+  recordLeadingGlobals,
+  stripCommandGlobals,
+  withCommandGlobals,
+} from "./run/command-globals.js";
 import { cmdAnalyzeSkill } from "./run/analyze-skill.js";
 import { projectDispatchProbe, formatDispatchProbe } from "./run/probe-dispatch.js";
 import { cmdDoctor } from "./run/doctor.js";
@@ -304,10 +312,11 @@ const HELP = `cowork-harness <command>   (v${"$VERSION"})
   vm <init|status|delete|prune>  manage the L2 Apple-VZ microVM (fidelity: microvm); macOS arm64 only
   doctor [--tier <tier>]       read-only prerequisite check (Docker, staged agent, token, baseline)
 
-  Global:  --dotenv <path>     load a .env before the command (host-side creds; never mounted).
+  Every command also takes (before or after the subcommand — once):
+           --dotenv <path>     load a .env before the command runs (host-side creds; never mounted).
            Auth resolves from process.env > --dotenv > ./.env > <install>/.env.
            Run 'doctor' to diagnose auth failures.
-  Global:  --run-dir <path>    write runs/ output under <path> instead of the default ~/.cowork-harness/runs
+           --run-dir <path>    write runs/ output under <path> instead of the default ~/.cowork-harness/runs
            (keeps sensitive inputs/outputs out of the working tree). flag > COWORK_HARNESS_RUNS_DIR > default.
   --version, -v                print version        --help, -h    print this help
 
@@ -404,9 +413,9 @@ Output:
                                    estimate (a single run has no live cost signal to abort on); with no
                                    priced history it warns and proceeds uncapped.
   --allow-budget-stop              treat a budget-stopped batch as a pass rather than incomplete. Needs --repeat.
-  --run-dir <path>                 GLOBAL flag — must PRECEDE the subcommand (cowork-harness --run-dir <path> skill …);
-                                   relocates runs/ output (default ~/.cowork-harness/runs) out of the working tree.
-                                   flag > COWORK_HARNESS_RUNS_DIR > default. (placed after the subcommand it is rejected.)
+  --run-dir <path>                 relocates runs/ output (default ~/.cowork-harness/runs) out of the working tree.
+                                   flag > COWORK_HARNESS_RUNS_DIR > default. Before or after the subcommand.
+  --dotenv <path>                  load a .env for this run (see Auth below). Before or after the subcommand.
   --ablate-skill                   negative control: re-run the same prompt with the skill(s)-under-test
                                    removed, to check whether the agent "succeeds" even without them
   --allow-missing-capability       don't fail the verdict when the (partial 'core') image omits a capability
@@ -517,9 +526,9 @@ Output:
                                    "runs →" header (runs stay durable)
   --ablate-skill                   negative control: re-run the same prompt with the skill(s)-under-test
                                    removed, to check whether the agent "succeeds" even without them
-  --run-dir <path>                 GLOBAL flag — must PRECEDE the subcommand (cowork-harness --run-dir <path> run …);
-                                   relocates runs/ output (default ~/.cowork-harness/runs) out of the working tree.
-                                   flag > COWORK_HARNESS_RUNS_DIR > default. (placed after the subcommand it is rejected.)
+  --run-dir <path>                 relocates runs/ output (default ~/.cowork-harness/runs) out of the working tree.
+                                   flag > COWORK_HARNESS_RUNS_DIR > default. Before or after the subcommand.
+  --dotenv <path>                  load a .env for this run (see Auth below). Before or after the subcommand.
   NO_COLOR=1                       disable ANSI on stderr
 
 Long runs:  an idle "still running" heartbeat prints on stderr after ~30s of silence
@@ -702,9 +711,9 @@ const COMMANDS = [
   "migrate-run-dir",
 ];
 
-// --dotenv / --run-dir are GLOBAL flags honored ONLY in leading position (before the subcommand),
-// so a per-command value beginning with `--dotenv=`/`--run-dir=` (e.g. `skill ./s "p" --answer
-// "--dotenv=x=foo"`) is never hijacked by the pre-dispatch scan. Walk from the front consuming only
+// --dotenv / --run-dir BEFORE the subcommand are handled here, and this scan stops at the subcommand, so a
+// per-command value beginning with `--dotenv=`/`--run-dir=` (e.g. `skill ./s "p" --answer=--dotenv=x=foo`)
+// is never hijacked by the pre-dispatch scan. After the subcommand, each command's own parser takes them. Walk from the front consuming only
 // leading global-flag tokens (and their space-form values); stop at the first token that isn't one —
 // that token is the subcommand. Returns the count of leading tokens; the scans slice argv to it. Because
 // the region is a prefix, an index found within it is the same index into argv (so the later splice/value
@@ -725,7 +734,7 @@ function leadingGlobalCount(av: string[]): number {
 async function main() {
   const argv = process.argv.slice(2);
 
-  // `--dotenv <path>` is a GLOBAL flag — parse + strip it before command dispatch so a skill run from
+  // `--dotenv <path>` BEFORE the subcommand — parse + strip it before command dispatch so a skill run from
   // any directory can point at the install's credentials. Credentials then resolve in priority order:
   // process.env (exported wins) > --dotenv > ./.env (cwd) > <install>/.env (package root). loadDotenv
   // only fills UNDEFINED keys, so calling it in this order yields exactly that precedence.
@@ -769,7 +778,7 @@ async function main() {
     }
   }
 
-  // `--run-dir <path>` is a GLOBAL flag (parsed + stripped before dispatch, like --dotenv) that relocates
+  // `--run-dir <path>` BEFORE the subcommand (parsed + stripped before dispatch, like --dotenv) relocates
   // the runs/ output root so sensitive skill inputs/outputs never land in a working tree. It is a thin
   // shim over COWORK_HARNESS_RUNS_DIR: setting it here makes runsWriteRoot()/runsRoot() pick it up with no
   // writer/reader changes. Precedence: flag > COWORK_HARNESS_RUNS_DIR > ~/.cowork-harness/runs. Unlike
@@ -800,6 +809,9 @@ async function main() {
     process.env.COWORK_HARNESS_RUNS_DIR = expandUserPath(runDirVal);
   }
 
+  // Snapshot what is set BEFORE any .env file loads, so a --dotenv given AFTER the subcommand (applied later,
+  // by the command's own parser — run/command-globals.ts) keeps this precedence: exported > --dotenv > ./.env.
+  recordLeadingGlobals({ "--dotenv": envFileIdx >= 0, "--run-dir": rdIdx >= 0 });
   const packageRootEnv = fileURLToPath(new URL("../.env", import.meta.url)); // dist/cli.js → <install>/.env
   const loadedEnv: string[] = [];
   const seenSources = new Set<string>();
@@ -846,36 +858,9 @@ async function main() {
   const envOutFmt = process.env.COWORK_HARNESS_OUTPUT_FORMAT;
   if (envOutFmt !== undefined && envOutFmt !== "text" && envOutFmt !== "json")
     fail(cmd, "usage", `COWORK_HARNESS_OUTPUT_FORMAT must be "text" or "json" (got "${envOutFmt}")`, undefined, isJsonOutput(rest));
-  // `--dotenv` / `--run-dir` are GLOBAL flags, honored ONLY in leading position (both stripped above before
-  // dispatch). An exact `--dotenv` / `--run-dir` token surviving in `rest` sits AFTER the subcommand — a
-  // misplaced global, the footgun: the bare per-command "unknown flag: --dotenv" (or, for run/assertions,
-  // an unrelated positional / "unexpected argument" error) sent users hunting for a per-command flag that
-  // doesn't exist (campaign-2 H-2/H-4 — `--dotenv` where the pre-0.17.0 docs put it). Reject with a position
-  // hint. Placed here — AFTER the --version/--help short-circuits (so a `--help`/`-h` request still wins,
-  // matching the precedent above) and routed through fail() so the json envelope + exit-2 path match
-  // every other usage error. Gated on a KNOWN `cmd`, so a junk subcommand (`frobnicate --dotenv x`) falls
-  // through to the more accurate "unknown command" path below rather than getting a hint that implies it was
-  // valid. EXACT-token match only: the `--flag=value` form is intentionally NOT matched, so a per-command
-  // value like `--answer "--dotenv=x=foo"` is never hijacked (a misplaced `--dotenv=x` then falls through to
-  // the command's own unknown-flag rejection). KNOWN trade-off: a bare token used as another flag's value
-  // (e.g. `decide --question --dotenv`, omitting the value) is pre-empted here — it would otherwise get a
-  // more specific "<flag> requires a value" error; both exit 2, and the input is rare (value omitted AND
-  // literally equal to the token).
-  if (!hasHelp(rest) && COMMANDS.includes(cmd)) {
-    // `critique` is exempt from the `--dotenv` half: it is a legitimate PER-COMMAND flag there (forwarded
-    // to the inner `skill` turns and, since the fix below, validated by critique's own parseArgs), not a
-    // misplaced global. `--run-dir` stays rejected for every command, `critique` included — nothing reads
-    // a per-command `--run-dir`.
-    const misplacedGlobal = rest.find((t) => (t === "--dotenv" && cmd !== "critique") || t === "--run-dir");
-    if (misplacedGlobal)
-      fail(
-        cmd,
-        "usage",
-        `${misplacedGlobal} is a GLOBAL flag and must come BEFORE the subcommand (e.g. \`cowork-harness ${misplacedGlobal} <path> ${cmd} …\`)`,
-        undefined,
-        isJsonOutput(rest),
-      );
-  }
+  // `--dotenv` / `--run-dir` AFTER the subcommand are each command's own flags: its parser knows which tokens
+  // are values of its other flags, so a `--dotenv=…` VALUE is never taken as the flag (the leading scan above
+  // stops at the subcommand for the same reason). run/command-globals.ts applies them with the same meaning.
   switch (cmd) {
     case "run":
       return cmdRun(rest);
@@ -1592,6 +1577,17 @@ async function cmdRun(rawArgs: string[]) {
   const withoutModel: string[] = [];
   for (let i = 0; i < rawRest.length; i++) {
     const tok = rawRest[i];
+    // `--dotenv`/`--run-dir` after the subcommand. This is the last flag-aware pass over `run`'s argv, so every
+    // other flag's value has already been consumed and a surviving token here is the flag itself.
+    const gEq = tok.startsWith("--") ? tok.indexOf("=") : -1;
+    const gName = gEq > 0 ? tok.slice(0, gEq) : tok;
+    if (isCommandGlobalFlag(gName)) {
+      const v = gEq > 0 ? tok.slice(gEq + 1) : rawRest[++i];
+      if (v === undefined || v.trim() === "" || (gEq < 0 && v.startsWith("-")))
+        fail("run", "usage", `${gName} requires a path (none provided)`, undefined, isJsonOutput(rawArgs));
+      applyCommandGlobal("run", gName, v, isJsonOutput(rawArgs));
+      continue;
+    }
     // Accept `--model=<id>` too: `record` gets it free from the shared parser, and a form that works on
     // one lane and is reported as an unexpected argument on the other is just a trap.
     if (tok.startsWith("--model=")) {
@@ -1627,14 +1623,6 @@ async function cmdRun(rawArgs: string[]) {
   }
   const args = withoutModel.filter((a) => a !== "--keep");
   if (keepRequested) log("note: `run` always keeps runs (under the runs root); --keep is a no-op here.");
-  // A leftover global-only flag is NOT a positional. `takeCommonFlags` has already consumed every real
-  // flag VALUE, so a `--dotenv=`/`--run-dir=` token surviving to here is provably a misplaced flag rather
-  // than someone's argument. Letting it fall through made `args[0]` the FLAG and the user's real scenario
-  // path the "unexpected argument(s)" — blaming the one token that was correct, and in the no-other-arg
-  // case reporting `scenario path not found: --dotenv=…`. Emitting the unknown-flag SHAPE routes this
-  // through fail()'s misplaced-global derivation instead of restating that sentence here.
-  const strayGlobal = args.find((a) => /^--(dotenv|run-dir)(=|$)/.test(a));
-  if (strayGlobal) fail("run", "usage", `unknown flag: ${strayGlobal}`, undefined, flags.output === "json");
   const target = args[0];
   if (!target) fail("run", "usage", "usage: run <scenario.yaml | dir/>", undefined, flags.output === "json");
   // `takeCommonFlags` strips known flags; `run` takes exactly one positional (a scenario file or a
@@ -1646,11 +1634,6 @@ async function cmdRun(rawArgs: string[]) {
     fail(
       "run",
       "usage",
-      // The pointer is appended to the MESSAGE, deliberately not passed as fail()'s `hint`: `hint` WINS over
-      // the auto-derived misplaced-global-flag guidance (`hint ?? misplacedGlobalHint(...)` in envelope.ts), and
-      // a token like `--dotenv,foo` reaches this path while still matching that helper (strayGlobal above
-      // terminates on `(=|$)`, misplacedGlobalHint on `(=|$|[\s,])`). A hint here would silently swallow the
-      // "put it before the subcommand" answer for exactly those tokens.
       `unexpected argument(s): ${extra.join(" ")} — \`run\` takes one <scenario.yaml | dir/> plus common flags. Fidelity is set by the scenario's \`fidelity:\` field, not a flag. ` +
         `To check a scenario without spending: \`lint <file.yaml>\` (does it load, and are the assertions sane) or \`record <file.yaml> --dry-run\` (also the pre-spend refusals).`,
       undefined,
@@ -1954,19 +1937,10 @@ async function cmdSkill(rawArgs: string[]) {
   const enables: string[] = [];
   const uploads: string[] = [];
   const folders: string[] = [];
-  const envFidelity = process.env.COWORK_HARNESS_FIDELITY;
-  const FID_VALUES: readonly string[] = FIDELITY_TIERS;
-  if (envFidelity && !FID_VALUES.includes(envFidelity))
-    fail(
-      "skill",
-      "usage",
-      `COWORK_HARNESS_FIDELITY must be one of ${FID_VALUES.join("|")} (got "${envFidelity}")`,
-      undefined,
-      flags.output === "json",
-    );
-  let fidelity: "protocol" | "container" | "microvm" | "hostloop" | "cowork" =
-    (envFidelity as "protocol" | "container" | "microvm" | "hostloop" | "cowork" | undefined) ?? "container";
-  let model: string | undefined = process.env.COWORK_HARNESS_MODEL;
+  // The env defaults (COWORK_HARNESS_FIDELITY / _MODEL) are read AFTER the flag loop, not here: a --dotenv
+  // given after the subcommand is applied inside the loop, and a default read before it would miss that file.
+  let fidelityFlag: "protocol" | "container" | "microvm" | "hostloop" | "cowork" | undefined;
+  let modelFlag: string | undefined;
   let promptFile: string | undefined;
   let sessionId: string | undefined;
   let answerPolicy: string | undefined;
@@ -2025,15 +1999,17 @@ async function cmdSkill(rawArgs: string[]) {
     ) {
       fail("skill", "usage", `${name} takes no value`, undefined, isJson0);
     }
-    if (name === "--fidelity") {
-      fidelity = nextVal() as typeof fidelity; // bounds-checked
+    if (isCommandGlobalFlag(name)) applyCommandGlobal("skill", name, nextValStrict(), isJson0);
+    else if (name === "--fidelity") {
+      const fidelity = nextVal(); // bounds-checked
       // validate at parse time → category `usage`. Previously an invalid value was only rejected
       // later by Scenario.parse (a Zod throw), which the top-level catch mapped to `internal` — a user
       // mistake masquerading as a harness bug.
       const FID: readonly string[] = FIDELITY_TIERS;
       if (!FID.includes(fidelity))
         fail("skill", "usage", `--fidelity must be one of ${FID.join("|")} (got "${fidelity}")`, undefined, isJson0);
-    } else if (name === "--model") model = nextValStrict();
+      fidelityFlag = fidelity as NonNullable<typeof fidelityFlag>;
+    } else if (name === "--model") modelFlag = nextValStrict();
     else if (name === "--prompt-file") promptFile = nextValStrict();
     else if (name === "--upload") uploads.push(nextValStrict());
     else if (name === "--folder") folders.push(nextValStrict());
@@ -2079,6 +2055,13 @@ async function cmdSkill(rawArgs: string[]) {
     else positional.push(a);
   }
   const isJson = flags.output === "json";
+  const envFidelity = process.env.COWORK_HARNESS_FIDELITY;
+  const FID_VALUES: readonly string[] = FIDELITY_TIERS;
+  if (envFidelity && !FID_VALUES.includes(envFidelity))
+    fail("skill", "usage", `COWORK_HARNESS_FIDELITY must be one of ${FID_VALUES.join("|")} (got "${envFidelity}")`, undefined, isJson);
+  let fidelity: "protocol" | "container" | "microvm" | "hostloop" | "cowork" =
+    fidelityFlag ?? (envFidelity as "protocol" | "container" | "microvm" | "hostloop" | "cowork" | undefined) ?? "container";
+  const model: string | undefined = modelFlag ?? process.env.COWORK_HARNESS_MODEL;
   if (resume && !sessionId) fail("skill", "usage", "--resume requires --session-id <id> (the session to resume)", undefined, isJson);
 
   // reject extra positionals so a shell-quoting slip (an unquoted multi-word prompt) can't silently
@@ -2386,7 +2369,7 @@ async function cmdProbeDispatch(rawArgs: string[]) {
   const folders: string[] = [];
   const PD_FID = ["container", "microvm", "hostloop"] as const;
   let fidelity: (typeof PD_FID)[number] = "hostloop"; // forced-default: path-fidelity (this probe's whole point) only matters on hostloop
-  let model: string | undefined = process.env.COWORK_HARNESS_MODEL;
+  let modelFlag: string | undefined; // COWORK_HARNESS_MODEL is read after the loop, so a per-command --dotenv applies
   let expectWriteSuffix: string | undefined;
   let allowStall = false; // --allow-stall: this lane's spelling of `allow_stall: true` (no assert: block to author it in)
   for (let i = 0; i < args.length; i++) {
@@ -2401,12 +2384,13 @@ async function cmdProbeDispatch(rawArgs: string[]) {
       }
       return flagValueStrict("probe-dispatch", args, i++, name, isJson);
     };
-    if (name === "--fidelity") {
+    if (isCommandGlobalFlag(name)) applyCommandGlobal("probe-dispatch", name, nextVal(), isJson);
+    else if (name === "--fidelity") {
       const v = nextVal();
       if (!(PD_FID as readonly string[]).includes(v))
         fail("probe-dispatch", "usage", `--fidelity must be one of ${PD_FID.join("|")} (got "${v}")`, undefined, isJson);
       fidelity = v as (typeof PD_FID)[number];
-    } else if (name === "--model") model = nextVal();
+    } else if (name === "--model") modelFlag = nextVal();
     else if (name === "--plugin") extraPlugins.push(nextVal());
     else if (name === "--upload") uploads.push(nextVal());
     else if (name === "--folder") folders.push(nextVal());
@@ -2426,6 +2410,7 @@ async function cmdProbeDispatch(rawArgs: string[]) {
       isJson,
     );
   const [folder, prompt] = positional;
+  const model = modelFlag ?? process.env.COWORK_HARNESS_MODEL;
 
   // Session + scenario construction mirrors cmdSkill's own inline-session path (loadSession →
   // resolveSessionPaths, Scenario.parse) — the "thin wrapper, don't reinvent" seam the design calls for.
@@ -2592,13 +2577,17 @@ function cmdVm(args: string[]) {
   const subArgs = args.slice(1); // drop the subcommand token
   let vmParsed;
   try {
-    vmParsed = parseArgs(subArgs, {
-      values: ["--output-format"],
-      enums: { "--output-format": ["text", "json"] },
-    });
+    vmParsed = parseArgs(
+      subArgs,
+      withCommandGlobals({
+        values: ["--output-format"],
+        enums: { "--output-format": ["text", "json"] },
+      }),
+    );
   } catch (e) {
     return fail("vm", "usage", String((e as Error).message), undefined, isJsonOutput(args));
   }
+  applyParsedCommandGlobals("vm", vmParsed, isJsonOutput(args));
   const vmJson = vmParsed.options["--output-format"] === "json";
   if (vmParsed.positionals.length > 1) {
     return fail(
@@ -2652,14 +2641,18 @@ function cmdBoundary(args: string[]) {
   let p;
   try {
     // --session and --output-format are the known flags; parseArgs rejects any other.
-    p = parseArgs(args, {
-      values: ["--session", "--output-format"],
-      enums: { "--output-format": ["text", "json"] },
-      noDashValue: ["--session"],
-    });
+    p = parseArgs(
+      args,
+      withCommandGlobals({
+        values: ["--session", "--output-format"],
+        enums: { "--output-format": ["text", "json"] },
+        noDashValue: ["--session"],
+      }),
+    );
   } catch (e) {
     return fail("boundary-check", "usage", (e as Error).message, undefined, json);
   }
+  applyParsedCommandGlobals("boundary-check", p, json);
   const sessionPath = p.options["--session"];
   // Reject extra baseline positionals rather than silently using only the first.
   if (p.positionals.length > 1) {
@@ -2744,10 +2737,11 @@ async function cmdSync(args: string[]) {
   const normalizedArgs = args.map((a) => (a === "--force" ? "--allow-empty" : a));
   let syncParsed;
   try {
-    syncParsed = parseArgs(normalizedArgs, { booleans: ["--diff", "--allow-empty"] });
+    syncParsed = parseArgs(normalizedArgs, withCommandGlobals({ booleans: ["--diff", "--allow-empty"] }));
   } catch (e) {
     return fail("sync", "usage", (e as Error).message, undefined, isJsonOutput(normalizedArgs));
   }
+  applyParsedCommandGlobals("sync", syncParsed, isJsonOutput(normalizedArgs));
   if (syncParsed.positionals.length > 0) {
     return fail(
       "sync",
@@ -3170,10 +3164,14 @@ function cmdInitRedact(args: string[]) {
   const json = isJsonOutput(args);
   let p;
   try {
-    p = parseArgs(args, { booleans: ["--force"], values: ["--output-format"], enums: { "--output-format": ["text", "json"] } });
+    p = parseArgs(
+      args,
+      withCommandGlobals({ booleans: ["--force"], values: ["--output-format"], enums: { "--output-format": ["text", "json"] } }),
+    );
   } catch (e) {
     return fail("init-redact", "usage", (e as Error).message, SUBCOMMAND_USAGE["init-redact"], json);
   }
+  applyParsedCommandGlobals("init-redact", p, json);
   if (p.positionals.length > 0) {
     return fail("init-redact", "usage", `init-redact takes no positional arguments (got: ${p.positionals.join(", ")})`, undefined, json);
   }
@@ -3209,10 +3207,11 @@ function cmdList(args: string[] = []) {
   const json = isJsonOutput(args);
   let listParsed;
   try {
-    listParsed = parseArgs(args, { values: ["--output-format"], enums: { "--output-format": ["text", "json"] } });
+    listParsed = parseArgs(args, withCommandGlobals({ values: ["--output-format"], enums: { "--output-format": ["text", "json"] } }));
   } catch (e) {
     return fail("list", "usage", (e as Error).message, undefined, json);
   }
+  applyParsedCommandGlobals("list", listParsed, json);
   if (listParsed.positionals.length > 0) {
     return fail("list", "usage", `list takes no positional arguments (got: ${listParsed.positionals.join(", ")})`, undefined, json);
   }
@@ -3302,6 +3301,12 @@ function formatStatsLine(s: StatsSummary, metric?: string): string {
  *  predate the index, or if index.jsonl was ever lost/corrupted beyond its own per-line tolerance). */
 function cmdStats(args: string[]) {
   if (hasHelp(args)) return void log(SUBCOMMAND_USAGE.stats);
+  args = stripCommandGlobals(
+    "stats",
+    args,
+    ["--since", "--baseline", "--branch", "--metric", "--last", "--skill-hash", "--label", "--group-by", "--output-format"],
+    isJsonOutput(args),
+  );
   ensureOutputFormat("stats", args);
   const json = isJsonOutput(args);
   rejectUnknownFlags(
@@ -3447,6 +3452,23 @@ function cmdStats(args: string[]) {
  *  helper receives and the answer it produced (or the protocol error); for `--answer`/`--answer-policy`
  *  it shows which rule matched. */
 async function cmdDecide(args: string[]) {
+  // --dotenv / --run-dir after the subcommand: applied and removed before this command's own flag scans.
+  args = stripCommandGlobals(
+    "decide",
+    args,
+    [
+      "--question",
+      "--option",
+      "--decider-cmd",
+      "--intent",
+      "--decider-model",
+      "--answer-policy",
+      "--answer",
+      "--output-format",
+      "--decider-dir",
+    ],
+    isJsonOutput(args),
+  );
   ensureOutputFormat("decide", args);
   const json = isJsonOutput(args);
   let question = "Confirm the detected stage before proceeding?";
@@ -3634,14 +3656,18 @@ async function cmdDecide(args: string[]) {
 async function cmdStatus(args: string[]) {
   let p;
   try {
-    p = parseArgs(args, {
-      booleans: ["--follow"],
-      values: ["--output-format", "--latest-for"],
-      enums: { "--output-format": ["text", "json"] },
-    });
+    p = parseArgs(
+      args,
+      withCommandGlobals({
+        booleans: ["--follow"],
+        values: ["--output-format", "--latest-for"],
+        enums: { "--output-format": ["text", "json"] },
+      }),
+    );
   } catch (e) {
     return fail("status", "usage", (e as Error).message, undefined, isJsonOutput(args));
   }
+  applyParsedCommandGlobals("status", p, isJsonOutput(args));
   const json = p.options["--output-format"] === "json";
   if (p.options["--latest-for"] !== undefined) {
     // A dedicated mode, not a modifier on the run-id/run-dir lookup above: it resolves a SCENARIO to its
@@ -3806,6 +3832,8 @@ async function cmdStatusLatestFor(scenarioArg: string, json: boolean): Promise<n
  *  JSON line per pending gate (`{seq, …decision_request}`) + a terminal `{"done":true}`. Point ONE
  *  Monitor at this (no hand-written zsh/find/seen-set loop). */
 async function cmdGates(args: string[]) {
+  // --dotenv / --run-dir after the subcommand: applied and removed before this command's own flag scans.
+  args = stripCommandGlobals("gates", args, ["--output-format"], isJsonOutput(args));
   ensureOutputFormat("gates", args);
   // Reject unknown flags rather than silently ignoring a typo.
   rejectUnknownFlags("gates", args, ["--follow", "--output-format", "--output-format=json", "--output-format=text"], isJsonOutput(args));
@@ -3823,6 +3851,8 @@ async function cmdGates(args: string[]) {
 /** `answer <dir> --gate <N> (--choose <label> | --answer "<q>=<label>"…)` — write a gate answer
  *  atomically with the right wire shape (hides the temp+rename + `{id, answers}` the driver had to build). */
 function cmdAnswer(args: string[]) {
+  // --dotenv / --run-dir after the subcommand: applied and removed before this command's own flag scans.
+  args = stripCommandGlobals("answer", args, ["--gate", "--choose", "--answer", "--output-format"], isJsonOutput(args));
   // validate --output-format before isJsonOutput so an unrecognized value is a usage error.
   ensureOutputFormat("answer", args);
   const json = isJsonOutput(args);
@@ -3933,6 +3963,8 @@ function cmdScaffold(args: string[]) {
   // ONE scaffold command, two forms. Any flag only the bundled script knows (--name, --prompt, --skill, …)
   // selects the flag-built form, delegated to `scenario.py scaffold` the way `lint` delegates; everything
   // else is the native run-id form below, unchanged.
+  // --dotenv / --run-dir after the subcommand: applied and removed before this command's own flag scans.
+  args = stripCommandGlobals("scaffold", args, SCAFFOLD_VALUE_FLAGS, isJsonOutput(args));
   if (isFlagBuiltScaffold(args)) return cmdScaffoldFlagBuilt(args);
   const json = isJsonOutput(args);
   // validate --output-format is text|json — an invalid value was a silent text degrade (only
@@ -4100,10 +4132,11 @@ function gateQuestionLabel(req: DecisionRequest): string {
 async function cmdVerifyRun(args: string[]) {
   let p;
   try {
-    p = parseArgs(args, { values: ["--output-format"], enums: { "--output-format": ["text", "json"] } });
+    p = parseArgs(args, withCommandGlobals({ values: ["--output-format"], enums: { "--output-format": ["text", "json"] } }));
   } catch (e) {
     return fail("verify-run", "usage", (e as Error).message, undefined, isJsonOutput(args));
   }
+  applyParsedCommandGlobals("verify-run", p, isJsonOutput(args));
   const json = p.options["--output-format"] === "json";
   const [runDir, scenarioFile] = p.positionals;
   if (!runDir || !scenarioFile) {
@@ -4606,6 +4639,8 @@ async function cmdVerifyRun(args: string[]) {
 /** `assertions --list` — enumerate the available assertion keys + one-line semantics, generated from the
  *  Zod `Assertion` schema (`Assertion.shape[k].description`) so the list can NEVER drift from the schema. */
 function cmdAssert(args: string[]) {
+  // --dotenv / --run-dir after the subcommand: applied and removed before this command's own flag scans.
+  args = stripCommandGlobals("assertions", args, ["--output-format"], isJsonOutput(args));
   const json = isJsonOutput(args);
   // validate --output-format is text|json (an invalid value was a silent text degrade).
   ensureOutputFormat("assertions", args);
@@ -4695,6 +4730,8 @@ const FILE_FAMILY = new Set([
 ]);
 
 function cmdTrace(args: string[]) {
+  // --dotenv / --run-dir after the subcommand: applied and removed before this command's own flag scans.
+  args = stripCommandGlobals("trace", args, ["--view", "--output-format", "--scope"], isJsonOutput(args));
   ensureOutputFormat("trace", args);
   const json = isJsonOutput(args);
 
@@ -5084,6 +5121,8 @@ function renderDiffText(r: DiffViewResult, view: string): string[] {
 /** Diffs a baseline pair or a run/cassette pair (cross-comparable; baselines only pair with baselines). */
 function cmdDiff(args: string[]) {
   if (hasHelp(args)) return void log(SUBCOMMAND_USAGE.diff);
+  // --dotenv / --run-dir after the subcommand: applied and removed before this command's own flag scans.
+  args = stripCommandGlobals("diff", args, ["--output-format", "--view"], isJsonOutput(args));
   ensureOutputFormat("diff", args);
   const json = isJsonOutput(args);
   rejectUnknownFlags(
@@ -5205,6 +5244,8 @@ function cmdDiff(args: string[]) {
 
 function cmdInspect(args: string[]) {
   if (hasHelp(args)) return void log(SUBCOMMAND_USAGE.inspect);
+  // --dotenv / --run-dir after the subcommand: applied and removed before this command's own flag scans.
+  args = stripCommandGlobals("inspect", args, ["--output-format"], isJsonOutput(args));
   ensureOutputFormat("inspect", args);
   const json = isJsonOutput(args);
   rejectUnknownFlags("inspect", args, ["--output-format", "--output-format=json", "--output-format=text"], json);
