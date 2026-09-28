@@ -671,6 +671,7 @@ _REDACTABLE_SHAPES = [
     re.compile(r"/Volumes/[^/\s]"),
     re.compile(r"/System/Volumes/"),
     re.compile(r"(?:^|[/\"'\s])-(?:Users|home|root)-[^/\s]"),  # a Claude project slug (-Users-acme-repo)
+    re.compile(r"sk-ant-"),  # an Anthropic key: the operator-secret scrubber rewrites it whole to [REDACTED]
     re.compile(r"[A-Za-z0-9._%+-]@[A-Za-z0-9.-]+\.[A-Za-z]{2,}"),
 ]
 
@@ -759,6 +760,15 @@ def _redaction_policy_patterns(path):
                 pats.append(c)
             else:
                 bad.append(src)
+    # The operator-secret scrubber (src/secrets.ts) rewrites these LITERALLY, everywhere, before any cassette
+    # or verify-run sees the stream: COWORK_HARNESS_SCRUB_VALUES, and the values of the variables named in
+    # COWORK_HARNESS_SCRUB_KEYS. Matched as literals, so a regex naming one (or a prefix of one) is flagged.
+    _csv = lambda v: [x.strip() for x in (v or "").split(",") if x.strip()]  # noqa: E731
+    for lit in _csv(os.environ.get("COWORK_HARNESS_SCRUB_VALUES")) + [
+        os.environ[k] for k in _csv(os.environ.get("COWORK_HARNESS_SCRUB_KEYS")) if os.environ.get(k)
+    ]:
+        # a secret prefix of 6+ chars named in the regex is as good as the secret: match either direction
+        pats.append(re.compile("|".join(re.escape(lit[:n]) for n in range(min(len(lit), 6), len(lit) + 1))))
     for src in [x.strip() for x in os.environ.get("COWORK_HARNESS_REDACT_PATTERNS", "").split(",") if x.strip()]:
         c = _compile_js_redaction_pattern(src, "g")
         if c is not None:

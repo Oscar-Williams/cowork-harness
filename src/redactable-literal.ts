@@ -30,6 +30,8 @@ const REDACTABLE_SHAPES: RegExp[] = [
   // A Claude project slug: a path with each `/` turned into `-` (`-Users-acme-repo`), as the shipped policy's
   // slug rule rewrites.
   /(?:^|[/"'\s])-(?:Users|home|root)-[^/\s]/,
+  // An Anthropic key: the operator-secret scrubber (src/secrets.ts) rewrites the whole key to [REDACTED].
+  /sk-ant-/,
   /[A-Za-z0-9._%+-]@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/,
 ];
 
