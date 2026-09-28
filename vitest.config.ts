@@ -17,7 +17,7 @@ export default defineConfig({
   test: {
     // Give every test process its own runs root so nothing writes into the developer's real
     // ~/.cowork-harness/runs. See test/setup/runs-root.ts for why this is structural rather than per-file.
-    setupFiles: ["test/setup/runs-root.ts"],
+    setupFiles: ["test/setup/runs-root.ts", "test/setup/forbid-spawn.ts"],
     // 93 test files spawn a subprocess (the built CLI, `claude`, git); only a handful declare a timeout,
     // so the rest inherited vitest's 5s default. They measure 167-888ms locally — a comfortable margin
     // until you remember this lane runs 344 files in parallel across every core, and a CI runner is ~3x
