@@ -84,16 +84,3 @@ describe.skipIf(!can)("a broken-file listing is one line per file", () => {
     expect(line.split("a.yaml").length - 1, "the listing already names the file").toBe(1);
   });
 });
-
-describe.skipIf(!can)("a defaulted fidelity warns ONCE per scenario, not once per parse", () => {
-  it("does not repeat itself across a command's three parse passes", () => {
-    // `record <dir> --dry-run` parses each file three times. At 812 chars a copy, a 35-file corpus
-    // emitted ~85KB of deprecation notice with --quiet and nothing wrong.
-    const w = mkdtempSync(join(tmpdir(), "cse-fid-"));
-    const dir = join(w, "corpus");
-    mkdirSync(dir);
-    for (const n of ["a", "b"]) writeFileSync(join(dir, `${n}.yaml`), `name: ${n}\nprompt: hi\nassert:\n  - result: success\n`);
-    const r = cli(["record", dir, "--dry-run", "--quiet"]);
-    expect(r.stderr.split("\n").filter((l) => l.includes("no `fidelity:`")).length).toBe(2);
-  });
-});

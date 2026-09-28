@@ -29,7 +29,8 @@ function repo(): string {
 }
 
 const HOSTLOOP = (name: string) => `name: ${name}\nprompt: go\nfidelity: hostloop\nassert:\n  - result: success\n`;
-const PROMPT_GATE = (name: string) => `name: ${name}\nprompt: go\non_unanswered: prompt\nassert:\n  - result: success\n`;
+const PROMPT_GATE = (name: string) =>
+  `name: ${name}\nprompt: go\nfidelity: container\non_unanswered: prompt\nassert:\n  - result: success\n`;
 
 /** One fixture per check `preSpendVerdicts` can emit. Keyed by a substring unique to that check's message.
  *  A check with no entry here is caught by the coverage test below — that is the property that makes this
@@ -141,8 +142,8 @@ describe("the batch preview advises, and never gates, on a path it is guessing",
     // `slugForPath` maps BOTH path separators to "-", so these two distinct names share one default path.
     // (A first draft used "my run" / "my-run", which do NOT collide — a space is preserved. The guard was
     // right and the fixture was wrong; verified against slugForPath directly before trusting either.)
-    writeFileSync(join(w, "scen", "a.yaml"), `name: a/b\nprompt: go\nassert:\n  - result: success\n`);
-    writeFileSync(join(w, "scen", "b.yaml"), `name: a\\b\nprompt: go\nassert:\n  - result: success\n`);
+    writeFileSync(join(w, "scen", "a.yaml"), `name: a/b\nprompt: go\nfidelity: container\nassert:\n  - result: success\n`);
+    writeFileSync(join(w, "scen", "b.yaml"), `name: a\\b\nprompt: go\nfidelity: container\nassert:\n  - result: success\n`);
     const r = cli(["record", join(w, "scen"), "--dry-run"], w);
     expect(r.code).not.toBe(0);
     expect(r.text).toMatch(/share a cassette output path/);

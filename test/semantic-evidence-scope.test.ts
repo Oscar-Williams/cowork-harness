@@ -485,7 +485,7 @@ describe("P0: a scenario whose only evidence-bearing assert is semantic_matches"
   // paths []. Both halves are fixed here: arm the manifest, and make its absence loud.
 
   it("semantic_matches ARMS the pre-run manifest (without it there is no authored evidence at all)", () => {
-    const base = { name: "s", prompt: "p", session: "(inline)", baseline: "latest" };
+    const base = { name: "s", prompt: "p", session: "(inline)", baseline: "latest", fidelity: "container" };
     const scoped = Scenario.parse({ ...base, assert: [{ semantic_matches: { rubric: ["x"], evidence_files: ["outputs/r.md"] } }] });
     const plain = Scenario.parse({ ...base, assert: [{ semantic_matches: { rubric: ["x"] } }] });
     expect(scenarioArmsPreRunManifest(scoped)).toBe(true);
@@ -555,7 +555,7 @@ describe("composeJudgedDocument — overflow bookkeeping with NO authored eviden
 });
 
 describe("evidence_files — schema and budget validator", () => {
-  const base = { prompt: "p", assert: [] as unknown[] };
+  const base = { prompt: "p", fidelity: "container", assert: [] as unknown[] };
 
   it("rejects an EMPTY evidence_files list at load time (a scope of nothing is not a scope)", () => {
     const r = Scenario.safeParse({

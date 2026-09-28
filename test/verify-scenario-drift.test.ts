@@ -14,14 +14,14 @@ const frozen = (prompt: string) => ({ scenarioSource: "s.yaml", scenario: { name
 describe("scenarioContentDrift (function-level)", () => {
   it("matching prompt → verifiable, no drift", () => {
     const d = mkdtempSync(join(tmpdir(), "cwh-scd-"));
-    writeFileSync(join(d, "s.yaml"), "prompt: hi\n");
+    writeFileSync(join(d, "s.yaml"), "fidelity: container\nprompt: hi\n");
     const r = scenarioContentDrift(frozen("hi"), join(d, "x.cassette.json"));
     expect(r).toEqual({ verifiable: true, drifted: [] });
   });
 
   it("edited on-disk prompt → verifiable drift on `prompt`", () => {
     const d = mkdtempSync(join(tmpdir(), "cwh-scd-"));
-    writeFileSync(join(d, "s.yaml"), "prompt: CHANGED\n");
+    writeFileSync(join(d, "s.yaml"), "fidelity: container\nprompt: CHANGED\n");
     const r = scenarioContentDrift(frozen("hi"), join(d, "x.cassette.json"));
     expect(r).toEqual({ verifiable: true, drifted: ["prompt"] });
   });
@@ -51,7 +51,7 @@ describe("scenarioContentDrift (function-level)", () => {
   it("a name-lookup match (recorded source gone) is a NOTE, not a hard-fail — avoids same-name false-red", () => {
     const d = mkdtempSync(join(tmpdir(), "cwh-scd-"));
     // scenarioSource recorded but missing → falls back to a fuzzy <name>.yaml sibling that may be unrelated.
-    writeFileSync(join(d, "c.yaml"), "prompt: a totally different scenario reusing the name\n");
+    writeFileSync(join(d, "c.yaml"), "fidelity: container\nprompt: a totally different scenario reusing the name\n");
     const cassette = { scenarioSource: "gone.yaml", scenario: { name: "c", prompt: "hi" } } as any;
     const r = scenarioContentDrift(cassette, join(d, "x.cassette.json"));
     // resolvable-by-name + drifted → downgraded to a non-failing note, NOT a { verifiable:true, drifted:["prompt"] } finding
@@ -87,7 +87,7 @@ describe.skipIf(!existsSync(CLI))("verify-cassettes gates on scenario prompt dri
     const d = mkdtempSync(join(tmpdir(), "cwh-scd-e2e-"));
     const cassettePath = join(d, "c.cassette.json");
     writeFileSync(cassettePath, JSON.stringify(cassetteFixture("hi")));
-    writeFileSync(join(d, "s.yaml"), "prompt: hi\n");
+    writeFileSync(join(d, "s.yaml"), "fidelity: container\nprompt: hi\n");
 
     const clean = envelope(["verify-cassettes", cassettePath], d);
     expect(clean.ok).toBe(true);
@@ -95,7 +95,7 @@ describe.skipIf(!existsSync(CLI))("verify-cassettes gates on scenario prompt dri
     expect(clean.results[0].scenarioDrift).toEqual([]);
 
     // Edit the committed prompt → the frozen cassette prompt now diverges → hard fail.
-    writeFileSync(join(d, "s.yaml"), "prompt: a DIFFERENT prompt\n");
+    writeFileSync(join(d, "s.yaml"), "fidelity: container\nprompt: a DIFFERENT prompt\n");
     const drifted = envelope(["verify-cassettes", cassettePath], d);
     expect(drifted.ok).toBe(false);
     expect(drifted.results[0].scenarioDrift.length).toBeGreaterThan(0);

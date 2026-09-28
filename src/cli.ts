@@ -2523,6 +2523,8 @@ function vmEnvelopeBase(subcommand: string, baselineName: string, baseline: Plat
       agentVersion: baseline.agentVersion,
       baselineVersion: baseline.baselineVersion,
     },
+    // `default` is the ad-hoc lanes' tier (`skill --fidelity`, $COWORK_HARNESS_FIDELITY) — a scenario has no
+    // default: `fidelity:` is required there (since 4.0.0). Kept as-is: this envelope is a covered JSON shape.
     fidelity: { tiers: [...FIDELITY_TIERS], default: "container" },
     image: {
       guestOs: baseline.guest.os,

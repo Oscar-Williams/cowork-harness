@@ -16,11 +16,14 @@ const validateScenario = ajv.compile(load("scenario.schema.json"));
 const validateSession = ajv.compile(load("session.schema.json"));
 
 describe("published scenario.schema.json validates via ajv (draft-07)", () => {
-  it("accepts a MINIMAL scenario (only `prompt`) — guards that defaulted fields are NOT required", () => {
-    expect(validateScenario({ prompt: "do the thing" })).toBe(true);
+  it("accepts a MINIMAL scenario (`prompt` + `fidelity`) — guards that defaulted fields are NOT required", () => {
+    expect(validateScenario({ prompt: "do the thing", fidelity: "container" })).toBe(true);
+  });
+  it("rejects a scenario without `fidelity` — the key is required since 4.0.0", () => {
+    expect(validateScenario({ prompt: "do the thing" })).toBe(false);
   });
   it("rejects an unknown top-level key (strictObject fail-closed preserved)", () => {
-    expect(validateScenario({ prompt: "x", bogus: true })).toBe(false);
+    expect(validateScenario({ prompt: "x", fidelity: "container", bogus: true })).toBe(false);
   });
 });
 
@@ -47,7 +50,7 @@ describe("published session.schema.json validates via ajv (draft-07)", () => {
 
 describe("published scenario.schema.json is structural, and says so", () => {
   it("accepts a matcher-less `answers:` entry that the LOADER refuses", () => {
-    const doc = { prompt: "x", answers: [{}] };
+    const doc = { prompt: "x", fidelity: "container", answers: [{}] };
     expect(validateScenario(doc), "the JSON schema started rejecting this — update the description").toBe(true);
     const parsed = Scenario.safeParse(doc);
     expect(parsed.success, "the loader started accepting a matcher-less answer rule").toBe(false);
@@ -57,14 +60,16 @@ describe("published scenario.schema.json is structural, and says so", () => {
   it("accepts `lane: remote` with a delivery-shaped assertion, which is refused at load time", () => {
     // Refused by `execute.ts`'s lane check and by `lint`'s `lane-remote-incompatible-key` — NOT by the
     // zod schema, which is why `Scenario.safeParse` passing here is the point rather than a bug.
-    const doc = { prompt: "x", lane: "remote", assert: [{ user_visible_artifact: "outputs/x.md" }] };
+    const doc = { prompt: "x", fidelity: "container", lane: "remote", assert: [{ user_visible_artifact: "outputs/x.md" }] };
     expect(validateScenario(doc)).toBe(true);
     expect(Scenario.safeParse(doc).success, "this moved into the zod schema — update the description").toBe(true);
   });
 
   it("still rejects what it DOES mirror (the delete-assertion contradiction)", () => {
     // The counterweight: "structural only" must not become "checks nothing".
-    expect(validateScenario({ prompt: "x", assert: [{ no_delete_in_outputs: true }, { allow_outputs_delete: true }] })).toBe(false);
+    expect(
+      validateScenario({ prompt: "x", fidelity: "container", assert: [{ no_delete_in_outputs: true }, { allow_outputs_delete: true }] }),
+    ).toBe(false);
   });
 
   it("the description points at the checks that catch the two cases above", () => {

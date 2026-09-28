@@ -48,7 +48,7 @@ describe("_findScenarioOnDisk — on-disk scenario probe", () => {
     const cassettePath = join(d, "cassettes", "my-scenario.cassette.json");
     const scenarioPath = join(d, "scenarios", "my-scenario.yaml");
     writeFileSync(cassettePath, "{}");
-    writeFileSync(scenarioPath, "prompt: hi\n");
+    writeFileSync(scenarioPath, "fidelity: container\nprompt: hi\n");
     expect(_findScenarioOnDisk(cassettePath, "my-scenario")).toBe(scenarioPath);
   });
 
@@ -57,7 +57,7 @@ describe("_findScenarioOnDisk — on-disk scenario probe", () => {
     const cassettePath = join(d, "my-scenario.cassette.json");
     const scenarioPath = join(d, "my-scenario.yaml");
     writeFileSync(cassettePath, "{}");
-    writeFileSync(scenarioPath, "prompt: hi\n");
+    writeFileSync(scenarioPath, "fidelity: container\nprompt: hi\n");
     expect(_findScenarioOnDisk(cassettePath, "my-scenario")).toBe(scenarioPath);
   });
 
@@ -72,7 +72,7 @@ describe("_findScenarioOnDisk — on-disk scenario probe", () => {
     const cassettePath = join(d, "cassettes", "c.cassette.json");
     writeFileSync(cassettePath, "{}");
     // a decoy that the misplaced slugForPath("scenario") fallback WOULD have matched
-    writeFileSync(join(d, "scenarios", "scenario.yaml"), "prompt: decoy\n");
+    writeFileSync(join(d, "scenarios", "scenario.yaml"), "fidelity: container\nprompt: decoy\n");
     expect(_findScenarioOnDisk(cassettePath, undefined)).toBeNull();
   });
 });
@@ -84,7 +84,7 @@ describe("_resolveRerecordSource prefers the persisted scenarioSource over the n
     // The on-disk scenario file is named differently than the authored `name:` — name lookup can't find it.
     const scenarioPath = join(d, "edited-source.yaml");
     writeFileSync(cassettePath, "{}");
-    writeFileSync(scenarioPath, "prompt: hi\n");
+    writeFileSync(scenarioPath, "fidelity: container\nprompt: hi\n");
     const cassette = { scenarioSource: "edited-source.yaml", scenario: { name: "Some Authored Name" } };
     const r = _resolveRerecordSource(cassettePath, cassette);
     expect(r.via).toBe("persisted");
@@ -98,7 +98,7 @@ describe("_resolveRerecordSource prefers the persisted scenarioSource over the n
     const cassettePath = join(d, "my-scenario.cassette.json");
     const scenarioPath = join(d, "my-scenario.yaml");
     writeFileSync(cassettePath, "{}");
-    writeFileSync(scenarioPath, "prompt: hi\n");
+    writeFileSync(scenarioPath, "fidelity: container\nprompt: hi\n");
     // persisted source points at a file that no longer exists
     const cassette = { scenarioSource: "deleted.yaml", scenario: { name: "my-scenario" } };
     const r = _resolveRerecordSource(cassettePath, cassette);
@@ -120,7 +120,7 @@ describe("_resolveRerecordSource prefers the persisted scenarioSource over the n
     const cassettePath = join(d, "my-scenario.cassette.json");
     const scenarioPath = join(d, "my-scenario.yaml");
     writeFileSync(cassettePath, "{}");
-    writeFileSync(scenarioPath, "prompt: hi\n");
+    writeFileSync(scenarioPath, "fidelity: container\nprompt: hi\n");
     const cassette = { scenario: { name: "my-scenario" } };
     const r = _resolveRerecordSource(cassettePath, cassette);
     expect(r.via).toBe("name-lookup");

@@ -42,7 +42,7 @@ function tmpWork() {
 }
 
 const okScenario = (name: string) => `name: ${name}\nprompt: "do the thing"\nfidelity: protocol\nassert:\n  - result: success\n`;
-const brokenScenario = "prompt: 123\n"; // wrong type — fails Zod validation → classified `broken`, not `skipped`
+const brokenScenario = "fidelity: container\nprompt: 123\n"; // wrong type — fails Zod validation → classified `broken`, not `skipped`
 
 describe.skipIf(!can)("record --dry-run — token/agent lines no longer read as a failure", () => {
   it("single scenario: absent token is worded as an informational preview, not a bare ✗ MISSING", () => {

@@ -83,7 +83,7 @@ function cassetteJson(opts: {
 function scenarioYaml(opts: { name?: string; prompt?: string; assert?: string; session?: string; lane?: "local" | "remote" } = {}): string {
   return (
     `name: ${opts.name ?? "c"}\n` +
-    `prompt: ${opts.prompt ?? "do the thing"}\n` +
+    `fidelity: container\nprompt: ${opts.prompt ?? "do the thing"}\n` +
     (opts.session ? `session: ${opts.session}\n` : "") +
     (opts.lane ? `lane: ${opts.lane}\n` : "") +
     `assert:\n${opts.assert ?? "  - result: success\n"}`
@@ -281,7 +281,7 @@ describe.skipIf(!can)("replay opt-in — --assert-from / --reassert, safe by con
       controlOut: [],
     });
     write(cwd, "c.cassette.json", frozen);
-    const base = "name: c\nprompt: do the thing\n";
+    const base = "name: c\nfidelity: container\nprompt: do the thing\n";
     const cases: Array<[string, string]> = [
       [
         "answers",
@@ -329,7 +329,7 @@ describe.skipIf(!can)("replay opt-in — --assert-from / --reassert, safe by con
     write(
       cwd,
       "edit.yaml",
-      "name: c\nprompt: do the thing\nbaseline: 1.2.3\nskills:\n  - alpha\nanswers:\n  - when_question: go?\n    choose: Yes\nassert:\n  - transcript_contains: hello\n",
+      "name: c\nfidelity: container\nprompt: do the thing\nbaseline: 1.2.3\nskills:\n  - alpha\nanswers:\n  - when_question: go?\n    choose: Yes\nassert:\n  - transcript_contains: hello\n",
     );
     const r = replay(cwd, ["c.cassette.json", "--assert-from", "edit.yaml", "--output-format", "json"]);
     expect(r.code).toBe(0);
@@ -443,7 +443,11 @@ describe.skipIf(!can)("replay opt-in — --assert-from / --reassert, safe by con
   it("warns that an edited on-disk expect_denied is sourced but inert on replay (live-only)", () => {
     const cwd = tmp();
     write(cwd, "c.cassette.json", cassetteJson({ assert: [{ result: "success" }] }));
-    write(cwd, "edit.yaml", "name: c\nprompt: do the thing\nexpect_denied:\n  - evil.example.com\nassert:\n  - result: success\n");
+    write(
+      cwd,
+      "edit.yaml",
+      "name: c\nfidelity: container\nprompt: do the thing\nexpect_denied:\n  - evil.example.com\nassert:\n  - result: success\n",
+    );
     const r = replay(cwd, ["c.cassette.json", "--assert-from", "edit.yaml"]);
     expect(r.stderr).toMatch(/expect_denied.*live-only/);
   });

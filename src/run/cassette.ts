@@ -35,7 +35,15 @@ import {
   FIDELITY_TIERS,
   isLiveModelId,
 } from "../types.js";
-import { executeScenario, assertContradiction, parseScenarioFile, collectArtifactPaths, parseSessionFile, slugForPath } from "./execute.js";
+import {
+  executeScenario,
+  assertContradiction,
+  parseScenarioFile,
+  collectArtifactPaths,
+  parseSessionFile,
+  slugForPath,
+  FidelityMissingError,
+} from "./execute.js";
 import { UsageError, UnknownBaselineError, compactSchemaError } from "../errors.js";
 import { preflightBudget, preflightBatchBudget, batchBudgetTracker, estimateBatchCost, batchCostEstimateLine } from "./budget.js";
 
@@ -5167,13 +5175,30 @@ const normRecordingShapingValue = (v: unknown) => JSON.stringify(v ?? null);
 const RECORDING_SHAPING_CHECKS: Record<(typeof RECORDING_SHAPING_FIELDS)[number], (frozen: Scenario, onDisk: Scenario) => boolean> = {
   prompt: (frozen, onDisk) => (frozen.prompt ?? "") === (onDisk.prompt ?? ""),
   baseline: (frozen, onDisk) => (frozen.baseline ?? "latest") === (onDisk.baseline ?? "latest"),
-  fidelity: (frozen, onDisk) => (frozen.fidelity ?? "container") === (onDisk.fidelity ?? "container"),
+  // The frozen side keeps its fallback (a hand-built cassette may lack the key); the on-disk side is a loaded
+  // scenario, where `fidelity` is required.
+  fidelity: (frozen, onDisk) => (frozen.fidelity ?? "container") === onDisk.fidelity,
   lane: (frozen, onDisk) => (frozen.lane ?? "local") === (onDisk.lane ?? "local"),
   answers: (frozen, onDisk) => normRecordingShapingValue(frozen.answers ?? []) === normRecordingShapingValue(onDisk.answers ?? []),
   skills: (frozen, onDisk) => normRecordingShapingValue(frozen.skills ?? []) === normRecordingShapingValue(onDisk.skills ?? []),
   requires_capabilities: (frozen, onDisk) =>
     normRecordingShapingValue(frozen.requires_capabilities ?? []) === normRecordingShapingValue(onDisk.requires_capabilities ?? []),
 };
+
+/** The remedy for an on-disk sibling that omits `fidelity:`, worded for a path that HAS a cassette: the
+ *  answer is not "pick a tier" but "add the tier this cassette recorded". Any other tier is a recording-shaping
+ *  change (see RECORDING_SHAPING_CHECKS), so the generic `container` advice would turn a missing key into a
+ *  drift on a `hostloop` or `protocol` cassette. The frozen side falls back to `container` for a hand-built
+ *  cassette, the same fallback the drift check uses. Shared by the three paths that read the sibling: the
+ *  default `replay` notice, `replay --assert-from`, and `verify-cassettes`' drift check. */
+export function fidelityMissingForCassette(e: FidelityMissingError, frozen: Pick<Scenario, "fidelity">): string {
+  const tier = frozen.fidelity ?? "container";
+  return (
+    `\`fidelity:\` is required (since 4.0.0) — add \`fidelity: ${tier}\` to ${e.path}, the tier this cassette recorded ` +
+    `(a different tier is a recording-shaping change and needs a re-record)` +
+    (e.otherIssues ? `. Also: ${e.otherIssues}` : "")
+  );
+}
 
 function recordingShapingDrift(frozen: Scenario, onDisk: Scenario): string[] {
   return RECORDING_SHAPING_FIELDS.filter((key) => !RECORDING_SHAPING_CHECKS[key](frozen, onDisk));
@@ -5809,6 +5834,8 @@ export async function cmdReplay(args: string[]) {
         try {
           onDisk = parseScenarioFile(srcPath);
         } catch (e) {
+          if (e instanceof FidelityMissingError)
+            throw new Error(`--assert-from: ${srcPath} does not load: ${fidelityMissingForCassette(e, rc.cassette.scenario)}`);
           throw new Error(`--assert-from: failed to parse ${srcPath}: ${compactSchemaError((e as Error).message)}`);
         }
         const drift = recordingShapingDrift(rc.cassette.scenario, onDisk);
@@ -5862,7 +5889,11 @@ export async function cmdReplay(args: string[]) {
             try {
               onDisk = parseScenarioFile(src.path);
             } catch (e) {
-              if (e instanceof UsageError)
+              if (e instanceof FidelityMissingError)
+                warn(
+                  `::notice:: [replay] ${src.path} does not load: ${fidelityMissingForCassette(e, rc.cassette.scenario)} — replay used the scenario frozen in the cassette and is unaffected.\n`,
+                );
+              else if (e instanceof UsageError)
                 warn(
                   `::notice:: [replay] ${src.path} does not load: ${compactSchemaError(e.message)} — replay used the scenario frozen in the cassette and is unaffected. ` +
                     `Run \`cowork-harness record ${src.path} --dry-run\` for the full error.\n`,

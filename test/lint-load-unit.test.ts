@@ -22,8 +22,8 @@ afterEach(() => vi.restoreAllMocks());
 describe("loaderFindings turns every load outcome into the right finding (a table over parseScenarioFile)", () => {
   // What this can catch: the error-to-finding mapping — a load failure that maps to NO ERROR (a silent
   // drop), or a successful load that still yields one. What it cannot catch: a regression inside the
-  // loader itself. Both sides call the same `loadScenarioPure` (`parseScenarioFile` is a thin wrapper that
-  // only adds the stderr notice), so a loader bug moves both together. That sharing is the design — lint
+  // loader itself. Both sides call the same `loadScenarioPure` (`parseScenarioFile` is the same function
+  // under its older name), so a loader bug moves both together. That sharing is the design — lint
   // and `run`/`record` cannot drift — and the loader's own behaviour is exercised end to end by the CLI
   // tests in lint-loads-scenario.test.ts.
   const d = mkdtempSync(join(tmpdir(), "cwh-lint-unit-"));
@@ -57,9 +57,9 @@ describe("loaderFindings turns every load outcome into the right finding (a tabl
 });
 
 describe("loaderFindings output", () => {
-  it("never writes to stdout or stderr (the defaulted-fidelity notice belongs to run/record)", () => {
+  it("never writes to stdout or stderr", () => {
     const d = mkdtempSync(join(tmpdir(), "cwh-lint-unit-"));
-    const p = file(d, "s.yaml", ["baseline: latest", "prompt: hello"]);
+    const p = file(d, "s.yaml", HEAD);
     const o = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
     const e = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
     expect(loaderFindings([p])).toEqual([]);
