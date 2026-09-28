@@ -1,8 +1,6 @@
 # Debugging a run
 
 Tracks `cowork-harness 3.10.0` (baseline `desktop-2.9939.2`). Read it when a run misbehaved or a green looks wrong: triage, the observability output, and `chat`.
-Moved from SKILL.md unchanged except for relative links. A section named in the text lives in the file
-SKILL.md's routing table assigns it; "Part I/II/III" are authoring.md, run-record-replay.md and debugging.md.
 
 ## Part III — Debug
 
@@ -47,7 +45,7 @@ A verdict is only the top of what a run records, and the run dir persists after 
 (`~/.cowork-harness/runs/…`). Beyond pass/fail, every `run`/`skill`/`chat` writes a `result.json` and a
 trace you read back without a re-record — the debugging loop is *localize the failure from that
 already-written evidence*, not re-run-and-hope. Use them to diagnose a failure (and, secondarily, to
-decide which assertions from *Assertions: two orthogonal axes* are worth adding):
+decide which assertions from *Assertions: two orthogonal axes* in `assertions-guide.md` are worth adding):
 
 - **`cowork-harness trace <run-dir> --view <view>`** — focuses one of the run's rollups (the per-tool
   call-count/timing table, the sub-agent dispatch tree, the gate lifecycle, the tool/error rollups, …);
@@ -71,7 +69,7 @@ decide which assertions from *Assertions: two orthogonal axes* are worth adding)
   individual runs behind each summary with their `skillHash`/`runLabel`, so
   you can tell which arm a run belonged to without opening its `result.json`. `--last <n>` windows per group.
 - **`result.json` carries the raw fields** the assertions read: `verdict`, `lane` (which Cowork delivery
-  contract the run was held to — see Gotcha 24), `scratchpadEvidenceComplete` (did a COMPLETE scratchpad
+  contract the run was held to — see gotcha 24 in `gotchas.md`), `scratchpadEvidenceComplete` (did a COMPLETE scratchpad
   walk observe this run — what distinguishes "nothing was left undelivered" from "cannot tell"), `cost` (`cost.usd` = the SDK's
   `total_cost_usd` for the run — the authoritative single-run spend; NOT the same source as summing
   `modelUsage[].costUSD`, which is what `trace --view usage` reports, so the two can differ),

@@ -1,8 +1,6 @@
 # Gotchas
 
-Tracks `cowork-harness 3.10.0` (baseline `desktop-2.9939.2`). The full "✓ passed ≠ correct" landmine catalog, numbered as it always was.
-Moved from SKILL.md unchanged except for relative links. A section named in the text lives in the file
-SKILL.md's routing table assigns it; "Part I/II/III" are authoring.md, run-record-replay.md and debugging.md.
+Tracks `cowork-harness 3.10.0` (baseline `desktop-2.9939.2`). The full "✓ passed ≠ correct" landmine catalog.
 
 ## Gotchas — the "✓ passed ≠ correct" landmines
 
@@ -37,7 +35,7 @@ authorable). Reach for this list when debugging a run's behavior, that one while
 
 3. **A multi-key `assert:` item is an AND.** A single list item with more than one key passes iff
    **every** key passes. *Fix:* one concern per item unless you genuinely mean conjunction (and a
-   mixed-class conjunction still loses its filesystem half on replay — see gotcha 1 below).
+   mixed-class conjunction still loses its filesystem half on replay — see gotcha 1 above).
 
 4. **`tool_called` doesn't mean "attempted".** Tool counts are authoritative and de-duped: a tool
    that was *requested then denied* does **not** register as called. *Fix:* don't assert `tool_called`
@@ -102,13 +100,13 @@ authorable). Reach for this list when debugging a run's behavior, that one while
 
 11. **An external decider returning `"first"` does not select option 1.** The `"first"` keyword
     shorthand is disabled for `--decider-cmd` / `--decider-dir` helpers (see *Choose an answer path*
-    → External deciders). If your helper
+    → External deciders in `authoring.md`). If your helper
     accidentally emits `"first"` and no label named `"first"` exists, the gate fails — it does
     **not** silently pick the first option. This is intentional: a helper bug should fail loud, not
     green wrong. *Fix:* have helpers return a label name or numeric index.
 
 12. **`prompt_asset_missing` is a WARN, not a hard failure — greens can hide it.** The
-    `prompt_asset_missing` verdict signal (see *Interpreting verdict signals*) does not block a green verdict. Scan the verdict
+    `prompt_asset_missing` verdict signal (see *Interpreting verdict signals* in `run-record-replay.md`) does not block a green verdict. Scan the verdict
     signals section after every run; a run that greened with this signal ran against an incomplete
     prompt. *Fix:* treat `prompt_asset_missing` as a blocking error in CI by checking the signals
     array.

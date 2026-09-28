@@ -1,8 +1,6 @@
 # Authoring a scenario
 
 Tracks `cowork-harness 3.10.0` (baseline `desktop-2.9939.2`). Read it when composing a `scenarios/*.yaml`: session vs scenario, discovery, the fidelity tier, the answer path, `web_fetch`, and scaffold + lint.
-Moved from SKILL.md unchanged except for relative links. A section named in the text lives in the file
-SKILL.md's routing table assigns it; "Part I/II/III" are authoring.md, run-record-replay.md and debugging.md.
 
 ## Part I — AUTHOR a scenario
 
@@ -64,7 +62,7 @@ So: behaviour conclusions (triggering, tool sequencing, gate handling) travel be
 asserting a **path, mount or delivery mechanism** is a claim about the local lane only. Declare
 `lane: remote` when the scenario is about that lane — the affected assertions then refuse to grade
 rather than passing (see the `delivery_unobservable` WARN and the `lane: remote` load-time rejections
-above).
+in `run-record-replay.md`).
 
 ### Choose an answer path (gates: AskUserQuestion + tool-permission)
 
@@ -103,7 +101,7 @@ Will this run be re-executed UNATTENDED? (CI, a committed cassette, --repeat, --
    │            (Label *text* drift alone does not need this — substring anchors handle that.)
    │
    └─ a human at a keyboard, and you are NOT producing a test
-            ──► `cowork-harness chat`   (TTY; no pass/fail verdict — see below)
+            ──► `cowork-harness chat`   (TTY; no pass/fail verdict — see debugging.md)
 ```
 
 | Channel | Deterministic? | Don't use it when |

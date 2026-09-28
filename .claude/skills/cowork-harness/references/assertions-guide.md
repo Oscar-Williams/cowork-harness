@@ -1,8 +1,6 @@
 # Assertions guide
 
 Tracks `cowork-harness 3.10.0` (baseline `desktop-2.9939.2`). Read it when choosing assertion keys: the two orthogonal axes and the goal → key map. The full catalog is `assertion-catalog.md`.
-Moved from SKILL.md unchanged except for relative links. A section named in the text lives in the file
-SKILL.md's routing table assigns it; "Part I/II/III" are authoring.md, run-record-replay.md and debugging.md.
 
 ### Assertions: two orthogonal axes
 
@@ -21,7 +19,7 @@ Conflating these is the **biggest landmine**. An assertion key has two independe
 
 Getting Axis B wrong means a check that **does nothing in CI** — the harness warns loudly when it skips
 (an `::warning::` annotation, not a silent no-op — see the Axis B bullet above), and the bundled linter
-catches it before you push — run it (see *Scaffold a valid scenario, then lint before you push* below).
+catches it before you push — run it (see *Scaffold a valid scenario, then lint before you push* in `authoring.md`).
 
 See `references/assertion-catalog.md` for the full assertion catalog, and `references/scenario-schema.md`'s
 *Replay class* for which keys survive `replay`.

@@ -1,8 +1,6 @@
 # Run, record and lock
 
 Tracks `cowork-harness 3.10.0` (baseline `desktop-2.9939.2`). Read it when running a scenario, recording or placing a cassette, reading verdict signals, checking a background run, or choosing CI lanes.
-Moved from SKILL.md unchanged except for relative links. A section named in the text lives in the file
-SKILL.md's routing table assigns it; "Part I/II/III" are authoring.md, run-record-replay.md and debugging.md.
 
 ## Part II — RUN, RECORD & LOCK
 
@@ -72,7 +70,7 @@ warns when the cassette would be written outside the scenario's tree, or when `s
 outside it (an absolute or `~` path: the mirror case, invisible to a check that only looks at where the
 cassette lands). A warning, not a refusal — an out-of-tree throwaway cassette is legitimate; what was
 missing was anything saying so while you could still act. Related: recording at a **host-inheriting** tier
-(`protocol`/`hostloop`/`cowork`→hostloop) into a repo-visible path is refused outright (gotcha 25 below).
+(`protocol`/`hostloop`/`cowork`→hostloop) into a repo-visible path is refused outright (gotcha 25 in `gotchas.md`).
 The clean answer there is `fidelity: container` (sealed, `HOME=/tmp`, nothing to leak) — **not**
 redirecting `--out` outside the repo and moving the file in afterwards, which trades a loud refusal
 for a cassette that cannot verify staleness from its own location — recoverable only by passing

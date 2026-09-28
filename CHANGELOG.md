@@ -62,9 +62,11 @@ All notable changes to this project are documented here. The format is based on
 
 - **The companion skill's `SKILL.md` is now a short entrypoint (about 14 KB, down from 103 KB).** It keeps
   the preflight, the Orient router, the invariants whose absence causes a false green, short workflows
-  and a routing table. The detail moved unchanged into six new files under `references/`:
-  `authoring.md`, `assertions-guide.md`, `run-record-replay.md`, `measurement.md`, `debugging.md` and
-  `gotchas.md` (numbering preserved). No harness behaviour changes. Links to the old `SKILL.md#gotchas-…`
+  and a routing table. The detail now lives in six new files under `references/`: `authoring.md`,
+  `assertions-guide.md`, `run-record-replay.md`, `measurement.md`, `debugging.md` and `gotchas.md` (numbering
+  preserved). The assertion catalog and verdict-signal table moved out of `scenario-schema.md` into a new
+  `references/assertion-catalog.md`, so no reference exceeds what one Read returns whole. No harness behaviour
+  changes. Links to the old `SKILL.md#gotchas-…`
   anchor now point at `references/gotchas.md`, where the same heading lives.
 - **`npm run check:claims` also reports version stamps in the companion-skill payload,** including the
   size caps' stamp in `scenario.py`.

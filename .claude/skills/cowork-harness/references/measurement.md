@@ -1,8 +1,6 @@
 # Measurement
 
 Tracks `cowork-harness 3.10.0` (baseline `desktop-2.9939.2`). Read it before comparing runs: `--repeat`, `--ablate-skill`, and the hygiene that keeps a batch valid.
-Moved from SKILL.md unchanged except for relative links. A section named in the text lives in the file
-SKILL.md's routing table assigns it; "Part I/II/III" are authoring.md, run-record-replay.md and debugging.md.
 
 ### Measure — before/after, with/without (`--repeat`, `--ablate-skill`)
 

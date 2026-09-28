@@ -153,14 +153,14 @@ behind each, is [`references/gotchas.md`](references/gotchas.md).
 |---|---|
 | [`references/authoring.md`](references/authoring.md) | session vs scenario, discovery, fidelity tier, the answer-channel decision tree, `web_fetch`, scaffold + lint |
 | [`references/assertions-guide.md`](references/assertions-guide.md) | the two assertion axes, the goal → key map |
-| [`references/run-record-replay.md`](references/run-record-replay.md) | run / `verify-run`, recording and cassette placement, real-document validation, verdict signals, background-run liveness, CI lanes |
+| [`references/run-record-replay.md`](references/run-record-replay.md) | run / `verify-run`, recording and cassette placement, real-document validation, verdict signals (incl. where a relative or `outputs/` path lands per tier), background-run liveness, CI lanes |
 | [`references/measurement.md`](references/measurement.md) | `--repeat`, `--ablate-skill`, measurement hygiene |
 | [`references/debugging.md`](references/debugging.md) | triage, `result.json` fields and `trace` views, `chat` |
 | [`references/gotchas.md`](references/gotchas.md) | the full "✓ passed ≠ correct" landmine catalog |
-| [`references/task-recipes.md`](references/task-recipes.md) | end-to-end recipes: evolve `assert:`, audit tier drift, redaction, budgets, answer quality |
+| [`references/task-recipes.md`](references/task-recipes.md) | start here for "how do I X": evolve `assert:`, audit tier drift, redaction, budgets, answer quality |
 | [`references/assertion-catalog.md`](references/assertion-catalog.md) | every `assert:` key's semantics, the verdict-signal table |
 | [`references/scenario-schema.md`](references/scenario-schema.md) | every YAML field, which keys survive `replay`, the `web_fetch` model |
 | [`references/fidelity-and-answers.md`](references/fidelity-and-answers.md) | tier semantics, answer paths, the determinism contract |
 | [`references/ci-recipe.md`](references/ci-recipe.md) | the GitHub Action, replay-vs-live lanes, the four-stage pipeline |
 | [`references/critique.md`](references/critique.md) | `critique` report and evidence-package shapes |
-| `scripts/scenario.py` | `scaffold`, `lint`, `lint-skill`, `resolve-agent-types <plugin-dir>` |
+| `scripts/scenario.py` | `scaffold`, `lint`, `lint-skill`, `resolve-agent-types <plugin-dir>` (validates a pinned `subagent_type` against `plugin.json` + `agents/*.md`) |
