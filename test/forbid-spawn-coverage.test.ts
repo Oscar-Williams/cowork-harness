@@ -45,4 +45,13 @@ describe("the spawn guard covers every model launch", () => {
     await expect(cmdChat([dir, "--raw"])).rejects.toThrow(/COWORK_HARNESS_FORBID_SPAWN/);
     expect(spawned).toEqual([]);
   });
+
+  it("interactive chat refuses under the flag, before the egress sidecar or the agent spawn", async () => {
+    const { cmdChat } = await import("../src/run/chat.js");
+    for (const tier of ["protocol", "hostloop"]) {
+      const dir = mkdtempSync(join(tmpdir(), "cwh-fs-chat-"));
+      await expect(cmdChat([dir, "--fidelity", tier])).rejects.toThrow(/COWORK_HARNESS_FORBID_SPAWN/);
+    }
+    expect(spawned).toEqual([]);
+  });
 });
