@@ -8,7 +8,7 @@ import type { RunResult } from "../types.js";
 import { readIndex, resolveRunsExactFromIndex, resolveRunsFragmentFromIndex, type RunIndexRow } from "./run-index.js";
 import { readTimeline } from "../agent/timeline.js";
 import { currentTurnEventLines } from "./turn-events.js";
-import { foldToolDurations } from "./timeline-fold.js";
+import { foldToolDurations, pairToolCalls, type ToolDurationEntry, type ToolDurationsBasis } from "./timeline-fold.js";
 import { latestTurn, turnArtifactPath, classifyRunDir, preLayoutMessage } from "./turn-layout.js";
 
 /**
@@ -602,26 +602,143 @@ export function formatDispatchTree({ nodes, total }: { nodes: DispatchNode[]; to
   return lines.join("\n");
 }
 
-/**
- * `trace --view tool-durations` — per-tool call-count/timing aggregate, folded from the sibling
- * `timeline.jsonl`. Returns `{}` for a run dir with no timeline (an older recording that predates this
- * file, or a run that genuinely made no tool calls) — same "absent means no data, not an error" convention as the other
- * `build*` functions in this file.
- */
-export function buildToolDurations(file: string): Record<string, { calls: number; totalMs: number; maxMs: number }> {
-  const timelineData = readTimeline(join(file, ".."));
-  return timelineData ? foldToolDurations(timelineData.events) : {};
+/** `--scope` for `trace --view tool-durations` — the same vocabulary, and the same membership rule, as
+ *  the object form of `tool_called` (`scope === "any" || origin === scope`). */
+export const TOOL_DURATION_SCOPES = ["main", "subagent", "any"] as const;
+export type ToolDurationScope = (typeof TOOL_DURATION_SCOPES)[number];
+
+export interface ToolDurationCallRow {
+  toolUseId: string;
+  name: string;
+  /** From result.json's `toolCalls[].origin` (the run's own classifier); absent when no result.json
+   *  classified this call (only possible under `--scope any`). */
+  origin?: "main" | "subagent" | "unknown";
+  /** ms from the timeline's start to the tool_use. */
+  startMs: number;
+  /** Wall gap to the paired tool_result; absent = the call never paired (no duration). */
+  durationMs?: number;
 }
 
-export function formatToolDurations(durations: Record<string, { calls: number; totalMs: number; maxMs: number }>): string {
-  const names = Object.keys(durations);
-  if (!names.length) return "(no tool-duration data for this run — an older recording without timing, or no tool calls)";
-  const lines = names.map((name) => {
-    const d = durations[name];
-    return `${name} ×${d.calls}, ${(d.totalMs / 1000).toFixed(1)}s total, ${(d.maxMs / 1000).toFixed(1)}s max`;
-  });
-  const totalMs = names.reduce((sum, name) => sum + durations[name].totalMs, 0);
-  lines.push(`\n${names.length} tool(s), ${(totalMs / 1000).toFixed(1)}s combined wall-gap total`);
+export interface ToolDurationsView {
+  basis: ToolDurationsBasis;
+  scope: ToolDurationScope;
+  /** false = the view cannot be computed honestly (corrupt timeline, or a narrowed scope with no
+   *  classification to read); `reason` says why and `durations` is `{}`. A run with no timeline at all
+   *  stays `available: true` with `{}` — absence of data, as in the other views. */
+  available: boolean;
+  reason?: string;
+  durations: Record<string, ToolDurationEntry>;
+  /** Calls the timeline holds that result.json's `toolCalls` has no entry for — excluded from a narrowed
+   *  scope, and counted so the exclusion is visible. Present only under `--scope main|subagent`. */
+  unclassified?: number;
+  /** One row per call (stream order), only with `--per-call`. */
+  calls?: ToolDurationCallRow[];
+}
+
+/**
+ * `trace --view tool-durations` — per-tool timing folded from the sibling `timeline.jsonl`, with the
+ * basis named. The fold is `foldToolDurations`, the same function every RunResult site uses, so this
+ * table and `result.json`'s `toolDurations` agree for `--scope any`.
+ *
+ * `--scope main|subagent` does not classify anything itself: it joins each timeline call by
+ * `toolUseId` to the sibling result.json's `toolCalls[].origin`, i.e. the run's own classification. With
+ * no result.json, or one that predates `toolCalls`, a narrowed scope is unavailable rather than a
+ * silent render of every call.
+ *
+ * A corrupt timeline (unparseable header, or dropped entry lines) is unavailable too, matching the
+ * RunResult sites, which refuse to fold one.
+ */
+export function buildToolDurations(file: string, opts: { scope?: ToolDurationScope; perCall?: boolean } = {}): ToolDurationsView {
+  const scope = opts.scope ?? "any";
+  const base = { basis: "wall_gap" as const, scope };
+  const unavailable = (reason: string): ToolDurationsView => ({ ...base, available: false, reason, durations: {} });
+  const timelineData = readTimeline(join(file, ".."));
+  if (!timelineData) return { ...base, available: true, durations: {}, ...(opts.perCall ? { calls: [] } : {}) };
+  if (timelineData.headerCorrupt) return unavailable("timeline.jsonl has a corrupt header — no durations can be trusted");
+  if (timelineData.malformedLines > 0)
+    return unavailable(
+      `timeline.jsonl has ${timelineData.malformedLines} malformed line(s) — a dropped line could be any call, so the table would be incomplete`,
+    );
+
+  let events = timelineData.events;
+  let unclassified: number | undefined;
+  const originById = new Map<string, "main" | "subagent" | "unknown">();
+  const result = readSiblingResult(file);
+  for (const c of result?.toolCalls ?? []) if (c.toolUseId) originById.set(c.toolUseId, c.origin);
+  if (scope !== "any") {
+    if (!result)
+      return unavailable(`--scope ${scope} needs the run's classification — ${resultUnavailableReason(file, "tool-durations --scope")}`);
+    if (result.toolCalls === undefined)
+      return unavailable(`--scope ${scope} needs result.json's toolCalls, which this run's result.json predates`);
+    unclassified = 0;
+    const keep = new Set<string>();
+    for (const ev of events) {
+      if (ev.type !== "tool_use" || !ev.toolUseId) continue;
+      const origin = originById.get(ev.toolUseId);
+      if (origin === undefined) unclassified++;
+      else if (origin === scope) keep.add(ev.toolUseId);
+    }
+    // Keep only in-scope tool_use events; results pair by id, so an out-of-scope result pairs nothing.
+    events = events.filter((ev) => ev.type !== "tool_use" || (ev.toolUseId !== undefined && keep.has(ev.toolUseId)));
+  }
+  const view: ToolDurationsView = {
+    ...base,
+    available: true,
+    durations: foldToolDurations(events),
+    ...(unclassified !== undefined ? { unclassified } : {}),
+  };
+  if (opts.perCall)
+    view.calls = pairToolCalls(events).map((c) => ({
+      toolUseId: c.toolUseId,
+      name: c.name,
+      ...(originById.has(c.toolUseId) ? { origin: originById.get(c.toolUseId) } : {}),
+      startMs: c.startTs,
+      ...(c.endTs !== undefined ? { durationMs: c.endTs - c.startTs } : {}),
+    }));
+  return view;
+}
+
+const BASIS_LINE =
+  "basis: wall gap from tool_use to tool_result, as the harness saw them — includes model/transport and permission latency; an Agent/Task entry spans its whole sub-agent run. Not isolated execution time.";
+const SCOPE_TEXT: Record<ToolDurationScope, string> = {
+  any: "any (main agent and sub-agents)",
+  main: "main (the main agent, including a Skill's or Agent(fork)'s children)",
+  subagent: "subagent (calls under a sub-agent dispatch this run recorded)",
+};
+
+const secs = (ms: number) => `${(ms / 1000).toFixed(1)}s`;
+
+export function formatToolDurations(v: ToolDurationsView): string {
+  const lines = [BASIS_LINE, `scope: ${SCOPE_TEXT[v.scope]}`];
+  if (!v.available) {
+    lines.push(`(tool durations unavailable: ${v.reason})`);
+    return lines.join("\n");
+  }
+  const names = Object.keys(v.durations);
+  if (!names.length) {
+    lines.push("(no tool-duration data for this run — an older recording without timing, or no tool calls in this scope)");
+  } else {
+    for (const name of names) {
+      const d = v.durations[name];
+      const timing = d.calls ? `, ${secs(d.totalMs)} total, ${secs(d.maxMs)} max` : "";
+      lines.push(`${name} ×${d.calls + d.unpaired}: ${d.calls} paired, ${d.unpaired} unpaired${timing}`);
+    }
+    const totalMs = names.reduce((sum, n) => sum + v.durations[n].totalMs, 0);
+    const unpaired = names.reduce((sum, n) => sum + v.durations[n].unpaired, 0);
+    lines.push(
+      `\n${names.length} tool(s), ${secs(totalMs)} summed wall gap over paired calls (overlapping calls, and an Agent/Task with its children, are counted more than once)` +
+        (unpaired ? `; ${unpaired} unpaired call(s) have no duration` : ""),
+    );
+  }
+  if (v.unclassified)
+    lines.push(`${v.unclassified} call(s) in the timeline were not classified by the run (no toolCalls entry) — excluded from this scope`);
+  if (v.calls) {
+    lines.push("\nper call (stream order):");
+    for (const c of v.calls)
+      lines.push(
+        `  ${c.toolUseId}  ${c.name}${c.origin ? ` [${c.origin}]` : ""}  +${secs(c.startMs)}  ${c.durationMs !== undefined ? secs(c.durationMs) : "no result (unpaired)"}`,
+      );
+  }
   return lines.join("\n");
 }
 
@@ -677,7 +794,7 @@ function readSiblingResult(file: string): RunResult | undefined {
  *  result-derived views. */
 export function resultUnavailableReason(
   file: string,
-  view: "files" | "usage" | "subagent-research" | "cache-read footer" | "gate provenance",
+  view: "files" | "usage" | "subagent-research" | "cache-read footer" | "gate provenance" | "tool-durations --scope",
 ): string {
   const runDir = dirname(file);
   const shape = classifyRunDir(runDir);

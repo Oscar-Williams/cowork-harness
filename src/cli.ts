@@ -83,6 +83,8 @@ import {
   formatDispatchTree,
   buildToolDurations,
   formatToolDurations,
+  TOOL_DURATION_SCOPES,
+  type ToolDurationScope,
   buildToolErrors,
   formatToolErrors,
   buildFilesView,
@@ -553,11 +555,13 @@ const SUBCOMMAND_USAGE: Record<string, string> = {
   // ${TRACE_VIEWS.join("|")} call on its own physical line, apart from the per-view rows below that
   // mention "result.json", keeps this out of the per-turn-artifact-addressing scan's blind spot (it
   // flags any physical line naming an artifact next to something that looks like a path-join call).
-  trace: `usage: trace <run-id | run-dir | events.jsonl> [--view ${TRACE_VIEWS.join("|")}] [--translate-paths] [--full-results] [--output-format json]
+  trace: `usage: trace <run-id | run-dir | events.jsonl> [--view ${TRACE_VIEWS.join("|")}] [--translate-paths] [--full-results] [--scope main|subagent|any] [--per-call] [--output-format json]
        --view tools              tool call / result rows
        --view questions          gate lifecycle (question → offered options, incl. each option's description → answer → delivered)
        --view dispatches         sub-agent dispatch tree + dispatch_count_max
-       --view tool-durations     per-tool call-count/timing table, folded from the sibling timeline.jsonl ({} when the run has no timing data)
+       --view tool-durations     per-tool timing, folded from the sibling timeline.jsonl ({} when the run has no timing data): paired/unpaired counts per tool, under a basis line — the wall gap from tool_use to tool_result, which includes model/transport and permission latency (an Agent/Task entry spans its whole sub-agent run)
+         --scope main|subagent|any  (tool-durations only; default any) which calls count — the same scopes as tool_called's object form, read from the run's own result.json toolCalls classification (a narrowed scope with no result.json, or one without toolCalls, is reported unavailable)
+         --per-call                 (tool-durations only) also list one row per call in stream order, with its duration or "no result (unpaired)"
        --view tool-errors        one row per errored tool call, with the full command + full multi-line stderr (each capped at 4KB); the tools view shows only the first 120 chars
        --view files              workspaceFiles[] class-grouped tree + diff vs preRunHashes (added/modified/removed/unchanged); needs a run dir (reads result.json)
        --view usage              per-model tokens/cost/cache-read ratio from modelUsage; needs a run dir (reads result.json)
@@ -4688,12 +4692,37 @@ function cmdTrace(args: string[]) {
   rejectUnknownFlags(
     "trace",
     args,
-    ["--view", "--output-format", "--output-format=json", "--output-format=text", "--translate-paths", "--full-results"],
+    [
+      "--view",
+      "--output-format",
+      "--output-format=json",
+      "--output-format=text",
+      "--translate-paths",
+      "--full-results",
+      "--scope",
+      "--per-call",
+    ],
     json,
   );
 
-  // skip the `--output-format` and `--view` values so they don't get treated as the target path.
-  const allPositionals = positionals(args, ["--output-format", "--view"]);
+  // --scope / --per-call shape the tool-durations view only. Anywhere else they would be silently
+  // ignored, so they are a usage error instead.
+  const scopeIdx = args.indexOf("--scope");
+  const scopeEqMatch = args.find((a) => a.startsWith("--scope="));
+  const scopeGiven = scopeIdx >= 0 || scopeEqMatch !== undefined;
+  const scopeArg: string | undefined = scopeEqMatch
+    ? scopeEqMatch.slice("--scope=".length)
+    : scopeIdx >= 0
+      ? args[scopeIdx + 1]
+      : undefined;
+  const perCall = args.includes("--per-call");
+  if ((scopeGiven || perCall) && view !== "tool-durations")
+    fail("trace", "usage", "--scope and --per-call apply only to --view tool-durations", undefined, json);
+  if (scopeGiven && !TOOL_DURATION_SCOPES.includes(scopeArg as ToolDurationScope))
+    fail("trace", "usage", `--scope: expected one of ${TOOL_DURATION_SCOPES.join("|")}, got "${scopeArg ?? ""}"`, undefined, json);
+
+  // skip the `--output-format`, `--view` and `--scope` values so they don't get treated as the target path.
+  const allPositionals = positionals(args, ["--output-format", "--view", "--scope"]);
   const target = allPositionals[0];
   // trace takes exactly one target; reject stray positionals rather than silently using the first.
   if (allPositionals.length > 1)
@@ -4708,7 +4737,7 @@ function cmdTrace(args: string[]) {
     fail(
       "trace",
       "usage",
-      `usage: trace <run-id | run-dir | events.jsonl> [--view ${TRACE_VIEWS.join("|")}] [--translate-paths] [--full-results] [--output-format json]`,
+      `usage: trace <run-id | run-dir | events.jsonl> [--view ${TRACE_VIEWS.join("|")}] [--translate-paths] [--full-results] [--scope main|subagent|any] [--per-call] [--output-format json]`,
       undefined,
       json,
     );
@@ -4733,10 +4762,11 @@ function cmdTrace(args: string[]) {
     return;
   }
   if (view === "tool-durations") {
-    // tool-durations view: per-tool call-count/timing aggregate, folded from the sibling timeline.jsonl.
-    const durations = buildToolDurations(file);
-    if (json) out(jsonPayloadEnvelope("trace", true, { file, durations }));
-    else out(formatToolDurations(durations));
+    // tool-durations view: per-tool timing folded from the sibling timeline.jsonl, with its basis named;
+    // --scope joins to result.json's own origin classification, --per-call adds one row per call.
+    const v = buildToolDurations(file, { scope: scopeArg as ToolDurationScope | undefined, perCall });
+    if (json) out(jsonPayloadEnvelope("trace", true, { file, ...v }));
+    else out(formatToolDurations(v));
     return;
   }
   if (view === "tool-errors") {
