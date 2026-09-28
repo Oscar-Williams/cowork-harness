@@ -37,7 +37,7 @@ import { resolveDispatchableAgents, readPluginName, type ResolvedAgent } from ".
 import { findEnclosingPluginDir } from "../run/analyze-skill.js";
 import { safePathSegment } from "../staging/resolve.js";
 import { snapshotTurnBoundary, readTurn1Result, readTurn1Slice, type TurnBoundary } from "./evidence.js";
-import { runCritique, DEFAULT_EVALUATOR_MODEL } from "./evaluator.js";
+import { runCritique, defaultEvaluatorModel } from "./evaluator.js";
 import { loadBaseline } from "../baseline.js";
 import type { PlatformBaseline } from "../types.js";
 import { isLiveModelId } from "../types.js";
@@ -187,7 +187,7 @@ Repeating a flag: --upload/--folder/--plugin/--marketplace/--enable/--answer acc
 COST AND PREREQUISITES — read before running:
   * Each critique is FOUR model workloads: two graded runs (task + reflection) at the chosen tier and two
     evaluator passes over an evidence package of up to ${MAX_PACKAGE_BYTES / 1024}KB.
-  * The evaluator defaults to ${DEFAULT_EVALUATOR_MODEL} — the most expensive tier. WHICH workload
+  * The evaluator defaults to ${defaultEvaluatorModel()} — the most expensive tier. WHICH workload
     dominates depends on the skill: evaluator cost is roughly FIXED (bounded by the evidence package),
     while the graded task turn is UNBOUNDED. On a trivial probe the two evaluator passes are ~3/4 of the
     total; on a real document-analysis run the ratio INVERTS (measured: task turn ~61%, evaluator ~30%).
@@ -1368,7 +1368,7 @@ interface ReportState {
   /** F35: the TRANSPORT-RESOLVED evaluator model, present only when the evaluator actually completed and
    *  every pass that ran agreed on it. Never the requested alias/default. */
   evaluatorModel?: string;
-  /** The requested model (opts.evaluatorModel ?? DEFAULT_EVALUATOR_MODEL) — shown ONLY as unresolved
+  /** The requested model (opts.evaluatorModel ?? defaultEvaluatorModel()) — shown ONLY as unresolved
    *  debugging context when the evaluator never completed (infra failure or evaluator error), clearly
    *  labeled as such; never presented as if it were the resolved provenance value. */
   requestedModel: string;
@@ -2253,7 +2253,7 @@ async function main(argv: string[] = process.argv.slice(2)): Promise<void> {
         taskResult: undefined,
         selfReportStatus: "unavailable",
         items: [],
-        requestedModel: opts.evaluatorModel ?? DEFAULT_EVALUATOR_MODEL,
+        requestedModel: opts.evaluatorModel ?? defaultEvaluatorModel(),
         infraFailure: taskInfra.reason,
         infraFailurePhase: "task turn",
         infraFailureKind: taskInfra.kind,
@@ -2346,7 +2346,7 @@ async function main(argv: string[] = process.argv.slice(2)): Promise<void> {
     // an infrastructure/protocol defect, never fall through to "the agent had nothing to say."
     const reflectionValidation = validateReflectionTurn(reflect, sessionId, outDir);
 
-    const requestedModel = opts.evaluatorModel ?? DEFAULT_EVALUATOR_MODEL;
+    const requestedModel = opts.evaluatorModel ?? defaultEvaluatorModel();
     let items: CritiqueItem[] = [];
     let evaluatorIntegrity: { pass1Canary: boolean; pass2Canary?: boolean } | undefined;
     let droppedEvaluatorItems: { pass1: number; pass2?: number } | undefined;

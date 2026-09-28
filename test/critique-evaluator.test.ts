@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { runCritique, buildPass1Prompt, buildPass2Prompt, DEFAULT_EVALUATOR_MODEL } from "../src/critique/evaluator";
+import { runCritique, buildPass1Prompt, buildPass2Prompt, defaultEvaluatorModel } from "../src/critique/evaluator";
 import { armorEvidence } from "../src/critique/armor";
 import type { Complete } from "../src/decide/decider";
 
@@ -119,8 +119,8 @@ describe("runCritique (two-pass evaluator, stubbed transport)", () => {
   it("defaults to the pinned evaluator model when opts.model is omitted", async () => {
     const { complete, calls } = makeStubComplete();
     await runCritique(SECTIONS, SELF_REPORT_MARKER, { nonce: NONCE, complete });
-    expect(calls[0].model).toBe(DEFAULT_EVALUATOR_MODEL);
-    expect(calls[1].model).toBe(DEFAULT_EVALUATOR_MODEL);
+    expect(calls[0].model).toBe(defaultEvaluatorModel());
+    expect(calls[1].model).toBe(defaultEvaluatorModel());
   });
 
   it("honors an explicit model override for both passes", async () => {
@@ -183,5 +183,31 @@ describe("runCritique — truncation awareness", () => {
     await runCritique(SECTIONS, SELF_REPORT_MARKER, { nonce: NONCE, complete, packageTruncated: true });
     expect(calls[0].prompt).toContain("this evidence package was TRUNCATED");
     expect(calls[1].prompt).toContain("this evidence package was TRUNCATED");
+  });
+});
+
+// COWORK_HARNESS_EVALUATOR_MODEL used to be read into a module-level const at import time — before main()
+// loads any .env — so a `.env` (via --dotenv or ./.env) could never set it. It is read at use now.
+describe("COWORK_HARNESS_EVALUATOR_MODEL is read when the evaluator runs, not at import", () => {
+  it("a value that arrives after import (as a --dotenv file's does) is the model the evaluator calls", async () => {
+    const { mkdtempSync, writeFileSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const { tmpdir } = await import("node:os");
+    const { applyCommandGlobal, resetCommandGlobalsForTest } = await import("../src/run/command-globals.js");
+    const prior = process.env.COWORK_HARNESS_EVALUATOR_MODEL;
+    delete process.env.COWORK_HARNESS_EVALUATOR_MODEL;
+    const d = mkdtempSync(join(tmpdir(), "eval-model-"));
+    writeFileSync(join(d, "e.env"), "COWORK_HARNESS_EVALUATOR_MODEL=claude-from-dotenv\n");
+    resetCommandGlobalsForTest();
+    try {
+      applyCommandGlobal("critique", "--dotenv", join(d, "e.env"), false);
+      const { complete, calls } = makeStubComplete();
+      await runCritique(SECTIONS, SELF_REPORT_MARKER, { nonce: NONCE, complete });
+      expect(calls[0].model).toBe("claude-from-dotenv");
+    } finally {
+      resetCommandGlobalsForTest();
+      if (prior === undefined) delete process.env.COWORK_HARNESS_EVALUATOR_MODEL;
+      else process.env.COWORK_HARNESS_EVALUATOR_MODEL = prior;
+    }
   });
 });
