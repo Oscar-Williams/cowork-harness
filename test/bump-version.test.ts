@@ -224,10 +224,17 @@ describe("TARGET_FILES", () => {
       ".claude-plugin/marketplace.json",
       ".claude/skills/cowork-harness/.claude-plugin/plugin.json",
       ".claude/skills/cowork-harness/SKILL.md",
-      ".claude/skills/cowork-harness/references/scenario-schema.md",
-      ".claude/skills/cowork-harness/references/fidelity-and-answers.md",
-      ".claude/skills/cowork-harness/references/task-recipes.md",
+      // Every references/*.md except ci-recipe.md, sorted — enumerated from the directory.
+      ".claude/skills/cowork-harness/references/assertions-guide.md",
+      ".claude/skills/cowork-harness/references/authoring.md",
       ".claude/skills/cowork-harness/references/critique.md",
+      ".claude/skills/cowork-harness/references/debugging.md",
+      ".claude/skills/cowork-harness/references/fidelity-and-answers.md",
+      ".claude/skills/cowork-harness/references/gotchas.md",
+      ".claude/skills/cowork-harness/references/measurement.md",
+      ".claude/skills/cowork-harness/references/run-record-replay.md",
+      ".claude/skills/cowork-harness/references/scenario-schema.md",
+      ".claude/skills/cowork-harness/references/task-recipes.md",
       ".claude/skills/cowork-harness/references/ci-recipe.md",
       "examples/replays/README.md",
       // Router-split pages (3.0.1). These carry `cowork-harness@^X.Y.Z` install floors that
@@ -247,13 +254,8 @@ describe("TARGET_FILES", () => {
   });
 
   it("bumps the Tracks stamp in each reference file's REAL committed content — synthetic fixtures once hid a line-wrapped stamp the space-literal regex could not match", () => {
-    const stampRefs = [
-      ".claude/skills/cowork-harness/references/scenario-schema.md",
-      ".claude/skills/cowork-harness/references/fidelity-and-answers.md",
-      ".claude/skills/cowork-harness/references/task-recipes.md",
-      ".claude/skills/cowork-harness/references/critique.md",
-      ".claude/skills/cowork-harness/references/ci-recipe.md",
-    ];
+    const stampRefs = TARGET_FILES.filter((f) => f.startsWith(".claude/skills/cowork-harness/references/"));
+    expect(stampRefs.length).toBeGreaterThanOrEqual(11);
     for (const file of stampRefs) {
       const real = readFileSync(resolve(file), "utf8");
       const next = rewriteFileContent(file, real, "9.9.9");

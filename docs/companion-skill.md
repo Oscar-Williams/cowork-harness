@@ -39,7 +39,9 @@ npx skills add yaniv-golan/cowork-harness --skill cowork-harness
 (Working *inside* this repo, the skill auto-loads as a project skill — no install needed.)
 
 **What the marketplace install actually pulls:** only `.claude/skills/cowork-harness/` — SKILL.md +
-`references/` + `scenario.py`/assertion keys, per `.claude-plugin/marketplace.json`'s `source`. Everything
+`references/` + `scenario.py`/assertion keys, per `.claude-plugin/marketplace.json`'s `source`. SKILL.md is a
+short entrypoint (routing, the false-green invariants, short workflows); the detail it routes to lives in
+`references/`, which the agent reads on demand. Everything
 else (the CLI, `docs/`, the worked examples, the pytest lane) arrives when the skill's first command
 self-bootstraps `npx "cowork-harness@^3.10.0"`, which pulls the same npm package as a global install.
 

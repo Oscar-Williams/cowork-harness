@@ -20,7 +20,7 @@
 // README's bare `@>=X` floor, and a test that the current-version release-note bullet survives the bump.
 
 import { execSync } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
+import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { checkVersions } from "./check-versions.js";
@@ -122,10 +122,14 @@ const CI_RECIPE_EXAMPLE: Rewriter = {
 
 const SKILL_MD = ".claude/skills/cowork-harness/SKILL.md";
 const CI_RECIPE_MD = ".claude/skills/cowork-harness/references/ci-recipe.md";
-const SCENARIO_SCHEMA_MD = ".claude/skills/cowork-harness/references/scenario-schema.md";
-const FIDELITY_AND_ANSWERS_MD = ".claude/skills/cowork-harness/references/fidelity-and-answers.md";
-const TASK_RECIPES_MD = ".claude/skills/cowork-harness/references/task-recipes.md";
-const CRITIQUE_MD = ".claude/skills/cowork-harness/references/critique.md";
+const REFERENCES_DIR = ".claude/skills/cowork-harness/references";
+/** Every reference other than ci-recipe.md carries only the `Tracks` stamp. Enumerated from the directory,
+ *  like check:versions invariant 6, so a new reference is bumped by rule rather than by remembering to
+ *  list it here. */
+const TRACKS_STAMP_REFS: readonly string[] = readdirSync(join(REPO_ROOT, REFERENCES_DIR))
+  .filter((f) => f.endsWith(".md") && f !== "ci-recipe.md")
+  .sort()
+  .map((f) => `${REFERENCES_DIR}/${f}`);
 const PLUGIN_JSON = ".claude/skills/cowork-harness/.claude-plugin/plugin.json";
 const MARKETPLACE_JSON = ".claude-plugin/marketplace.json";
 const REPLAYS_README = "examples/replays/README.md";
@@ -150,10 +154,7 @@ export const FILE_REWRITERS: Readonly<Record<string, readonly Rewriter[]>> = {
     HARNESS_FLOORS,
     BARE_FLOORS, // the `Pin `@^X`` phrase — a bare floor, like README's
   ],
-  [SCENARIO_SCHEMA_MD]: [TRACKS_STAMP],
-  [FIDELITY_AND_ANSWERS_MD]: [TRACKS_STAMP],
-  [TASK_RECIPES_MD]: [TRACKS_STAMP],
-  [CRITIQUE_MD]: [TRACKS_STAMP],
+  ...Object.fromEntries(TRACKS_STAMP_REFS.map((f) => [f, [TRACKS_STAMP]])),
   [CI_RECIPE_MD]: [TRACKS_STAMP, CI_RECIPE_EXAMPLE, HARNESS_FLOORS],
   [REPLAYS_README]: [HARNESS_FLOORS],
   // No BARE_FLOORS on these four: none carries a bare `@^X` any more (README's Action-inputs mention
@@ -171,10 +172,7 @@ export const TARGET_FILES: readonly string[] = [
   MARKETPLACE_JSON,
   PLUGIN_JSON,
   SKILL_MD,
-  SCENARIO_SCHEMA_MD,
-  FIDELITY_AND_ANSWERS_MD,
-  TASK_RECIPES_MD,
-  CRITIQUE_MD,
+  ...TRACKS_STAMP_REFS,
   CI_RECIPE_MD,
   REPLAYS_README,
   COMPANION_SKILL_MD,

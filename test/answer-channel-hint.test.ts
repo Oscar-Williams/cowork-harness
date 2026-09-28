@@ -98,13 +98,21 @@ describe("unanswered-gate hint names every answer channel", () => {
 // `--decider-dir` WAS mentioned in SKILL.md the whole time, in a table row, and agents still could not
 // choose it. What is asserted here is PLACEMENT: it must be inside the decision procedure, with its cost.
 
-describe("SKILL.md's answer-channel router", () => {
+// The decision tree lives in references/authoring.md (it moved out of SKILL.md when the entrypoint was
+// split); SKILL.md keeps the Orient bullet that routes "interactive but asserted" away from `chat`, and the
+// routing-table row that sends a reader choosing a channel to the tree.
+describe("the skill's answer-channel router", () => {
   const skillMd = readFileSync(resolve(".claude/skills/cowork-harness/SKILL.md"), "utf8");
+  const authoringMd = readFileSync(resolve(".claude/skills/cowork-harness/references/authoring.md"), "utf8");
   const router = (): string => {
-    const m = skillMd.match(/<!-- answer-channels:begin -->([\s\S]*?)<!-- answer-channels:end -->/);
-    if (!m) throw new Error("the answer-channels markers are gone from SKILL.md — the router is unguarded");
+    const m = authoringMd.match(/<!-- answer-channels:begin -->([\s\S]*?)<!-- answer-channels:end -->/);
+    if (!m) throw new Error("the answer-channels markers are gone from references/authoring.md — the router is unguarded");
     return m[1];
   };
+
+  it("SKILL.md routes a reader choosing a channel to the decision tree's file", () => {
+    expect(skillMd).toMatch(/\[`references\/authoring\.md`\]\(references\/authoring\.md\) \|[^\n]*answer-channel decision tree/);
+  });
 
   it("has the anchored region at all, and it is substantial (not an emptied stub)", () => {
     expect(router().length).toBeGreaterThan(800);

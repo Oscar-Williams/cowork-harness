@@ -926,7 +926,7 @@ export function checkVersions(): { ok: boolean; errors: string[]; values: Record
     // The claim must be cited where the false-negative message is explained — the skill and docs/scenario.md.
     if (sites < 2)
       errors.push(
-        `expected at least 2 shipped-doc citations of the form "rootfs manifest captured at Desktop \`X\`" (SKILL.md + docs/scenario.md), found ${sites}`,
+        `expected at least 2 shipped-doc citations of the form "rootfs manifest captured at Desktop \`X\`" (the skill payload + docs/scenario.md), found ${sites}`,
       );
   }
 

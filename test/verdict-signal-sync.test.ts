@@ -57,7 +57,10 @@ const verdictSrc = read("src/run/verdict.ts");
 const typesSrc = read("src/types.ts");
 const schemaRefMd = read(SCHEMA_REF);
 const scenarioMd = read("docs/scenario.md");
-const skillMd = read(".claude/skills/cowork-harness/SKILL.md");
+// The curated signal bullets and the "full N-code signal table" pointer moved with *Interpreting verdict
+// signals* out of SKILL.md into this reference when the skill entrypoint was split.
+const RUN_REF = ".claude/skills/cowork-harness/references/run-record-replay.md";
+const skillMd = read(RUN_REF);
 
 /** SKILL.md's signal bullets: `- **\`code\`** (\`WARN\`, …) — prose`. The severity marker is optional —
  *  a bullet that omits it simply makes no severity claim to check. */

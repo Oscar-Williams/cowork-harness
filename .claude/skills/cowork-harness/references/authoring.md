@@ -1,0 +1,254 @@
+# Authoring a scenario
+
+Tracks `cowork-harness 3.10.0` (baseline `desktop-2.9939.2`). Read it when composing a `scenarios/*.yaml`: session vs scenario, discovery, the fidelity tier, the answer path, `web_fetch`, and scaffold + lint.
+Everything below was moved verbatim from SKILL.md. A cross-reference to another section by name, to
+"Part I/II/III", or to a bare "gotcha N" points at the file SKILL.md's routing table assigns it.
+
+## Part I — AUTHOR a scenario
+
+Everything below composes one deterministic, asserted `scenarios/*.yaml`: the session/scenario split,
+how the skill mounts, the fidelity tier, the answer path, the two assertion axes, `web_fetch`
+provenance, and the scaffold/lint tools that keep the YAML honest.
+
+### Two files: session vs scenario
+
+- **`sessions/*.yaml`** — pre-prompt setup: `model`, mounts (`folders`), and discovery
+  (marketplaces / plugins / skills / mcp). One session is reused by many scenarios. A scenario that
+  omits `session:` gets an all-defaults **inline** session (not a file on disk).
+- **`scenarios/*.yaml`** — the test: `prompt`, scripted `answers:`, and `assert:`.
+
+This split matters: release ground truth (`baseline:` / `baselines/`, produced by `sync`) is
+**separate** from authored setup (`session:` / `sessions/`). "profile" is retired vocabulary — do
+not use it. See `references/scenario-schema.md` for every field.
+
+### Discovery: how the skill-under-test gets mounted
+
+The skill is **copied fresh into the sandbox each run**. Wire it via `plugins.local_plugins` +
+`plugins.enabled: [<plugin>@local]` in the session (or `--marketplace` / `--plugin` flags on
+`skill`). A missing mount source is now a **hard error** (`mount source(s) not found …`); set
+`COWORK_HARNESS_SOFT_MISSING=1` to fall back to warn-and-exclude. Mount names are always derived from
+the folder basename (collision-resolved); there is no `to:` override. See `references/scenario-schema.md`.
+
+> **`git add` a brand-new skill before testing it.** Inside a git repo the harness stages the
+> **git-tracked** files (the fidelity boundary — real Cowork installs from a repo and sees only committed
+> files). *Tracked* means **in the git index** (committed **or** `git add`-staged); the **content** staged
+> is your **working tree**, so an uncommitted edit to an already-tracked file *is* tested — you needn't
+> commit to iterate. Only brand-new (untracked) files must be `git add`-ed to appear. Commit before you
+> record the **locking cassette**, though: real Cowork ships the *committed* tree, so a green on
+> uncommitted edits isn't yet a green on what installs. An **all-untracked** skill folder mounts *empty* and the agent reports "the skill isn't
+> installed" then did the work itself — a green-looking run where the skill never loaded. That now
+> **hard-fails** (`BoundaryError`, exit 3) naming the dir, and a partially-tracked folder emits a loud
+> `::notice:: [stage]` listing the excluded files. Fix: `git add` the skill, or `COWORK_HARNESS_GITSET=0`
+> to copy untracked files (won't reflect what ships). A folder **outside** any repo is copied raw (no guard).
+
+### Choose a fidelity tier
+
+| Tier | What it gives you | Use when |
+|---|---|---|
+| `protocol` | Fastest; no sandbox, no egress | Pure protocol/answer-shape tests. **Rejected** if the scenario asserts egress. |
+| `container` | Real sandbox + real default-deny egress (**default**). Models the **VM loop**: keeps the built-in `Bash`, but `WebFetch` is replaced by `mcp__workspace__web_fetch` — assert on that name, not `WebFetch`. (`run`/`record` only; `chat --fidelity container` still offers the built-in.) **The name is tier-specific**: `microvm` never offers it and `protocol` serves the operator's own host registry. A `tool_not_called`/`subagent_tool_absent` naming a tool its tier does not serve is **REFUSED at scenario load** (the message names what to write instead), so moving a scenario between tiers now errors rather than silently voiding the assertion — except at `protocol`, which is never judged | Most functional + boundary tests. |
+| `microvm` | VM-grade escape **isolation** (macOS arm64). Egress transport is the *same allowlist proxy as `container`* — not better network fidelity. Unlike `container`, still offers the built-in `WebFetch` | Testing untrusted code escape, not network behavior. |
+| `hostloop` / `cowork` | Production split-exec: the agent loop is a **native process on the host** (no container around the file tools — matching production), with **both** native `Bash` and `WebFetch` disabled and routed host-side via the workspace SDK-MCP server into a Docker VM sidecar (the VM loop replaces web_fetch only) | Highest-fidelity / parity runs. A writable connected folder needs `allow_host_writes: true` (see scenario-schema.md). |
+
+Set the tier in the **scenario's `fidelity:` field**, not a flag — `run` rejects `--fidelity`
+(it's a `skill`/`chat` flag; `run` takes fidelity only from the scenario). See
+`references/fidelity-and-answers.md`.
+
+**Every tier models Cowork's DESKTOP-LOCAL lane** — agent on the user's machine, shell rooted at
+`/sessions/<id>`, folders at `/sessions/<id>/mnt/<name>`, delivery via `present_files`. Cowork's
+**remote** lane runs server-side in a cloud container with a different filesystem (`$HOME/mnt/`),
+different delivery (`/mnt/user-data/outputs/` + `SendUserFile`) and a server-authored prompt; no tier
+reproduces it and none can — that container is not something a local tool can stand up. Which lane a
+real session gets is a Cowork setting ("Only on this computer"), observed **off** on a current install.
+So: behaviour conclusions (triggering, tool sequencing, gate handling) travel between lanes; anything
+asserting a **path, mount or delivery mechanism** is a claim about the local lane only. Declare
+`lane: remote` when the scenario is about that lane — the affected assertions then refuse to grade
+rather than passing (see the `delivery_unobservable` WARN and the `lane: remote` load-time rejections
+above).
+
+### Choose an answer path (gates: AskUserQuestion + tool-permission)
+
+Default to **deterministic**: scripted `answers:` + `on_unanswered: fail`. Anything that brings a
+live model into answering flags the run `nonDeterministic` — keep those out of deterministic
+regressions.
+
+<!-- answer-channels:begin -->
+**Pick by asking one question about your situation**, not by scanning a table — the channels are not
+interchangeable and the wrong one either masks a gate or can't run at all:
+
+```
+Will this run be re-executed UNATTENDED? (CI, a committed cassette, --repeat, --matrix)
+│
+├─ YES ──► scripted `answers:` / `--answer` / `--answer-policy` + `on_unanswered: fail`
+│          The ONLY reproducible channel. Non-negotiable for CI and committed cassettes.
+│          Labels reworded every run? STAY HERE: pin a stable leading SUBSTRING
+│          (uniqueness-guarded, fails loud) or a positional `choose`. Both keep determinism.
+│
+└─ NO — a discovery / validation run. Who holds the context to answer?
+   │
+   ├─ a model, steered by one line of intent
+   │        ──► `--decider-llm --intent "<…>"`          [skill · record]
+   │            NOT on `run` — there the spelling is the scenario-YAML `on_unanswered: llm`.
+   │            Can false-green an oracle-less semantic gate.
+   │
+   ├─ deterministic logic you can write down
+   │        ──► `--decider-cmd '<helper>'`               [skill · run]
+   │            Determinism is your helper's, not the harness's. NOT on `record`.
+   │
+   ├─ YOU, the driving agent, holding the task context
+   │        ──► `--decider-dir <FRESH, EMPTY dir>`       [skill · run · record]
+   │            + `cowork-harness gates <dir> --follow`  (arm a Monitor here)
+   │            + `cowork-harness answer <dir> --gate N --choose "<label>"`
+   │            Its ONE unique property: it needs no advance knowledge of the option SET.
+   │            (Label *text* drift alone does not need this — substring anchors handle that.)
+   │
+   └─ a human at a keyboard, and you are NOT producing a test
+            ──► `cowork-harness chat`   (TTY; no pass/fail verdict — see below)
+```
+
+| Channel | Deterministic? | Don't use it when |
+|---|---|---|
+| Scripted | ✅ the CI/agent default | you cannot know the option set in advance |
+| `--decider-llm` / `on_unanswered: llm` | ❌ nonDeterministic | the gate has no oracle a model could judge |
+| `--decider-cmd` | delegated to your helper | the logic needs task context code doesn't have |
+| `--decider-dir` | ❌ nonDeterministic | nobody is present to drive it — it BLOCKS per gate |
+| `on_unanswered: first` | ❌ nonDeterministic | the answer matters — it *masks* the gate |
+
+**Cost of `--decider-dir`, stated plainly:** flags the run `nonDeterministic`; needs a live driver + a
+Monitor, so it is **unusable unattended**; blocks at each gate, strictly serial; needs a fresh empty dir
+per run (a dirty one is refused); rejected with `--repeat`, `--on-unanswered`, `--decider-cmd`, and with
+`--matrix --concurrency > 1`; and a cassette recorded this way carries a **re-record cost** — regenerating
+it needs the driver present again.
+
+**Rehearse it in ~2s before wiring it into a real run** — `cowork-harness decide --decider-dir <dir>` fires
+one sample gate through the same channel, then blocks (10-min backstop) until you answer it with the two
+commands above. It is the cheapest way to see the protocol work. Full recipe, including the multiSelect
+wire shape and the `gates --follow` Monitor loop:
+[`docs/decider-dir.md`](https://github.com/yaniv-golan/cowork-harness/blob/main/docs/decider-dir.md)
+(repo-only — an npm install ships it at `node_modules/cowork-harness/docs/decider-dir.md`). <!-- npm-only-ok -->
+
+**It is a FEEDER for the scripted default, not a rival.** `record --decider-dir` is a first-class way to
+*produce* a cassette: the non-reproducibility is spent once at authoring time and the cassette replays
+deterministically forever. The loop is **discover → transcribe → script** — answer live, then paste the
+run's echoed `--answer "<q>=<choice>"` footer lines into the scenario's `answers:` so re-records go back to
+being unattended. Skip the transcribe step only for one-off/exploratory runs.
+<!-- answer-channels:end -->
+
+**For a QUESTION gate, never hand-write the `req-N.json`/`resp-N.json` files.** `gates` and `answer` wrap
+the protocol — the atomic temp+rename, the `{id, answers}` envelope, the multiSelect array shape.
+Hand-rolling a Monitor over the raw files is the single most common mistake on this channel.
+
+`answer` writes `{id, answers}` and nothing else, so it covers **question gates only**. The channel also
+carries **permission**, **dialog** and **elicit** gates, whose replies need `{behavior}` / `{action}` — for
+those, write `resp-N.json` yourself, following the `reply_with` template the gate's own `req-N.json`
+advertises (it spells out the exact shape, e.g. `{"id":"…","behavior":"allow|deny"}`).
+
+Exact accepted values (teach precisely): `--on-unanswered` takes `fail|prompt|first` on `skill`,
+only `fail|first` on `run`. **`llm` is NOT an `--on-unanswered` value** — the bare flag
+`--on-unanswered llm` is rejected (use `--decider-llm`); the YAML spelling is `on_unanswered: llm`.
+The word `agent` is **retired** — do not write `on_unanswered: agent` (the schema rejects it).
+`--on-unanswered` also conflicts with `--decider-dir`/`--decider-cmd`/`--decider-llm` (the channel or
+model IS the terminal, so a policy alongside it never applies) — pass one, not both. On `record`, a
+scenario setting `on_unanswered: prompt` is rejected too: the YAML field outranks the flag, and a TTY
+wait can't produce a deterministic committed fixture.
+`--on-unanswered first` is itself flagged `nonDeterministic` — it is *not* a deterministic stand-in
+for scripted answers. See `references/fidelity-and-answers.md`.
+
+**Which gates to anchor (re-record robustness).** The model rewords option labels (and sometimes the
+question) every run, so a brittle exact-label `choose:` is itself a re-record-fragility source — it drifts and
+forces a re-record. The practical rule: **label-anchor only the gates whose choice drives an `assert:`** (or
+materially changes behavior); for gates whose answer is immaterial to your assertions, `on_unanswered: first`
+is the more re-record-robust choice — accept the `nonDeterministic` flag rather than trade it for a flaky
+anchor. (When label *order* is stable but the text drifts, a positional `choose` is the middle option — the
+linter flags positional `choose` as order-dependent, so use it deliberately.) The caution stands: `first`
+*masks* an unanswered gate, so don't use it for a gate you actually need answered a specific way.
+
+**Drifting label TEXT and an unknowable option SET are different problems — don't reach past the cheap
+fix.** Text that rewords while the choices stay the same is a *scripted* problem with a deterministic
+answer: a uniqueness-guarded leading substring, or a positional `choose`. Only when you cannot know what
+the options will *be* — they're generated per input document, so no anchor can be written in advance — does
+the answer move to a live channel (`--decider-dir` if you're driving, `--decider-llm` if nobody is).
+
+#### External deciders and the "first" shorthand
+
+When using `--decider-cmd` or `--decider-dir`, the helper's output is passed through
+`coerceLabel` **with the "first" shorthand disabled**. This means a helper that returns the literal
+string `"first"` must match an actual label named `"first"` — it is **not** coerced to option 1.
+This prevents a helper bug (accidentally emitting `"first"`) from silently green-ing option 1.
+
+The `"first"` shorthand remains active only for the built-in `--on-unanswered first` path. If you
+write an external helper, return a label name or option index — never the bare word `"first"` unless
+your gate actually has a label called `"first"`.
+
+### web_fetch (fail-closed, two-path)
+
+`web_fetch` behaves unlike `curl`. A URL is gated by **provenance**, not the egress allowlist:
+
+- A URL is *provenanced* iff it appeared in the **prompt** or a **prior `web_fetch` result**. To
+  make a fetch succeed, put the URL in the prompt.
+- **Provenanced** → fetches (still SSRF-guarded per redirect hop); the egress hostname allowlist is
+  **not consulted**.
+- **Not provenanced** → raises a per-domain approval gate (`webfetch:<domain>`) that is
+  **fail-closed** (it is *not* auto-allowed; `--on-unanswered first` won't allow it). Answer it with
+  a scripted rule (`when_tool: "webfetch:<domain>"` + `grant: domain|once`), a session
+  `web_fetch.approved_domains`, or a live decider.
+
+Surprise to remember: adding a host to `egress.extra_allow` is a **no-op** for a provenanced fetch.
+Full model in `references/scenario-schema.md`.
+
+### Scaffold a valid scenario, then lint before you push
+
+Don't hand-write the YAML from memory — that's how invented keys (`assertions:` vs `assert:`,
+`json_file`, `answer_policy`) creep in. Start from the bundled generator, which emits the
+known-good skeleton (right tier, scripted `answers:` + `on_unanswered: fail`, content assertions
+separated from live-only ones, one concern per item) and **self-lints its own output**. The
+generator is the bundled `scripts/scenario.py` — installed as a plugin, point `S` at
+`${CLAUDE_PLUGIN_ROOT}/scripts/scenario.py`; from a repo checkout, use the literal path below:
+
+```bash
+S=".claude/skills/cowork-harness/scripts/scenario.py"
+python3 "$S" scaffold --name report-check --skill ./skills/report-gen \
+  --prompt "Generate the weekly report to outputs/report.md." \
+  --content 'weekly report' --artifact outputs/report.md \
+  --egress-allowed api.weather.example.com --out scenarios/report-check.yaml
+```
+
+Then lint every scenario — it encodes the no-silent-false-green invariants. Use the CLI wrapper
+`cowork-harness lint`: it runs the bundled `scenario.py lint` **and** the harness's own scenario loader,
+so a file `run`/`record` would refuse fails lint too (running `scenario.py lint` directly skips the loader):
+
+```bash
+cowork-harness lint scenarios/*.yaml
+```
+
+`lint` flags: filesystem/egress-only assertions on a `replay` gate (silent no-op), bad regex
+quoting, an egress assert on `protocol` fidelity, `transcript_no_host_path` on `hostloop`/`protocol`
+(ERROR — fails by design at those tiers; WARN on `fidelity: cowork`, whose tier resolves per the
+baseline's host-loop gate), non-empty `requires_capabilities` on `protocol` without
+`allow_missing_capability` (ERROR — the capability probe can't run there, so the run hard-fails as
+unverifiable), `no_scratchpad_leak` off `container` (ERROR on `protocol`/`microvm`/`hostloop` — hostloop's
+`present_files` passes a validated path through without promoting, so there is no scratch→outputs copy
+to leak; WARN on `cowork`, whose tier resolves per the baseline gate) or `present_files_called` on
+`protocol`/`microvm` (ERROR — served only at `container`/`hostloop`), or `present_files_called`/`no_scratchpad_leak`/`user_visible_artifact` on `lane: remote` (ERROR — the runtime rejects those at scenario load time, so the tier rules are suppressed there), a `controlOut`-gated key on a non-`controlOut` replay, mixed-class assertion items,
+and hallucinated schema (`assertions:` vs `assert:`, unknown keys). Exit code is non-zero on errors
+(CI-friendly). `scaffold` auto-upgrades the tier if you ask for egress on `protocol`, so it never
+emits a scenario `lint` would reject.
+
+**`cowork-harness lint` runs the loader: a file it calls clean is one `run`/`record` will load.** Anything
+the loader refuses — an unknown key, a wrong value type (a scalar `semantic_matches.rubric`), a bad regex,
+a reserved value — is ✗ ERROR `scenario-invalid` (exit 1, with or without `--strict`), and a `baseline:`
+naming no baseline this installed CLI ships is ✗ ERROR `baseline-unknown` (`latest` always resolves). It
+does not check what depends on the machine the run happens on (the session file and its mounts, an
+absolute `baseline:` path, environment variables). A session or matrix YAML in a linted directory is not
+a scenario and is reported as one that does not load — keep those out of the linted set. `python3
+scenario.py lint` run directly stays offline and lenient: there an unknown key is only a ⚠ WARN (exit 0).
+`cowork-harness record <file.yaml> --dry-run` also runs the loader and adds the pre-spend refusals (exit 2
+on a schema error; a directory reports each `✗ broken:` file and exits 1). **Read the exit code, not just
+its sign:** `record <file>` — with or without
+`--dry-run` — answers `2` for "did not load" and `1` for "loaded fine, but this record is refused" (a
+pre-spend policy refusal; `--max-budget-usd` is the one refusal that keeps exit 2). Treating any non-zero
+as "scenario broken" mis-reports every refused-but-valid scenario. Corollary: **the loader** fails LOUD on an unknown key (never silently) —
+but **`replay` does not**: a frozen top-level key it doesn't recognize (e.g. `lane:` recorded pre-1.16.0) is
+silently ignored and can flip a lane-sensitive verdict green; only frozen **assertion** keys stay
+hard-rejected there. Full split + the v11 version-regime:
+[docs/scenario.md](https://github.com/yaniv-golan/cowork-harness/blob/main/docs/scenario.md#unknown-keys-the-loader-is-strict-lint-is-lenient).

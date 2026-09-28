@@ -177,8 +177,8 @@ the reason to read the *record* rather than the answer. (`critique` is built on 
   `assertions[].evidence`. See `replay --help`.
 - **The "✓ passed ≠ correct" landmines** — the catalog of how a check can pass vacuously (mixed
   content/live assertion items, header-only gates that can't be keyed, replay-skipped egress keys) is in
-  the companion skill's **Gotchas** section:
-  [SKILL.md → Gotchas](../.claude/skills/cowork-harness/SKILL.md#gotchas--the--passed--correct-landmines).
+  the companion skill's **Gotchas** catalog:
+  [references/gotchas.md](../.claude/skills/cowork-harness/references/gotchas.md#gotchas--the--passed--correct-landmines).
   Read it before trusting a green you didn't expect.
 - **Gate provenance** — a green run whose premise came from a *decided* (LLM/external) gate is the classic
   false-green. `result.json`'s `gateProvenance` block, the footer `gates: N · …` line, and

@@ -294,7 +294,7 @@ Each list item under `assert:` is one assertion. **An item with multiple keys is
 passes only if every key passes. Keep one concern per item unless you mean conjunction.
 
 Looking for a key *by what you want to prove* (tool health, sub-agent work, panels, skill
-attribution, resources, diagnostics)? SKILL.md §6's "goal → key" map is the by-purpose index into this
+attribution, resources, diagnostics)? `assertions-guide.md`'s "goal → key" map is the by-purpose index into this
 table; the table below is the full per-key reference, and `cowork-harness assertions --list` prints the
 same set live from the schema.
 
@@ -556,9 +556,9 @@ Find an artifact's real field paths by running once with `--keep`, then `cowork-
 
 The "✓ passed ≠ correct" landmines relevant to **scenario/assertion authoring**, as
 *symptom → why → fix*. `file:line` pointers track the version at the top of this file.
-**Scope note:** this is the assertion/replay-focused view; the companion `SKILL.md`'s Gotchas section
+**Scope note:** this is the assertion/replay-focused view; the companion skill's `gotchas.md` catalog
 is the broader one (it adds workflow/record/answer-path landmines this reference omits). **Neither list
-is a strict superset of the other** — reach for this one while authoring `assert:`, and SKILL's when
+is a strict superset of the other** — reach for this one while authoring `assert:`, and `gotchas.md` when
 debugging a run's behavior. The two are **numbered independently**: a bare "gotcha N" means this list.
 
 1. **Replay skips filesystem/egress assertions (two shapes) — with a loud warning.** *Full skip:* a pure
