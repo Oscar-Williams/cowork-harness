@@ -283,6 +283,8 @@ export async function cmdChat(args: string[]) {
   // mirroring execute.ts's hardening so a re-run can't collide on the sidecar container name.
   const runToken = `r${process.hrtime.bigint().toString(36)}`;
   // no process.env mutation — pass proxy/network explicitly so concurrent calls don't stomp.
+  // Unit-lane spawn guard: everything below starts containers or a real agent.
+  assertSpawnAllowed(`\`chat\` at ${fidelity}`);
   // protocol tier runs the host claude binary with no Docker sandbox, so no sidecar is needed.
   const sidecar = fidelity !== "protocol" ? startEgressSidecar(plan.egressAllow, outDir, runToken) : null;
   // Host-loop prompt-token substitution (P2a) — mirrors execute.ts's call site exactly (same pure joins,
