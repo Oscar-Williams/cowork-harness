@@ -1739,6 +1739,15 @@ def cmd_lint(args):
         print(json.dumps([x.as_dict() for x in all_findings], indent=2))
     else:
         _print_findings(all_findings, len(args.files))
+    # Run directly (no COWORK_HARNESS_PROG — the wrapper always sets it), this script never ran the scenario
+    # loader `run`/`record` use, so "clean" here is weaker than `cowork-harness lint`'s. Say so on stderr only:
+    # stdout carries the --json array, and the exit code must not change.
+    if not os.environ.get("COWORK_HARNESS_PROG"):
+        print(
+            "note: scenario loader skipped — this direct run checks the lint rules only. "
+            "Run `cowork-harness lint` to also check that each file loads the way `run`/`record` load it.",
+            file=sys.stderr,
+        )
     has_error = any(x.severity == "ERROR" for x in all_findings)
     if has_error or (args.strict and all_findings):
         return 1

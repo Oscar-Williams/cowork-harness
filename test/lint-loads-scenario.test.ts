@@ -237,3 +237,43 @@ describe.skipIf(!can)("record --dry-run keeps the defaulted-fidelity notice ahea
     expect(all.indexOf("::warning:: [scenario]")).toBeLessThan(all.indexOf("bad regex"));
   });
 });
+
+// Running the bundled script directly skips the loader pre-pass, so its "clean" is weaker than the wrapper's.
+// It says so on stderr (never stdout, which carries the --json array), and only when it was run directly:
+// the wrapper always sets COWORK_HARNESS_PROG and has already run the loader.
+describe.skipIf(!can || !havePython)("a direct `scenario.py lint` names the loader it skipped", () => {
+  const LOADER_SKIPPED = /loader.*skipped|skipped.*loader/i;
+  function direct(args: string[]) {
+    const env: NodeJS.ProcessEnv = { ...process.env };
+    delete env.COWORK_HARNESS_PROG;
+    const r = spawnSync(py, [resolveScenarioScript(), "lint", ...args], { encoding: "utf8", env });
+    return { code: r.status, stdout: r.stdout || "", stderr: r.stderr || "" };
+  }
+
+  it("direct text run: a stderr note that points at `cowork-harness lint`, exit code unchanged", () => {
+    const d = mkdtempSync(join(tmpdir(), "cwh-lint-load-"));
+    const f = scenario(d, "s.yaml", CLEAN);
+    const r = direct([f]);
+    expect(r.code).toBe(0);
+    expect(r.stderr).toMatch(LOADER_SKIPPED);
+    expect(r.stderr).toContain("cowork-harness lint");
+    expect(r.stdout).not.toMatch(LOADER_SKIPPED);
+  });
+
+  it("direct --json run: stdout is still exactly the findings array; the note stays on stderr", () => {
+    const d = mkdtempSync(join(tmpdir(), "cwh-lint-load-"));
+    const f = scenario(d, "s.yaml", CLEAN);
+    const r = direct([f, "--json"]);
+    expect(r.code).toBe(0);
+    expect(Array.isArray(JSON.parse(r.stdout))).toBe(true);
+    expect(r.stderr).toMatch(LOADER_SKIPPED);
+  });
+
+  it("through the wrapper (which ran the loader): no such note", () => {
+    const d = mkdtempSync(join(tmpdir(), "cwh-lint-load-"));
+    const f = scenario(d, "s.yaml", CLEAN);
+    const r = runCli(["lint", f]);
+    expect(r.code).toBe(0);
+    expect(r.stderr + r.stdout).not.toMatch(LOADER_SKIPPED);
+  });
+});
