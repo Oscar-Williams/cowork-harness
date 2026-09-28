@@ -77,6 +77,12 @@ function missIsUnknown(text: string, truncated: boolean | undefined, source: str
  *  they were what the check saw. */
 const scrubTokens = (s: string): string => s.replace(REDACTION_TOKEN_RE, "(redacted)");
 
+/** The text a regex HIT is judged on: every redaction token replaced by a sentinel no author regex can
+ *  match into, so `key`, `REDACTED` or a 12-hex-digit pattern never "hits" a token's own label or hash.
+ *  A MISS is still judged by missIsUnknown on the original text (token present ⇒ unknown). */
+const HIT_SENTINEL = "\u0000";
+const hitText = (s: string): string => s.replace(REDACTION_TOKEN_RE, HIT_SENTINEL);
+
 export function checkToolCallObject(
   key: Key,
   o: ToolCalledObject | ToolNotCalledObject,
@@ -132,13 +138,13 @@ export function checkToolCallObject(
     for (const [f, src] of Object.entries(o.input ?? {})) {
       const v = c.input[f];
       if (!v) parts.push("no");
-      else if (compiled.get(`input.${f}`)!.test(v.text)) parts.push("yes");
+      else if (compiled.get(`input.${f}`)!.test(hitText(v.text))) parts.push("yes");
       else parts.push(missIsUnknown(v.text, v.truncated, src, negative) ? "unknown" : "no");
     }
     if (o.input_any !== undefined) {
       const re = compiled.get("input_any")!;
       const fields = Object.values(c.input);
-      if (fields.some((v) => re.test(v.text))) parts.push("yes");
+      if (fields.some((v) => re.test(hitText(v.text)))) parts.push("yes");
       else parts.push(fields.some((v) => missIsUnknown(v.text, v.truncated, o.input_any!, negative)) ? "unknown" : "no");
     }
     return all(parts);
@@ -154,7 +160,7 @@ export function checkToolCallObject(
     if (o.result.is_error !== undefined) parts.push(r.isError === o.result.is_error ? "yes" : "no");
     if (o.result.matches !== undefined)
       parts.push(
-        compiled.get("result.matches")!.test(text)
+        compiled.get("result.matches")!.test(hitText(text))
           ? "yes"
           : missIsUnknown(text, r.assertTextTruncated, o.result.matches, negative)
             ? "unknown"
@@ -162,7 +168,7 @@ export function checkToolCallObject(
       );
     if (o.result.not_matches !== undefined)
       parts.push(
-        compiled.get("result.not_matches")!.test(text)
+        compiled.get("result.not_matches")!.test(hitText(text))
           ? "no"
           : missIsUnknown(text, r.assertTextTruncated, o.result.not_matches, !negative)
             ? "unknown"
