@@ -89,12 +89,15 @@ All notable changes to this project are documented here. The format is based on
   the flag. Precedence is unchanged (`process.env` > `--dotenv` > `./.env` > `<install>/.env`;
   `--run-dir` > `COWORK_HARNESS_RUNS_DIR` > default). Giving either flag both before and after the
   subcommand, or twice, is a usage error. A `--dotenv` file given after the subcommand that would change
-  `COWORK_HARNESS_OUTPUT_FORMAT` is refused, because the output format is fixed before a command's flags
-  are parsed; put that `--dotenv` before the subcommand instead.
+  the effective output format (`COWORK_HARNESS_OUTPUT_FORMAT`) is refused, because the output format is
+  fixed before a command's flags are parsed; put that `--dotenv` before the subcommand instead. `vm` takes
+  them before its own subcommand too.
 - **One `scaffold` command.** `cowork-harness scaffold --name … --prompt … [--skill …] [--out …]` builds
   a scenario from flags alone by running the bundled `scenario.py scaffold` (same flags, self-linted,
   YAML only). `scaffold <run-id | run-dir>` still turns a kept run into a scenario. Combining a run id
-  with the flag-built form, or passing `--output-format json` to it, is a usage error that says why.
+  with the flag-built form, or asking it for json (`--output-format json`, or a
+  `COWORK_HARNESS_OUTPUT_FORMAT=json` default without `--output-format text`), is a usage error that says
+  why.
 - **`--allow-stall` on `skill` and `probe-dispatch`:** the open-ended lanes' spelling of `allow_stall:
   true`, which these lanes had no `assert:` block to carry. `critique` forwards it to the task turn.
 
@@ -144,6 +147,12 @@ All notable changes to this project are documented here. The format is based on
   ignored by design. For `lane: "remote"` the stamp is raised (v11) only when the cassette was recorded
   on ≥ 1.16.0 — one recorded by 1.14.0/1.15.0 is v10, a pre-`lane` CLI ignores the key there, and
   `rehash` re-stamps it.
+- **`--label` (`run` / `skill` / `probe-dispatch`) and `record --model` refuse a flag-looking value,**
+  as every other value-taking flag already did; `--label --dotenv` no longer takes `--dotenv` as the
+  label. The `=` form stays the escape for a value that starts with `-`.
+- **`COWORK_HARNESS_JUDGE_MODEL` and `COWORK_HARNESS_EVALUATOR_MODEL` can now be set from a `.env`**
+  (`./.env`, the install `.env` or `--dotenv`). Both were read before any `.env` loaded, so only an
+  exported variable took effect.
 
 ## [3.10.0] — 2026-09-27
 
