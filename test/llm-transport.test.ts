@@ -58,7 +58,14 @@ function invocations(): number {
   return existsSync(counterPath) ? Number(readFileSync(counterPath, "utf8").trim()) || 0 : 0;
 }
 
+let prevForbid: string | undefined;
 beforeAll(() => {
+  // Opt out of the unit lane's spawn guard (test/setup/forbid-spawn.ts) for THIS file only: every spawn
+  // here is the fake bin below, never a real `claude`. Opting the file out, rather than exempting "any
+  // explicit COWORK_HARNESS_CLAUDE_BIN" in the guard, keeps the guard on for an env var pointed at a real
+  // binary.
+  prevForbid = process.env.COWORK_HARNESS_FORBID_SPAWN;
+  process.env.COWORK_HARNESS_FORBID_SPAWN = "0";
   dir = mkdtempSync(join(tmpdir(), "cowork-llm-transport-"));
   binPath = join(dir, "fake-claude.sh");
   counterPath = join(dir, "counter");
@@ -80,6 +87,8 @@ afterEach(() => {
 });
 
 afterAll(() => {
+  if (prevForbid === undefined) delete process.env.COWORK_HARNESS_FORBID_SPAWN;
+  else process.env.COWORK_HARNESS_FORBID_SPAWN = prevForbid;
   delete process.env.COWORK_HARNESS_CLAUDE_BIN;
   rmSync(dir, { recursive: true, force: true });
 });

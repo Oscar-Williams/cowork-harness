@@ -52,6 +52,7 @@ import { instanceName, VM_WORK_HOST } from "../runtime/lima.js";
 import { ResourceSampler, makeSampleOnce, foldResources, resolveIntervalMs } from "../runtime/resource-sampler.js";
 import { tierVacuousTool, tierVacuousMessage, objectFormTierVacuous } from "./tier-vacuous-tools.js";
 import { toolCallObjectRegexes } from "../tool-call-assert.js";
+import { assertSpawnAllowed } from "../spawn-guard.js";
 import { decideLoopFromBaseline, readGateFlag, readGateNumber, resolveSkillDiscoveryGates } from "../loop-decision.js";
 import { makeWebFetchDedupCache } from "../hostloop/webfetch-dedup.js";
 import type { WebFetchProvenance } from "../hostloop/workspace-handler.js";
@@ -836,7 +837,7 @@ export async function executeScenario(scenario: Scenario, opts: ExecuteOptions =
   // PLAN is computed, not executed); from here down the run probes images, acquires the egress sidecar,
   // and spawns the agent. The unit lane sets COWORK_HARNESS_FORBID_SPAWN so a scenario a refusal should
   // have caught fails red instead of launching a real agent.
-  assertSpawnAllowed(scenario.name);
+  assertSpawnAllowed(`scenario "${scenario.name}"`);
 
   // Pre-flight: if the skill DECLARES required capabilities and the image provably omits one, FAIL FAST here
   // — before any paid agent run — instead of burning ~12 min to reach a verdict the post-run guard already
@@ -1997,19 +1998,7 @@ export function loadScenarioPure(path: string, hooks: { onFidelityDefaulted?: (n
   return scenario;
 }
 
-/** The unit-lane spawn guard. `test/setup/forbid-spawn.ts` sets COWORK_HARNESS_FORBID_SPAWN=1 for the fast
- *  test lane, and executeScenario calls this at the top of its stage/launch step — after every load-time
- *  refusal, before any staging, image probe, sidecar or agent spawn. A test driving a scenario that SHOULD
- *  have been refused then fails red for free, instead of launching a real agent (a host-loop agent can
- *  find the operator's own credentials, so that launch can cost money). */
-export function assertSpawnAllowed(scenarioName: string, env: NodeJS.ProcessEnv = process.env): void {
-  const v = env.COWORK_HARNESS_FORBID_SPAWN;
-  if (v !== undefined && v !== "" && v !== "0")
-    throw new Error(
-      `COWORK_HARNESS_FORBID_SPAWN is set: refusing to stage or launch an agent for scenario "${scenarioName}". ` +
-        `The unit test lane never runs a real agent — a scenario reaching this point passed every load-time refusal.`,
-    );
-}
+export { assertSpawnAllowed } from "../spawn-guard.js";
 
 /** Every nested `{ …: <regex> }` leaf in the Assertion schema, derived from zod rather than enumerated.
  *

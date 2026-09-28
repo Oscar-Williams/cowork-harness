@@ -2,6 +2,7 @@ import readline from "node:readline";
 import { unpinnedModelWarning } from "./model-provenance.js";
 import os from "node:os";
 import { spawn, spawnSync } from "node:child_process";
+import { assertSpawnAllowed } from "../spawn-guard.js";
 import { join, resolve } from "node:path";
 import { mkdirSync, existsSync, readdirSync, writeFileSync } from "node:fs";
 import { writeTextAtomic, warn } from "../io.js";
@@ -633,6 +634,7 @@ async function* ttyTurns(rl: readline.Interface): AsyncGenerator<string> {
 /** `chat --raw` — native interactive cowork mode (no -p / stream-json), stdio inherited.
  *  Egress sandbox NOT applied. `--fidelity` is ignored. */
 function chatRaw(folder: string, model?: string) {
+  assertSpawnAllowed("`chat --raw` (docker run of the agent)");
   const baseline = loadBaseline("latest");
   const agent = resolveAgentBinary(baseline);
   const image = resolveAgentImage();
