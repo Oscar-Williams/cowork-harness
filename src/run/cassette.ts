@@ -86,7 +86,7 @@ import { isVmSessionsPath } from "../vm-paths.js";
 /** Upper bound for `record --concurrency`. Above a handful, concurrent runs exhaust Docker's default address
  *  pool (each run creates two networks) and press model API rate limits — both surface as actionable errors. */
 const MAX_RECORD_CONCURRENCY = 8;
-import { evaluate, budgetFields, HOSTLOOP_ONLY_KEYS, type AssertContext } from "../assert.js";
+import { evaluate, budgetFields, toolResultEvidence, HOSTLOOP_ONLY_KEYS, type AssertContext } from "../assert.js";
 import {
   planMutationsWithStats,
   summarizeMutationPlan,
@@ -2167,6 +2167,7 @@ function minimalRec(): RunRecord {
     mcpErrors: [],
     hookEvents: [],
     fileToolAttempts: [],
+    toolCalls: [],
     pathDenials: [],
     presentedFiles: [],
     presentFilesCalls: 0,
@@ -4888,6 +4889,7 @@ function replayErrorResult(file: string): RunResult {
     mcpErrors: undefined, // live-only — this early-bail lane never drives a session
     hookEvents: undefined, // no rec to read from on this early-bail lane
     fileToolAttempts: undefined, // no rec to read from on this early-bail lane
+    toolCalls: undefined, // no rec to read from on this early-bail lane
     pathDenials: undefined, // no rec to read from on this early-bail lane
     presentedFiles: undefined, // no rec to read from on this early-bail lane
     presentFilesCalls: undefined, // ditto
@@ -7318,7 +7320,8 @@ export async function replayCassette(
       toolResultTexts: rec.toolResults.map((r) => r.assertText ?? r.text),
       toolResultsTruncated: rec.toolResults.map((r) => r.assertText === undefined),
       // content-class, same as toolResultTexts above — pairing info for subagent_file_write.
-      toolResults: rec.toolResults.map((r) => ({ toolUseId: r.toolUseId, isError: r.isError })),
+      toolResults: rec.toolResults.map(toolResultEvidence),
+      toolCalls: rec.toolCalls, // content-class: re-derived from the frozen tool_use blocks by the re-drive
       toolErrors: rec.toolErrors,
       redundantToolCalls: rec.redundantToolCalls,
       truncatedPaths: replayTruncatedPaths,
@@ -7733,6 +7736,7 @@ export async function replayCassette(
       // Content-class: the tool_use blocks live in the ordinary events stream (not controlOut), so the
       // re-drive reproduces fileToolAttempts automatically — same reasoning as presentedFiles below.
       fileToolAttempts: rec.fileToolAttempts,
+      toolCalls: rec.toolCalls, // content-class too: re-derived from the frozen tool_use blocks
       // reconstructed above (beside replayHookEvents) from cassette.events + controlOut, pairing the
       // pretooluse/can_use_tool sources with their controlOut reply and merging the permission_denied
       // source from the re-drive; undefined when controlOut is absent.

@@ -1,0 +1,235 @@
+/**
+ * The object form of `tool_called` / `tool_not_called`: a claim about what a tool call CARRIED (its
+ * top-level input fields), WHERE it ran (main agent / sub-agent), and what its PAIRED result said.
+ *
+ * Evidence is `RunResult.toolCalls` (one classifier in `Run`, read identically on the live, replay and
+ * verify-run lanes) joined to `toolResults` by `toolUseId`. Every "could not look" case fails CLOSED:
+ *  - no `toolCalls` at all (an older result.json)                       → evidence unavailable, both ways;
+ *  - an input field cut at its 10 KB cap that the regex missed           → the call is UNKNOWN;
+ *  - a result predicate on an unpaired call, or one a truncated result
+ *    cannot settle                                                        → the call is UNKNOWN;
+ *  - a regex the recorder's redaction rewrote, or a redacted field the
+ *    regex names a redactable literal of                                 → UNKNOWN / unavailable.
+ * An UNKNOWN call can never make a negative pass, nor make a positive "not called" — it becomes
+ * `evidence unavailable`.
+ */
+import type { AssertContext } from "./assert.js";
+import type { ToolCalledObject, ToolNotCalledObject, ToolCallRecord } from "./types.js";
+import { compileUserRegex } from "./regex.js";
+import { REDACTION_TOKEN_MARK, regexNamesRedactableLiteral } from "./redactable-literal.js";
+
+type KeyResult = { pass: true; evidence?: string } | { pass: false; message: string };
+type Status = "yes" | "no" | "unknown";
+type Key = "tool_called" | "tool_not_called";
+
+/** The globs to hand to the STRING evaluator when the value is a string, or an object carrying nothing
+ *  but `tool` at the default scope — so `{tool: X}` behaves exactly like `"X"` everywhere. Undefined means
+ *  "not routable": either the key is absent or the object form's own evaluator must run. */
+export function routedToolGlobs(v: unknown): string[] | undefined {
+  if (typeof v === "string") return [v];
+  if (!v || typeof v !== "object") return undefined;
+  const o = v as Record<string, unknown>;
+  const extra = Object.keys(o).filter((k) => k !== "tool" && o[k] !== undefined);
+  if (extra.length === 1 && extra[0] === "scope" && o.scope === "main") extra.length = 0;
+  if (extra.length) return undefined;
+  if (typeof o.tool === "string") return [o.tool];
+  if (Array.isArray(o.tool) && o.tool.every((g) => typeof g === "string")) return o.tool as string[];
+  return undefined;
+}
+
+/** Every regex source the object form carries, with where it lives — for bad-regex and redaction checks. */
+export function toolCallObjectRegexes(o: ToolCalledObject | ToolNotCalledObject): Array<{ where: string; source: string }> {
+  const out: Array<{ where: string; source: string }> = [];
+  for (const [f, src] of Object.entries(o.input ?? {})) out.push({ where: `input.${f}`, source: src });
+  if (o.input_any !== undefined) out.push({ where: "input_any", source: o.input_any });
+  if (o.result?.matches !== undefined) out.push({ where: "result.matches", source: o.result.matches });
+  if (o.result?.not_matches !== undefined) out.push({ where: "result.not_matches", source: o.result.not_matches });
+  if (o.subagent_type !== undefined) out.push({ where: "subagent_type", source: o.subagent_type });
+  return out;
+}
+
+const all = (xs: Status[]): Status => (xs.includes("no") ? "no" : xs.includes("unknown") ? "unknown" : "yes");
+
+/** A regex MISS over `text` that cannot be trusted as absence: the text was cut, or it carries a
+ *  redaction token and the regex names a literal of the kind redaction rewrites (so the bytes it looks
+ *  for may be exactly the ones replaced). */
+function missIsUnknown(text: string, truncated: boolean | undefined, source: string): boolean {
+  return truncated === true || (text.includes(REDACTION_TOKEN_MARK) && regexNamesRedactableLiteral(source));
+}
+
+export function checkToolCallObject(
+  key: Key,
+  o: ToolCalledObject | ToolNotCalledObject,
+  ctx: AssertContext,
+  toolMatches: (pattern: string, name: string) => boolean,
+  warnIfRegexish: (key: string, pattern: string) => void,
+): KeyResult {
+  const fail = (message: string): KeyResult => ({ pass: false, message });
+  const negative = key === "tool_not_called";
+  const globs = Array.isArray(o.tool) ? o.tool : [o.tool];
+  for (const g of globs) warnIfRegexish(key, g);
+  const shownTool = globs.join(" | ");
+
+  // A frozen regex that record-time redaction rewrote (a `[REDACTED:…]` token spliced into the source —
+  // which is now a character class) no longer says what the author wrote. Both directions are unknowable.
+  const sources = toolCallObjectRegexes(o);
+  const redactedSrc = sources.find((s) => s.source.includes(REDACTION_TOKEN_MARK));
+  if (redactedSrc)
+    return fail(
+      `evidence unavailable: ${key}.${redactedSrc.where} was rewritten by the cassette's redaction policy ("${redactedSrc.source.slice(0, 120)}") — ` +
+        `it cannot be evaluated on replay. Assert on a literal the policy does not rewrite, or check it on a live run`,
+    );
+  const compiled = new Map<string, RegExp>();
+  for (const s of sources) {
+    const c = compileUserRegex(s.source);
+    if ("error" in c) return fail(`${key}: bad regex "${s.source}" in ${s.where}: ${c.error}`);
+    compiled.set(s.where, c.re);
+  }
+
+  if (ctx.toolCalls === undefined)
+    return fail(
+      `evidence unavailable: ${ctx.toolCallsMissing ? "tool calls absent from result.json (recorded before the field existed)" : "no tool-call record on this lane"} — ` +
+        `cannot evaluate the object form of ${key}`,
+    );
+
+  const scope = o.scope ?? "main";
+  const dispatches = new Map(ctx.subagents.filter((s) => s.toolUseId !== undefined).map((s) => [s.toolUseId!, s]));
+  const typeRe = compiled.get("subagent_type");
+  const typeOk = (c: ToolCallRecord): boolean => {
+    if (!typeRe) return true;
+    const d = c.parentToolUseId !== undefined ? dispatches.get(c.parentToolUseId) : undefined;
+    if (!d) return false;
+    return (
+      typeRe.test(d.dispatchAgentType) ||
+      (d.resolvedAgentType !== undefined && typeRe.test(d.resolvedAgentType)) ||
+      typeRe.test(d.description ?? "")
+    );
+  };
+  const inScope = (c: ToolCallRecord): boolean => (scope === "any" || c.origin === scope) && typeOk(c);
+
+  const inputStatus = (c: ToolCallRecord): Status => {
+    const parts: Status[] = [];
+    for (const [f, src] of Object.entries(o.input ?? {})) {
+      const v = c.input[f];
+      if (!v) parts.push("no");
+      else if (compiled.get(`input.${f}`)!.test(v.text)) parts.push("yes");
+      else parts.push(missIsUnknown(v.text, v.truncated, src) ? "unknown" : "no");
+    }
+    if (o.input_any !== undefined) {
+      const re = compiled.get("input_any")!;
+      const fields = Object.values(c.input);
+      if (fields.some((v) => re.test(v.text))) parts.push("yes");
+      else parts.push(fields.some((v) => missIsUnknown(v.text, v.truncated, o.input_any!)) ? "unknown" : "no");
+    }
+    return all(parts);
+  };
+
+  const resultStatus = (c: ToolCallRecord): { s: Status; note: string } => {
+    if (!o.result) return { s: "yes", note: "" };
+    if (ctx.toolResults === undefined) return { s: "unknown", note: "results absent" };
+    const r = c.toolUseId !== undefined ? ctx.toolResults.find((x) => x.toolUseId === c.toolUseId) : undefined;
+    if (!r) return { s: "unknown", note: "unpaired" };
+    const text = r.text ?? "";
+    const parts: Status[] = [];
+    if (o.result.is_error !== undefined) parts.push(r.isError === o.result.is_error ? "yes" : "no");
+    if (o.result.matches !== undefined)
+      parts.push(
+        compiled.get("result.matches")!.test(text)
+          ? "yes"
+          : missIsUnknown(text, r.assertTextTruncated, o.result.matches)
+            ? "unknown"
+            : "no",
+      );
+    if (o.result.not_matches !== undefined)
+      parts.push(
+        compiled.get("result.not_matches")!.test(text)
+          ? "no"
+          : missIsUnknown(text, r.assertTextTruncated, o.result.not_matches)
+            ? "unknown"
+            : "yes",
+      );
+    return { s: all(parts), note: r.assertTextTruncated ? "paired, truncated" : "paired" };
+  };
+
+  // Show the fields the author named (or the first field) — what DID run is the most useful line in a red.
+  const shownFields = Object.keys(o.input ?? {});
+  const describe = (c: ToolCallRecord, note: string): string => {
+    const names = shownFields.length ? shownFields : Object.keys(c.input).slice(0, 1);
+    const fields = names.map((f) => `${f}=${c.input[f] ? JSON.stringify(c.input[f].text.slice(0, 120)) : "(absent)"}`).join(" ");
+    return `${c.name}[${c.origin}]${fields ? " " + fields : ""}${note ? ` (${note})` : ""}`;
+  };
+
+  const named = ctx.toolCalls.filter((c) => globs.some((g) => toolMatches(g, c.name)));
+  const satisfied: string[] = [];
+  const unknown: string[] = [];
+  const rejected: string[] = [];
+  const outOfScope = new Map<string, number>();
+  for (const c of named) {
+    const inp = inputStatus(c);
+    if (!inScope(c)) {
+      if (inp !== "no") {
+        const where = typeOk(c) || scope !== "subagent" ? c.origin : `${c.origin}, other subagent_type`;
+        outOfScope.set(where, (outOfScope.get(where) ?? 0) + 1);
+      }
+      continue;
+    }
+    if (inp === "no") {
+      rejected.push(describe(c, "input mismatch"));
+      continue;
+    }
+    const res = resultStatus(c);
+    if (res.s === "no") rejected.push(describe(c, `result mismatch, ${res.note}`));
+    else if (inp === "unknown" || res.s === "unknown")
+      unknown.push(describe(c, inp === "unknown" ? "input truncated or redacted" : `result ${res.note}`));
+    else satisfied.push(describe(c, res.note));
+  }
+
+  const sample = (xs: string[]) => xs.slice(0, 5).join("; ") + (xs.length > 5 ? `; …(+${xs.length - 5})` : "");
+  const scopeHint = [...outOfScope]
+    .map(
+      ([where, n]) =>
+        `${n} matching call${n === 1 ? "" : "s"} in scope ${where} — set \`scope: any\` (or \`scope: ${where.split(",")[0]}\`) to count ${n === 1 ? "it" : "them"}`,
+    )
+    .join("; ");
+  const context =
+    (rejected.length
+      ? ` Considered in scope ${scope}: ${sample(rejected)}.`
+      : named.length === 0
+        ? ` No ${shownTool} call was recorded at all.`
+        : "") + (scopeHint ? ` ${scopeHint}.` : "");
+
+  if (negative) {
+    if (satisfied.length)
+      return fail(
+        `tool unexpectedly called: ${satisfied.length} ${shownTool} call(s) in scope ${scope} satisfied every predicate: ${sample(satisfied)}`,
+      );
+    if (unknown.length)
+      return fail(
+        `evidence unavailable: ${unknown.length} ${shownTool} call(s) in scope ${scope} could not be ruled out — ${sample(unknown)}. ` +
+          `A negative check cannot pass over evidence it could not read`,
+      );
+    return {
+      pass: true,
+      evidence: `tool_not_called: no ${shownTool} call in scope ${scope} satisfied every predicate (${named.length} name-matching call(s) checked)`,
+    };
+  }
+  const min = (o as ToolCalledObject).count?.min ?? 1;
+  const max = (o as ToolCalledObject).count?.max;
+  const n = satisfied.length;
+  if (n >= min && (max === undefined || n + unknown.length <= max))
+    return {
+      pass: true,
+      evidence: `tool_called: ${n} ${shownTool} call(s) in scope ${scope} satisfied every predicate: ${sample(satisfied)}`,
+    };
+  if (max !== undefined && n > max)
+    return fail(`tool called too often: ${n} ${shownTool} call(s) satisfied every predicate (max ${max}): ${sample(satisfied)}`);
+  if (unknown.length)
+    return fail(
+      `evidence unavailable: ${n} ${shownTool} call(s) satisfied every predicate (need ${min}${max !== undefined ? `..${max}` : "+"}), and ${unknown.length} more could not be settled — ${sample(unknown)}`,
+    );
+  return fail(
+    n === 0
+      ? `tool not called: no ${shownTool} call in scope ${scope} satisfied every predicate.${context}`
+      : `tool called too rarely: ${n} ${shownTool} call(s) satisfied every predicate (min ${min}).${context}`,
+  );
+}

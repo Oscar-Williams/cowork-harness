@@ -2781,6 +2781,40 @@
         "type": "string",
         "required": true
       },
+      ".toolCalls": {
+        "type": "array"
+      },
+      ".toolCalls[]": {
+        "type": "object"
+      },
+      ".toolCalls[].input": {
+        "type": "object",
+        "required": true
+      },
+      ".toolCalls[].input{}": {
+        "type": "object"
+      },
+      ".toolCalls[].input{}.text": {
+        "type": "string",
+        "required": true
+      },
+      ".toolCalls[].input{}.truncated": {
+        "type": "boolean"
+      },
+      ".toolCalls[].name": {
+        "type": "string",
+        "required": true
+      },
+      ".toolCalls[].origin": {
+        "enum": ["main", "subagent", "unknown"],
+        "required": true
+      },
+      ".toolCalls[].parentToolUseId": {
+        "type": "string"
+      },
+      ".toolCalls[].toolUseId": {
+        "type": "string"
+      },
       ".toolCounts": {
         "type": "object"
       },
@@ -3538,7 +3572,62 @@
       ".assert[].tool_available": {
         "type": "string"
       },
-      ".assert[].tool_called": {
+      ".assert[].tool_called<anyOf:0>": {
+        "type": "string"
+      },
+      ".assert[].tool_called<anyOf:1>": {
+        "type": "object",
+        "closed": true
+      },
+      ".assert[].tool_called<anyOf:1>.count": {
+        "type": "object",
+        "closed": true
+      },
+      ".assert[].tool_called<anyOf:1>.count.max": {
+        "type": "integer"
+      },
+      ".assert[].tool_called<anyOf:1>.count.min": {
+        "type": "integer"
+      },
+      ".assert[].tool_called<anyOf:1>.input": {
+        "type": "object"
+      },
+      ".assert[].tool_called<anyOf:1>.input_any": {
+        "type": "string"
+      },
+      ".assert[].tool_called<anyOf:1>.input{}": {
+        "type": "string"
+      },
+      ".assert[].tool_called<anyOf:1>.result": {
+        "type": "object",
+        "closed": true
+      },
+      ".assert[].tool_called<anyOf:1>.result.is_error": {
+        "type": "boolean"
+      },
+      ".assert[].tool_called<anyOf:1>.result.matches": {
+        "type": "string"
+      },
+      ".assert[].tool_called<anyOf:1>.result.not_matches": {
+        "type": "string"
+      },
+      ".assert[].tool_called<anyOf:1>.scope": {
+        "type": "string",
+        "enum": ["main", "subagent", "any"]
+      },
+      ".assert[].tool_called<anyOf:1>.subagent_type": {
+        "type": "string"
+      },
+      ".assert[].tool_called<anyOf:1>.tool": {
+        "required": true
+      },
+      ".assert[].tool_called<anyOf:1>.tool<anyOf:0>": {
+        "type": "string"
+      },
+      ".assert[].tool_called<anyOf:1>.tool<anyOf:1>": {
+        "type": "array"
+      },
+      ".assert[].tool_called<anyOf:1>.tool<anyOf:1>[]": {
         "type": "string"
       },
       ".assert[].tool_calls_max": {
@@ -3550,7 +3639,52 @@
       ".assert[].tool_no_error_if_called": {
         "type": "string"
       },
-      ".assert[].tool_not_called": {
+      ".assert[].tool_not_called<anyOf:0>": {
+        "type": "string"
+      },
+      ".assert[].tool_not_called<anyOf:1>": {
+        "type": "object",
+        "closed": true
+      },
+      ".assert[].tool_not_called<anyOf:1>.input": {
+        "type": "object"
+      },
+      ".assert[].tool_not_called<anyOf:1>.input_any": {
+        "type": "string"
+      },
+      ".assert[].tool_not_called<anyOf:1>.input{}": {
+        "type": "string"
+      },
+      ".assert[].tool_not_called<anyOf:1>.result": {
+        "type": "object",
+        "closed": true
+      },
+      ".assert[].tool_not_called<anyOf:1>.result.is_error": {
+        "type": "boolean"
+      },
+      ".assert[].tool_not_called<anyOf:1>.result.matches": {
+        "type": "string"
+      },
+      ".assert[].tool_not_called<anyOf:1>.result.not_matches": {
+        "type": "string"
+      },
+      ".assert[].tool_not_called<anyOf:1>.scope": {
+        "type": "string",
+        "enum": ["main", "subagent", "any"]
+      },
+      ".assert[].tool_not_called<anyOf:1>.subagent_type": {
+        "type": "string"
+      },
+      ".assert[].tool_not_called<anyOf:1>.tool": {
+        "required": true
+      },
+      ".assert[].tool_not_called<anyOf:1>.tool<anyOf:0>": {
+        "type": "string"
+      },
+      ".assert[].tool_not_called<anyOf:1>.tool<anyOf:1>": {
+        "type": "array"
+      },
+      ".assert[].tool_not_called<anyOf:1>.tool<anyOf:1>[]": {
         "type": "string"
       },
       ".assert[].tool_result_contains": {

@@ -60,6 +60,7 @@ import {
   evaluate,
   hostMatches,
   budgetFields,
+  toolResultEvidence,
   runSemanticJudges,
   type AssertContext,
   type SemanticJudge,
@@ -1471,7 +1472,9 @@ export async function executeScenario(scenario: Scenario, opts: ExecuteOptions =
       toolResultsTruncated: record.toolResults.map((r) => r.assertText === undefined),
       // Minimal pairing info (toolUseId/isError, no text) for subagent_file_write's causal pairing
       // against fileToolAttempts. Always defined live — an empty array is a real "no tool results" signal.
-      toolResults: record.toolResults.map((r) => ({ toolUseId: r.toolUseId, isError: r.isError })),
+      toolResults: record.toolResults.map(toolResultEvidence),
+      // Every observed call with capped inputs + origin — the object form of tool_called reads it.
+      toolCalls: record.toolCalls,
       toolErrors: record.toolErrors,
       redundantToolCalls: record.redundantToolCalls,
       skillsInvoked: record.skillsInvoked,
@@ -1780,6 +1783,7 @@ export async function executeScenario(scenario: Scenario, opts: ExecuteOptions =
       mcpErrors: record.mcpErrors, // uncollapsed — an empty [] is the real "no MCP errors" signal no_mcp_error needs
       hookEvents: record.hookEvents, // uncollapsed — an empty [] on a no-Task scenario is the real "nothing hook-blocked" signal no_hook_blocked needs
       fileToolAttempts: record.fileToolAttempts, // uncollapsed — content-class, same as toolResults/decisions above
+      toolCalls: record.toolCalls, // uncollapsed — [] is a real "no calls"; undefined only on a result.json that predates it
       pathDenials: record.pathDenials, // uncollapsed — content-class, same as fileToolAttempts above
       presentedFiles: record.presentedFiles, // uncollapsed — an empty [] is the real "nothing presented" signal no_scratchpad_leak's vacuous pass needs
       presentFilesCalls: record.presentFilesCalls,
@@ -2402,6 +2406,7 @@ export function buildPartialResult(args: {
     mcpErrors: record.mcpErrors, // uncollapsed — an empty [] is the real "no MCP errors" signal no_mcp_error needs
     hookEvents: record.hookEvents, // uncollapsed — an empty [] on a no-Task scenario is the real "nothing hook-blocked" signal no_hook_blocked needs
     fileToolAttempts: record.fileToolAttempts, // uncollapsed — content-class, same as toolResults/decisions above
+    toolCalls: record.toolCalls, // uncollapsed — [] is a real "no calls"; undefined only on a result.json that predates it
     pathDenials: record.pathDenials, // uncollapsed — content-class, same as fileToolAttempts above
     presentedFiles: record.presentedFiles, // uncollapsed — an empty [] is the real "nothing presented" signal no_scratchpad_leak's vacuous pass needs
     presentFilesCalls: record.presentFilesCalls,

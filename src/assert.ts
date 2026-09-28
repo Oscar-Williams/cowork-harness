@@ -1,7 +1,8 @@
 import { existsSync, readFileSync, statSync, realpathSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { join, resolve, relative, isAbsolute, sep, dirname, extname } from "node:path";
-import type { Assertion, RunResult, UsageInfo, CostInfo, OutputsFsDiff } from "./types.js";
+import type { Assertion, RunResult, UsageInfo, CostInfo, OutputsFsDiff, ToolCalledObject, ToolNotCalledObject } from "./types.js";
+import { checkToolCallObject, routedToolGlobs } from "./tool-call-assert.js";
 import { outputsDeleteTier, outputsDeleteEntries } from "./run/outputs-delete-tier.js";
 import { VERDICT_MODIFIER_KEYS } from "./types.js";
 import { compileUserRegex } from "./regex.js";
@@ -96,6 +97,24 @@ export const HOSTLOOP_ONLY_KEYS: (keyof Assertion)[] = [
   "no_path_denied",
   "subagent_dispatch_healthy",
 ];
+
+/** One `AssertContext.toolResults` entry from a RunResult/RunRecord tool result — the SAME projection on
+ *  the live, replay and verify-run lanes. `assertTextTruncated` is true when the text may be incomplete:
+ *  cut at the 10 KB cap, or `assertText` absent so only the 500-char display text remains. */
+export function toolResultEvidence(r: {
+  toolUseId?: string;
+  isError: boolean;
+  text: string;
+  assertText?: string;
+  assertTextTruncated?: boolean;
+}): NonNullable<AssertContext["toolResults"]>[number] {
+  return {
+    toolUseId: r.toolUseId,
+    isError: r.isError,
+    text: r.assertText ?? r.text,
+    assertTextTruncated: r.assertTextTruncated === true || r.assertText === undefined,
+  };
+}
 
 /** Derives the four AssertContext budget fields (costUsd/tokensTotal/toolCallsTotal/turns) uniformly from
  *  any RunResult/RunRecord-shaped source — live, replay, and verify-run all read the same shapes (the
@@ -587,7 +606,22 @@ export interface AssertContext {
    *  Sourced from `RunResult.toolResults` at all three ctx-construction sites (live/replay/verify).
    *  Undefined = evidence unavailable (older run/result.json); `subagent_file_write` fails cannot-verify
    *  rather than risk pairing an attempt with the wrong (or no) result. */
-  toolResults?: { toolUseId?: string; isError: boolean }[];
+  toolResults?: {
+    toolUseId?: string;
+    isError: boolean;
+    /** `assertText ?? text` — read only by the object form of tool_called/tool_not_called (`result:`). */
+    text?: string;
+    /** The text above may be INCOMPLETE: `assertText` was cut at its 10 KB cap, or it is absent and
+     *  `text` is the 500-char display fallback (an old cassette). A result predicate the text cannot
+     *  settle is then evidence-unavailable, never a pass. */
+    assertTextTruncated?: boolean;
+  }[];
+  /** RunResult.toolCalls — every observed call with its capped inputs and origin. Undefined = evidence
+   *  unavailable (an older result.json, or a lane that never wired it): the object form of
+   *  tool_called/tool_not_called fails closed, both directions. */
+  toolCalls?: RunResult["toolCalls"];
+  /** Set by verify-run only when `result.toolCalls` is undefined in result.json. */
+  toolCallsMissing?: boolean;
   /** RunResult.presentedFiles — files delivered via `present_files`, each already classified
    *  promoted/leaked at derivation time (see RunResult's own doc comment). Undefined means no
    *  `present_files` telemetry was recorded for this run (an older run predating the feature) — the
@@ -1641,28 +1675,39 @@ function check(
     // only (LIVE_ONLY_KEYS: stripped on replay, so it never reaches here on the replay lane).
     results.push(checkNoLostWriteBack(ctx));
   }
-  if (a.tool_called !== undefined) {
-    warnIfRegexish("tool_called", a.tool_called);
-    const hit = [...ctx.toolsCalled].find((t) => toolMatches(a.tool_called!, t));
+  // The object form with nothing but `tool` (and the default scope) is routed to the STRING evaluator, so
+  // `{tool: X}` ≡ `"X"` on every lane — including a verify-run over a result.json that predates
+  // `toolCalls`, which the object evaluator would (correctly) refuse as evidence-unavailable.
+  const toolCalledGlobs = routedToolGlobs(a.tool_called);
+  if (toolCalledGlobs !== undefined) {
+    const shown = toolCalledGlobs.join(" | ");
+    for (const g of toolCalledGlobs) warnIfRegexish("tool_called", g);
+    const hit = [...ctx.toolsCalled].find((t) => toolCalledGlobs.some((g) => toolMatches(g, t)));
     results.push(
       ctx.toolsCalledMissing
         ? // Mirror tool_not_called: a missing tool-count channel is "cannot evaluate", not "not called".
           fail(`evidence unavailable: tool counts absent from result.json — cannot evaluate tool_called`)
         : hit !== undefined
-          ? ok(`tool_called: "${a.tool_called}" matched ${hit}`)
-          : fail(`tool not called: no called tool matched "${a.tool_called}" (called: ${toolSample(ctx.toolsCalled)})`),
+          ? ok(`tool_called: "${shown}" matched ${hit}`)
+          : fail(`tool not called: no called tool matched "${shown}" (called: ${toolSample(ctx.toolsCalled)})`),
     );
+  } else if (a.tool_called !== undefined) {
+    results.push(checkToolCallObject("tool_called", a.tool_called as ToolCalledObject, ctx, toolMatches, warnIfRegexish));
   }
-  if (a.tool_not_called !== undefined) {
-    warnIfRegexish("tool_not_called", a.tool_not_called);
-    const hits = [...ctx.toolsCalled].filter((t) => toolMatches(a.tool_not_called!, t));
+  const toolNotCalledGlobs = routedToolGlobs(a.tool_not_called);
+  if (toolNotCalledGlobs !== undefined) {
+    const shown = toolNotCalledGlobs.join(" | ");
+    for (const g of toolNotCalledGlobs) warnIfRegexish("tool_not_called", g);
+    const hits = [...ctx.toolsCalled].filter((t) => toolNotCalledGlobs.some((g) => toolMatches(g, t)));
     results.push(
       ctx.toolsCalledMissing
         ? fail(`evidence unavailable: tool counts absent from result.json — cannot evaluate tool_not_called`)
         : hits.length === 0
           ? ok()
-          : fail(`tool unexpectedly called: "${a.tool_not_called}" matched ${hits.join(", ")}`),
+          : fail(`tool unexpectedly called: "${shown}" matched ${hits.join(", ")}`),
     );
+  } else if (a.tool_not_called !== undefined) {
+    results.push(checkToolCallObject("tool_not_called", a.tool_not_called as ToolNotCalledObject, ctx, toolMatches, warnIfRegexish));
   }
   if (a.reference_read !== undefined || a.no_observed_reference_access !== undefined) {
     // One block for both keys: they read the same list through the same compiled regex, and splitting

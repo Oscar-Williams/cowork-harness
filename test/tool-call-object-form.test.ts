@@ -320,13 +320,13 @@ describe("scope classifier (synthetic streams — pins the classifier, not the b
   it("a sub-agent call under the default scope fails and NAMES the out-of-scope match", async () => {
     const rec = await drive(stream);
     const c = ctx({ toolCalls: rec.toolCalls, toolResults: rec.toolResults, subagents: rec.subagents });
-    const r = one({ tool_called: { tool: "Bash", input: { command: "child-call" } } }, c);
+    const r = one({ tool_called: { tool: "Bash", input: { command: "echo child-call" } } }, c);
     expect(r.pass).toBe(false);
     expect(r.message).toMatch(/1 matching call in scope subagent/);
     expect(r.message).toMatch(/scope: any/);
     // and the negative form at default scope does NOT see it (documented surprise, named in docs)
-    expect(one({ tool_not_called: { tool: "Bash", input: { command: "child-call" } } }, c).pass).toBe(true);
-    expect(one({ tool_not_called: { tool: "Bash", input: { command: "child-call" }, scope: "any" } }, c).pass).toBe(false);
+    expect(one({ tool_not_called: { tool: "Bash", input: { command: "echo child-call" } } }, c).pass).toBe(true);
+    expect(one({ tool_not_called: { tool: "Bash", input: { command: "echo child-call" }, scope: "any" } }, c).pass).toBe(false);
   });
 
   it("the synthetic MCP echo is excluded", async () => {
