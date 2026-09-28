@@ -1449,3 +1449,110 @@ def test_lint_skill_ignores_extra_findings(tmp_path, monkeypatch):
         code = scenario.main(["lint-skill", str(skill)])
     assert code == 0
     assert "scenario-invalid" not in buf.getvalue()
+
+
+# --- the object form of tool_called / tool_not_called, and the transcript_* command-shape rule ------
+
+CMD_RULE = "transcript-command-shaped"
+
+
+@pytest.mark.parametrize(
+    "key,value",
+    [
+        ("transcript_matches", "python3 scripts/x.py 129"),
+        ("transcript_matches", "fetch-lesson\\\\.js\\\\s+129"),  # a script filename, regex-escaped
+        ("transcript_contains", "ran fetch-lesson.js 129"),
+        ("transcript_not_matches", "ok && node build\\\\.mjs"),
+        ("transcript_not_contains", "$(bash deploy)"),
+    ],
+)
+def test_command_shaped_transcript_value_warns(key, value, tmp_path):
+    assert CMD_RULE in _rules(f"assert:\n  - {key}: '{value}'\n", tmp_path)
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "node count",  # bare interpreter word in prose: no operator before it, not at the start with an arg shape
+        "metrics\\\\.json",  # data files are not scripts
+        "the report\\\\.md was written",
+        "config\\\\.yaml",
+        "flagged the blank",
+        "nodes",
+    ],
+)
+def test_prose_transcript_value_is_clean(value, tmp_path):
+    assert CMD_RULE not in _rules(f"assert:\n  - transcript_matches: '{value}'\n", tmp_path)
+
+
+def test_command_shaped_fix_points_at_the_object_form(tmp_path):
+    f = tmp_path / "sc.yaml"
+    f.write_text(
+        "name: t\nbaseline: latest\nsession: (inline)\nfidelity: container\nprompt: hi\n"
+        "assert:\n  - transcript_matches: 'python3 scripts/x.py 129'\n",
+        encoding="utf-8",
+    )
+    [hit] = [x for x in scenario.lint_file(str(f)) if x.rule == CMD_RULE]
+    assert hit.severity == "WARN"
+    assert "tool_called" in hit.fix and "input" in hit.fix
+
+
+RED_RULE = "tool-input-regex-redactable"
+
+
+def test_negative_input_regex_naming_a_home_path_warns(tmp_path):
+    body = "assert:\n  - tool_not_called: { tool: Bash, input: { command: 'rm\\s+-rf\\s+/Users/acme' } }\n"
+    assert RED_RULE in _rules(body, tmp_path)
+
+
+def test_negative_input_any_naming_an_email_warns(tmp_path):
+    body = "assert:\n  - tool_not_called: { tool: '*', input_any: 'alice@example\\.com' }\n"
+    assert RED_RULE in _rules(body, tmp_path)
+
+
+def test_positive_or_clean_negative_is_not_redactable(tmp_path):
+    assert RED_RULE not in _rules("assert:\n  - tool_called: { tool: Bash, input: { command: '/Users/acme' } }\n", tmp_path)
+    assert RED_RULE not in _rules("assert:\n  - tool_not_called: { tool: Bash, input: { command: 'git\\s+push' } }\n", tmp_path)
+
+
+def test_redactable_rule_reads_a_policy_next_to_the_scenario(tmp_path):
+    # A custom policy literal the built-in shapes do not know about.
+    (tmp_path / ".cowork-redact.json").write_text(json.dumps({"patterns": [{"regex": "Acme(?:Corp)?", "label": "customer"}]}))
+    body = "assert:\n  - tool_not_called: { tool: Bash, input: { command: 'deploy AcmeCorp' } }\n"
+    assert RED_RULE in _rules(body, tmp_path)
+
+
+def test_redactable_rule_survives_the_repos_own_policy(tmp_path):
+    # Every pattern in the repo's .cowork-redact.json uses variable-width lookbehind, which Python's `re`
+    # cannot compile. The rule must not crash, and must still fire on a home-path literal.
+    (tmp_path / ".cowork-redact.json").write_text((REPO / ".cowork-redact.json").read_text())
+    body = "assert:\n  - tool_not_called: { tool: Bash, input: { command: 'cat /Users/acme/notes' } }\n"
+    assert RED_RULE in _rules(body, tmp_path)
+
+
+def test_dict_tool_not_called_is_held_to_the_tier_table(tmp_path):
+    assert "tool-not-called-tier-vacuous" in _rules_at("hostloop", "assert:\n  - tool_not_called: { tool: Bash }\n", tmp_path)
+    assert "tool-not-called-tier-vacuous" in _rules_at(
+        "hostloop", "assert:\n  - tool_not_called: { tool: [Bash, WebFetch], input: { command: x } }\n", tmp_path
+    )
+    # one served member keeps it satisfiable
+    assert "tool-not-called-tier-vacuous" not in _rules_at(
+        "hostloop", "assert:\n  - tool_not_called: { tool: [Bash, mcp__workspace__bash] }\n", tmp_path
+    )
+
+
+def test_dict_tool_called_still_arms_the_gate_witness(tmp_path):
+    body = "assert:\n  - gate_answers_delivered: true\n  - tool_called: { tool: AskUserQuestion }\n"
+    assert RULE not in _rules(body, tmp_path)
+    # ...but a floor of zero witnesses nothing
+    body0 = "assert:\n  - gate_answers_delivered: true\n  - tool_called: { tool: AskUserQuestion, count: { min: 0 } }\n"
+    assert RULE in _rules(body0, tmp_path)
+
+
+def test_literal_bash_command_check_at_hostloop_suggests_both_shells(tmp_path):
+    body = "assert:\n  - tool_called: { tool: Bash, input: { command: 'build\\.py' } }\n"
+    assert "tool-input-shell-tier" in _rules_at("hostloop", body, tmp_path)
+    assert "tool-input-shell-tier" in _rules_at("cowork", body, tmp_path)
+    assert "tool-input-shell-tier" not in _rules_at("container", body, tmp_path)
+    listed = "assert:\n  - tool_called: { tool: [Bash, mcp__workspace__bash], input: { command: 'build\\.py' } }\n"
+    assert "tool-input-shell-tier" not in _rules_at("hostloop", listed, tmp_path)
