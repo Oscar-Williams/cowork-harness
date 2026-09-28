@@ -73,6 +73,9 @@ export function makeStubFixture(body: string, extraEnv: Record<string, string> =
     COWORK_MANAGED_CONFIG: "0",
     STUB_PID: stubPidFile,
     STUB_ENV_DUMP: envDump,
+    // A run must resolve a model (4.0.0); the scenario's inline session has none, so the env channel pins
+    // one. The stub ignores its argv, so the id is never used.
+    COWORK_HARNESS_MODEL: "claude-sonnet-5",
     ...Object.fromEntries(CREDENTIAL_VARS.map((k) => [k, ""])),
     ...extraEnv,
   };

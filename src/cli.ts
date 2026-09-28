@@ -21,12 +21,14 @@ import {
   executeScenario,
   parseScenarioFile,
   loadSessionFromFile,
+  unresolvedModelPreflight,
   UnansweredError,
   BoundaryError,
   UsageError,
   LegacyRunDirError,
   type ExecuteOptions,
 } from "./run/execute.js";
+import { unresolvedModelRefusal, envModelDefault } from "./run/model-provenance.js";
 import {
   ScriptedDecider,
   ExternalDecider,
@@ -453,8 +455,8 @@ const RUN_HELP = `cowork-harness run <scenario.yaml | dir/>
 Model:
   --model <id>                     pin the model, overriding the session's 'model:' for this run
                                    (env COWORK_HARNESS_MODEL sets a default; a --matrix 'models:' axis
-                                   wins over both). A run that resolves no model warns: omitting it is
-                                   deprecated and becomes an error in the next major.
+                                   wins over both). A run that resolves no model from any of these is
+                                   refused (exit 2) before anything runs.
 
 Input policy:
   --on-unanswered fail|first       policy for an unscripted question (default: fail — deterministic).
@@ -1724,6 +1726,18 @@ async function cmdRun(rawArgs: string[]) {
           o.json,
         );
     }
+    // Every cell must resolve a model, from the same chain a cell run uses: the cell's `models:` axis, then
+    // `--model`, then the session's `model:`, then COWORK_HARNESS_MODEL. Checked for every cell before any
+    // runs: a cell that resolves none would otherwise surface as a per-cell error after the others paid.
+    if (cells.some((c) => (c.axes.model ?? modelFlag ?? baseSession!.model ?? envModelDefault()) === undefined))
+      fail(
+        "run",
+        "usage",
+        unresolvedModelRefusal(`scenario "${scenario.name}" under --matrix ${matrixFile}`) +
+          " A `models:` axis in the matrix file also pins each cell.",
+        undefined,
+        o.json,
+      );
     const results: RunResult[] = [];
     // Every cell resolves its own overridden scenario/session first (shared by both branches below) —
     // an error here (a bad skill_dirs substitution, an unresolvable overridden baseline) is a
@@ -1854,6 +1868,18 @@ async function cmdRun(rawArgs: string[]) {
         o.json,
       );
   }
+  // Every scenario must resolve a model (`--model`, its session's `model:`, or COWORK_HARNESS_MODEL).
+  // executeScenario refuses one that does not, but on a directory that would fire only when that file's
+  // turn came, after the earlier ones had been paid for. Every offender is named in one refusal.
+  const unpinned = files.filter((_, i) => unresolvedModelPreflight(loaded[i], modelFlag) !== undefined);
+  if (unpinned.length)
+    fail(
+      "run",
+      "usage",
+      files.length === 1 ? unresolvedModelPreflight(loaded[0], modelFlag)! : unresolvedModelRefusal(unpinned.join(", ")),
+      undefined,
+      o.json,
+    );
   if (maxBudgetUsd !== undefined && repeatN === undefined)
     for (const scenario of loaded) preflightBudget("run", scenario.name, maxBudgetUsd, o.json);
 
@@ -2071,7 +2097,7 @@ async function cmdSkill(rawArgs: string[]) {
     fail("skill", "usage", `COWORK_HARNESS_FIDELITY must be one of ${FID_VALUES.join("|")} (got "${envFidelity}")`, undefined, isJson);
   let fidelity: "protocol" | "container" | "microvm" | "hostloop" | "cowork" =
     fidelityFlag ?? (envFidelity as "protocol" | "container" | "microvm" | "hostloop" | "cowork" | undefined) ?? "container";
-  const model: string | undefined = modelFlag ?? process.env.COWORK_HARNESS_MODEL;
+  const model: string | undefined = modelFlag ?? envModelDefault();
   if (resume && !sessionId) fail("skill", "usage", "--resume requires --session-id <id> (the session to resume)", undefined, isJson);
 
   // reject extra positionals so a shell-quoting slip (an unquoted multi-word prompt) can't silently
@@ -2198,6 +2224,10 @@ async function cmdSkill(rawArgs: string[]) {
       JSON.stringify(
         {
           fidelity,
+          // `null`, not absent, when nothing resolves: the real run refuses that (exit 2), and the preview
+          // says so in its payload rather than omitting the one input that decides it. It does not refuse:
+          // it spends nothing, and it is how a reader checks an invocation before adding the model.
+          model: model ?? null,
           prompt,
           localPlugins,
           marketplaces,
@@ -2218,6 +2248,11 @@ async function cmdSkill(rawArgs: string[]) {
     );
     return;
   }
+
+  // The skill lane's inline session carries no `model:` of its own, so `--model` or COWORK_HARNESS_MODEL
+  // must supply it. Refused here, before staging; executeScenario is the backstop. After the --dry-run
+  // branch on purpose: the preview spends nothing, so it reports `model: null` instead of refusing.
+  if (model === undefined) fail("skill", "usage", unresolvedModelRefusal("this `skill` run"), undefined, isJson);
 
   // Resolve the inline session's relative paths against cwd (consistent with `run`'s file path, which
   // goes through resolveSessionPaths) so uploads/folders/plugins are cwd-independent for the skill path.
@@ -2420,7 +2455,9 @@ async function cmdProbeDispatch(rawArgs: string[]) {
       isJson,
     );
   const [folder, prompt] = positional;
-  const model = modelFlag ?? process.env.COWORK_HARNESS_MODEL;
+  const model = modelFlag ?? envModelDefault();
+  // Same as `skill`: the inline session has no `model:`, so the flag or the env var must supply one.
+  if (model === undefined) fail("probe-dispatch", "usage", unresolvedModelRefusal("this `probe-dispatch` run"), undefined, isJson);
 
   // Session + scenario construction mirrors cmdSkill's own inline-session path (loadSession →
   // resolveSessionPaths, Scenario.parse) — the "thin wrapper, don't reinvent" seam the design calls for.

@@ -29,6 +29,8 @@ function noTokenEnv(): NodeJS.ProcessEnv {
     CLAUDE_CODE_OAUTH_TOKEN: "",
     ANTHROPIC_API_KEY: "",
     ANTHROPIC_AUTH_TOKEN: "",
+    // A run must resolve a model (4.0.0); the dry run refuses one that does not, which is not this file's subject.
+    COWORK_HARNESS_MODEL: "claude-sonnet-5",
   };
 }
 

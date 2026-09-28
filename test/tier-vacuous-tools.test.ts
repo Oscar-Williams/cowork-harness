@@ -115,6 +115,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { executeScenario, parseScenarioFile } from "../src/run/execute";
 
+// A run must resolve a model (4.0.0), and that refusal comes before this one; pin it so the load reaches the
+// tier check.
+const executePinned = (s: Parameters<typeof executeScenario>[0]) => executeScenario(s, { modelOverride: "claude-sonnet-5" });
+
 function scenarioWith(tier: string, asserts: string): ReturnType<typeof parseScenarioFile> {
   const dir = mkdtempSync(join(tmpdir(), "cwh-tv-"));
   writeFileSync(join(dir, "s.yaml"), "folders: []\n");
@@ -125,7 +129,7 @@ function scenarioWith(tier: string, asserts: string): ReturnType<typeof parseSce
 
 describe("executeScenario refuses a tier-vacuous tool_not_called at load", () => {
   it("rejects `Bash` at hostloop, naming the replacement", async () => {
-    await expect(executeScenario(scenarioWith("hostloop", `  - tool_not_called: Bash\n`))).rejects.toThrow(
+    await expect(executePinned(scenarioWith("hostloop", `  - tool_not_called: Bash\n`))).rejects.toThrow(
       /can never be violated at fidelity `hostloop`[\s\S]*mcp__workspace__bash/,
     );
   });
@@ -135,13 +139,13 @@ describe("executeScenario refuses a tier-vacuous tool_not_called at load", () =>
     // an author that this class is caught, then did not catch it. `subagent_tool_absent` reads the tools
     // sub-agents actually USED (assert.ts's ctx.subagentTools), not a per-dispatch declared list, so the
     // same table applies — the belief that it read a different inventory was simply wrong.
-    await expect(executeScenario(scenarioWith("hostloop", `  - subagent_tool_absent: Bash\n`))).rejects.toThrow(
+    await expect(executePinned(scenarioWith("hostloop", `  - subagent_tool_absent: Bash\n`))).rejects.toThrow(
       /`subagent_tool_absent: "Bash"` can never be violated at fidelity `hostloop`/,
     );
   });
 
   it("rejects the INVERSE at container", async () => {
-    await expect(executeScenario(scenarioWith("container", `  - tool_not_called: mcp__workspace__bash\n`))).rejects.toThrow(
+    await expect(executePinned(scenarioWith("container", `  - tool_not_called: mcp__workspace__bash\n`))).rejects.toThrow(
       /can never be violated at fidelity `container`/,
     );
   });
@@ -155,13 +159,13 @@ describe("executeScenario refuses a tier-vacuous tool_not_called at load", () =>
 describe("the object form of tool_not_called is held to the same tier table", () => {
   it("rejects an object whose only tool is unserved (an input regex does not rescue it)", async () => {
     await expect(
-      executeScenario(scenarioWith("hostloop", `  - tool_not_called: { tool: Bash, input: { command: 'rm\\s+-rf' } }\n`)),
+      executePinned(scenarioWith("hostloop", `  - tool_not_called: { tool: Bash, input: { command: 'rm\\s+-rf' } }\n`)),
     ).rejects.toThrow(/can never be violated at fidelity `hostloop`[\s\S]*mcp__workspace__bash/);
   });
 
   it("rejects a LIST only when EVERY member is unserved", async () => {
     await expect(
-      executeScenario(scenarioWith("hostloop", `  - tool_not_called: { tool: [Bash, WebFetch], input: { command: x } }\n`)),
+      executePinned(scenarioWith("hostloop", `  - tool_not_called: { tool: [Bash, WebFetch], input: { command: x } }\n`)),
     ).rejects.toThrow(/can never be violated at fidelity `hostloop`/);
   });
   // A list with one served member ([Bash, mcp__workspace__bash]) is NOT refused — asserted on the pure

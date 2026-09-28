@@ -322,7 +322,7 @@ describe.skipIf(!can)("cli --output-format json envelope + exit codes", () => {
 
   it("boundary error → category 'boundary', exit 3 (protocol + expect_denied)", () => {
     const { cwd } = run(["--version"]); // borrow a temp cwd
-    writeIn(cwd, "sess.yaml", "permission_mode: default\n");
+    writeIn(cwd, "sess.yaml", "permission_mode: default\nmodel: claude-sonnet-5\n");
     writeIn(cwd, "b.yaml", "name: b\nbaseline: latest\nsession: ./sess.yaml\nfidelity: protocol\nprompt: hi\nexpect_denied: [evil.com]\n");
     const r = spawnSync("node", [CLI, "run", "b.yaml", "--output-format=json"], { encoding: "utf8", cwd });
     expect(r.status).toBe(3); // boundary violations → exit 3 (integrity, not usage)
@@ -610,7 +610,19 @@ describe.skipIf(!can)("cli --output-format json envelope + exit codes", () => {
     const folder = mkdtempSync(join(tmpdir(), "cc-ablate-"));
     mkdirSync(join(folder, ".claude-plugin"), { recursive: true });
     writeFileSync(join(folder, "SKILL.md"), "---\nname: h\ndescription: h.\n---\n# h\n");
-    const r = run(["skill", folder, "hi", "--session-id", "s1", "--resume", "--ablate-skill", "--output-format", "json"]);
+    const r = run([
+      "skill",
+      folder,
+      "hi",
+      "--session-id",
+      "s1",
+      "--resume",
+      "--ablate-skill",
+      "--model",
+      "claude-sonnet-5",
+      "--output-format",
+      "json",
+    ]);
     expect(r.code).toBe(2);
     expect(r.json?.error?.category).toBe("usage");
     expect(r.json?.error?.message).toMatch(/--ablate-skill cannot be combined with --resume/);

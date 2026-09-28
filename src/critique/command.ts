@@ -43,6 +43,7 @@ import type { PlatformBaseline } from "../types.js";
 import { isLiveModelId } from "../types.js";
 import { decideLoopFromBaseline } from "../loop-decision.js";
 import { parseDotenv } from "../dotenv.js";
+import { unresolvedModelRefusal, envModelDefault } from "../run/model-provenance.js";
 import type { CritiqueItem } from "./evidence.js";
 
 const REFLECTION_PROMPT_VERSION = 2;
@@ -2210,6 +2211,16 @@ async function main(argv: string[] = process.argv.slice(2)): Promise<void> {
   // minted — nothing under --run-dir, no index row, no spawn.
   if (opts.corpusOnly) {
     process.exit(runCorpusPreview(opts, resolvedSkill, preflight.pkg));
+    return;
+  }
+  // Both turns run the `skill` lane, which refuses a run that resolves no model. Check it HERE, before the
+  // task turn: otherwise the child refuses after staging and this reports an opaque instrument failure.
+  // `--model` reaches both turns (forwardBoth); COWORK_HARNESS_MODEL reaches them through this process's env,
+  // which `--dotenv` has already been applied to (prepareCritique). --corpus-only returned above: no turn.
+  const forwardsModel = opts.forwardBoth.some((a) => a === "--model" || a.startsWith("--model="));
+  if (!forwardsModel && envModelDefault() === undefined) {
+    process.stderr.write(`critique: ${unresolvedModelRefusal("this critique's task and reflection turns")}\n`);
+    process.exit(2);
     return;
   }
   // Past this point a turn WILL run. parseArgs guarantees a probe on every non-corpus-only line; the

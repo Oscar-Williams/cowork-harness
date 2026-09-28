@@ -262,7 +262,7 @@ describe.skipIf(!can)("cli: stats — generation queries", () => {
     run(["stats", "--reindex"], root);
     const d = mkdtempSync(join(tmpdir(), "cli-stats-budget-"));
     writeFileSync(join(d, "pricey.yaml"), "name: pricey\nfidelity: container\nprompt: hi\n");
-    const r = spawnSync("node", [CLI, "run", join(d, "pricey.yaml"), "--max-budget-usd", "1.0"], {
+    const r = spawnSync("node", [CLI, "run", join(d, "pricey.yaml"), "--max-budget-usd", "1.0", "--model", "claude-sonnet-5"], {
       encoding: "utf8",
       env: { ...process.env, COWORK_HARNESS_RUNS_DIR: root },
     });

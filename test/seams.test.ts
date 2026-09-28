@@ -2195,7 +2195,7 @@ describe("execute.ts — COWORK_HARNESS_DIALOG_TIMEOUT_MS configuration guard", 
         snapshot: () => undefined,
       };
       const scenario = Scenario.parse({ prompt: "hi", fidelity: "container" });
-      await expect(executeScenario(scenario, { externalChannel: stubChannel })).rejects.toThrow(
+      await expect(executeScenario(scenario, { modelOverride: "claude-sonnet-5", externalChannel: stubChannel })).rejects.toThrow(
         "COWORK_HARNESS_DIALOG_TIMEOUT_MS: cannot use a finite timeout",
       );
     } finally {

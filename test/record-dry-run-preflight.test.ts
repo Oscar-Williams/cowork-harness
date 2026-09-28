@@ -29,6 +29,8 @@ function cli(args: string[], extraEnv: Record<string, string> = {}) {
     env: {
       ...process.env,
       COWORK_HARNESS_RUNS_DIR: mkdtempSync(join(tmpdir(), "rec-dry-runs-")),
+      // A run must resolve a model (4.0.0), and that refusal precedes the ones this file is about.
+      COWORK_HARNESS_MODEL: "claude-sonnet-5",
       ...extraEnv,
       // A PLACEHOLDER credential, and it spends nothing. `record`'s auth guard (cassette.ts) sits ABOVE
       // the single-file arm, so on the real path — with no token in the environment — every pre-spend

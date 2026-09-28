@@ -41,8 +41,12 @@ function seedRun(root: string, scenario: string, runId: string, costUsd: number)
   );
 }
 
+// A run must resolve a model (4.0.0), and that refusal precedes the budget gate; every spawn here pins one
+// through the env channel so the gate under test is what answers.
+const PINNED = { COWORK_HARNESS_MODEL: "claude-sonnet-5" };
+
 function cli(args: string[], root: string) {
-  const r = spawnSync("node", [CLI, ...args], { encoding: "utf8", env: { ...process.env, COWORK_HARNESS_RUNS_DIR: root } });
+  const r = spawnSync("node", [CLI, ...args], { encoding: "utf8", env: { ...process.env, COWORK_HARNESS_RUNS_DIR: root, ...PINNED } });
   return { code: r.status, out: r.stdout, err: r.stderr, all: r.stdout + r.stderr };
 }
 
@@ -265,7 +269,7 @@ describe.skipIf(!can)("record --max-budget-usd — a refusal exits 1, not 2", ()
   function cliWith(args: string[], root: string, cwd: string) {
     const r = spawnSync("node", [CLI, ...args], {
       encoding: "utf8",
-      env: { ...process.env, COWORK_HARNESS_RUNS_DIR: root, ...PLACEHOLDER },
+      env: { ...process.env, COWORK_HARNESS_RUNS_DIR: root, ...PLACEHOLDER, ...PINNED },
       cwd,
     });
     return { code: r.status, all: (r.stdout ?? "") + (r.stderr ?? "") };
@@ -389,7 +393,7 @@ describe.skipIf(!can)("record <dir/> --dry-run --output-format json — exactly 
   function dry(work: string, root: string, cap: string, json = true) {
     const r = spawnSync("node", [CLI, "record", work, "--dry-run", "--max-budget-usd", cap, ...(json ? ["--output-format", "json"] : [])], {
       encoding: "utf8",
-      env: { ...process.env, COWORK_HARNESS_RUNS_DIR: root },
+      env: { ...process.env, COWORK_HARNESS_RUNS_DIR: root, ...PINNED },
       cwd: work,
     });
     return { code: r.status, out: r.stdout ?? "", err: r.stderr ?? "" };
@@ -511,7 +515,7 @@ describe.skipIf(!can)("budget refusal under --output-format json — exactly one
         encoding: "utf8",
         // A placeholder credential lets the real paths reach the gate (the auth guard sits above it); the
         // gate refuses before any spawn, and the unit lane's spawn guard backstops anything past it.
-        env: { ...process.env, COWORK_HARNESS_RUNS_DIR: root, ANTHROPIC_API_KEY: "placeholder-not-used-no-spawn-in-this-suite" },
+        env: { ...process.env, COWORK_HARNESS_RUNS_DIR: root, ANTHROPIC_API_KEY: "placeholder-not-used-no-spawn-in-this-suite", ...PINNED },
         cwd: work,
       });
       const lines = (r.stdout ?? "").split("\n").filter((l) => l.trim() !== "");

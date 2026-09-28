@@ -1,6 +1,6 @@
 import { applyCommandGlobal, isCommandGlobalFlag } from "./command-globals.js";
 import readline from "node:readline";
-import { unpinnedModelWarning } from "./model-provenance.js";
+import { unresolvedModelRefusal, envModelDefault } from "./model-provenance.js";
 import os from "node:os";
 import { spawn, spawnSync } from "node:child_process";
 import { assertSpawnAllowed } from "../spawn-guard.js";
@@ -200,8 +200,8 @@ export async function cmdChat(args: string[]) {
     process.exit(2);
   }
   const fidelity: ChatFidelity = fidelityFlag ?? (envFid as ChatFidelity | undefined) ?? "container";
-  // COWORK_HARNESS_MODEL env var default (CLI --model takes precedence).
-  const model: string | undefined = modelFlag ?? process.env.COWORK_HARNESS_MODEL;
+  // COWORK_HARNESS_MODEL env var default (CLI --model takes precedence). An empty value counts as unset.
+  const model: string | undefined = modelFlag ?? envModelDefault();
   const folder = positional[0];
   const seedPrompt = positional[1]; // optional: injected as the first turn before the REPL
   // reject extra positionals — `chat <folder> [prompt]` consumes at most two; a third (e.g. an
@@ -215,6 +215,12 @@ export async function cmdChat(args: string[]) {
   }
   if (!folder) {
     log(chatUsage());
+    process.exit(2);
+  }
+  // A session must state its model, like every other lane: the model selects part of the agent's system
+  // prompt. Refused before the --raw branch so both chat lanes refuse, and before any run dir or docker work.
+  if (model === undefined) {
+    log(`chat: ${unresolvedModelRefusal("this `chat` session")}\n`);
     process.exit(2);
   }
 
@@ -271,9 +277,6 @@ export async function cmdChat(args: string[]) {
   // keeps ONE turn-start ritual instead of two.
   const turnNumber = beginTurn(outDir);
   const plan = buildLaunchPlan(session, baseline, outDir, fidelity, false); // chat has no resume concept
-  // Chat warns on the same condition but in its own words: an interactive session makes no
-  // reproducibility claim, so the consequence differs even though the missing input is identical.
-  if (plan.model === undefined) warn(unpinnedModelWarning("chat") + "\n");
   // mounts.json (see vm-path-ctx-file.ts's header): mirror execute.ts's unconditional write.
   // Chat's `fidelity` is fixed at CLI-parse time (no "cowork" gate resolution here, unlike execute.ts's
   // effectiveFidelity), so it IS the effective tier this session actually runs at. Best-effort; never

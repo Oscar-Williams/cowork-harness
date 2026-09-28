@@ -85,7 +85,7 @@ describe("session manifest — the WRITER records identity", () => {
     );
     const scenario = parseScenarioFile(join(scnDir, "w.yaml"));
     // Refused at the host-write consent gate — AFTER the manifest is written, BEFORE anything spawns.
-    await expect(executeScenario(scenario, { sessionId: "mw1" })).rejects.toThrow(/allow_host_writes/);
+    await expect(executeScenario(scenario, { modelOverride: "claude-sonnet-5", sessionId: "mw1" })).rejects.toThrow(/allow_host_writes/);
     const m = JSON.parse(readFileSync(join(root, "manifest-writer", "sess-mw1", "session.json"), "utf8"));
     expect(m.scenario).toBe("manifest-writer");
     expect(m.prompt).toBe("identify me");

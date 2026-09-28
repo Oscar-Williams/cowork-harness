@@ -101,7 +101,9 @@ describe("execute — pinned-session cross-project guard", () => {
     process.env.COWORK_HARNESS_RUNS_DIR = root;
     const dir = seedPinnedDir(root, "guard-a", "ci", { originKey: "deadbeefdeadbeef", sourceHint: "/other/proj" });
     const { scenario } = sourcedScenario("guard-a");
-    await expect(executeScenario(scenario, { sessionId: "ci" })).rejects.toThrow(/already in use by another project at \/other\/proj/);
+    await expect(executeScenario(scenario, { modelOverride: "claude-sonnet-5", sessionId: "ci" })).rejects.toThrow(
+      /already in use by another project at \/other\/proj/,
+    );
     expect(existsSync(join(dir, "PRIOR.txt"))).toBe(true);
   });
 
@@ -110,7 +112,7 @@ describe("execute — pinned-session cross-project guard", () => {
     process.env.COWORK_HARNESS_RUNS_DIR = root;
     // A marker is present, but the inline run has no source → identity can't be confirmed → must not rm.
     const dir = seedPinnedDir(root, "guard-inline", "ci", { originKey: "anything", sourceHint: "/x" });
-    await expect(executeScenario(inlineScenario("guard-inline"), { sessionId: "ci" })).rejects.toThrow(
+    await expect(executeScenario(inlineScenario("guard-inline"), { modelOverride: "claude-sonnet-5", sessionId: "ci" })).rejects.toThrow(
       /mounts no source to identify it as yours/,
     );
     expect(existsSync(join(dir, "PRIOR.txt"))).toBe(true);
@@ -121,7 +123,7 @@ describe("execute — pinned-session cross-project guard", () => {
     process.env.COWORK_HARNESS_RUNS_DIR = root;
     const dir = seedPinnedDir(root, "guard-b", "ci"); // confirmable session, but the dir has NO .origin
     const { scenario } = sourcedScenario("guard-b");
-    await expect(executeScenario(scenario, { sessionId: "ci" })).rejects.toThrow(/or delete .* to reset/);
+    await expect(executeScenario(scenario, { modelOverride: "claude-sonnet-5", sessionId: "ci" })).rejects.toThrow(/or delete .* to reset/);
     expect(existsSync(join(dir, "PRIOR.txt"))).toBe(true);
   });
 
@@ -131,7 +133,9 @@ describe("execute — pinned-session cross-project guard", () => {
     const dir = seedPinnedDir(root, "guard-c", "ci", { originKey: "deadbeefdeadbeef", sourceHint: "/other/proj" });
     writeFileSync(join(dir, "session.json"), JSON.stringify({ sessionId: "ci", agentSessionId: "u" }));
     const { scenario } = sourcedScenario("guard-c");
-    await expect(executeScenario(scenario, { sessionId: "ci", resume: true })).rejects.toThrow(/belongs to another project/);
+    await expect(executeScenario(scenario, { modelOverride: "claude-sonnet-5", sessionId: "ci", resume: true })).rejects.toThrow(
+      /belongs to another project/,
+    );
   });
 
   // The turn-layout removal's write-side gate: `--resume` onto a pre-layout (root-only, no `turns/`) or a
@@ -155,7 +159,9 @@ describe("execute — pinned-session cross-project guard", () => {
     // `turns/<N>/` existed at all.
     writeFileSync(join(dir, "result.json"), JSON.stringify({ turn: 1, result: "success" }));
     writeFileSync(join(dir, "run.jsonl"), "{}\n");
-    await expect(executeScenario(scenario, { sessionId: "lg1", resume: true })).rejects.toThrow(/pre-layout run dir/);
+    await expect(executeScenario(scenario, { modelOverride: "claude-sonnet-5", sessionId: "lg1", resume: true })).rejects.toThrow(
+      /pre-layout run dir/,
+    );
     // A refused resume must not itself destroy the evidence it refused to touch.
     expect(existsSync(join(dir, "result.json"))).toBe(true);
   });
@@ -175,7 +181,9 @@ describe("execute — pinned-session cross-project guard", () => {
     writeFileSync(join(dir, "run.jsonl"), "{}\n");
     writeFileSync(join(dir, ".origin"), JSON.stringify({ originKey, sourceHint: sources[0], createdAt: new Date().toISOString() }));
     writeFileSync(join(dir, "session.json"), JSON.stringify({ sessionId: "mx1", agentSessionId: "u" }));
-    await expect(executeScenario(scenario, { sessionId: "mx1", resume: true })).rejects.toThrow(/MIXED run dir/);
+    await expect(executeScenario(scenario, { modelOverride: "claude-sonnet-5", sessionId: "mx1", resume: true })).rejects.toThrow(
+      /MIXED run dir/,
+    );
   });
 
   // Cross-tier resume fail-loud: a session STAMPED at one fidelity, resumed at another, must throw BEFORE
@@ -204,7 +212,9 @@ describe("execute — pinned-session cross-project guard", () => {
     writeFileSync(join(dir, ".origin"), JSON.stringify({ originKey, sourceHint: sources[0], createdAt: new Date().toISOString() }));
     // Stamped at container; the scenario resumes at hostloop → must fail loud.
     writeFileSync(join(dir, "session.json"), JSON.stringify({ sessionId: "tr1", agentSessionId: "u", fidelity: "container" }));
-    await expect(executeScenario(scenario, { sessionId: "tr1", resume: true })).rejects.toThrow(/created at fidelity "container"/);
+    await expect(executeScenario(scenario, { modelOverride: "claude-sonnet-5", sessionId: "tr1", resume: true })).rejects.toThrow(
+      /created at fidelity "container"/,
+    );
     // The refused resume didn't spawn and didn't destroy the turn evidence.
     expect(existsSync(join(dir, "turns", "1", "result.json"))).toBe(true);
   });

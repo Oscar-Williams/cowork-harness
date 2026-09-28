@@ -636,7 +636,7 @@ describe.skipIf(!can)("CLI arg guards — run --repeat (E1)", () => {
       return { code: r.status, out: r.stdout + r.stderr };
     };
     withRuns(["stats", "--reindex"]);
-    const r = withRuns(["run", "pricey.yaml", "--max-budget-usd", "1.0"]);
+    const r = withRuns(["run", "pricey.yaml", "--max-budget-usd", "1.0", "--model", "claude-sonnet-5"]);
     expect(r.out).not.toMatch(/--max-budget-usd requires --repeat/);
     expect(r.out).toMatch(/refused before spending/);
     expect(r.code).toBe(2);
@@ -672,7 +672,7 @@ describe.skipIf(!can)("CLI arg guards — run --matrix (E3)", () => {
     const d = mkdtempSync(join(tmpdir(), "g-matrix-"));
     writeFileSync(join(d, "s.yaml"), "fidelity: container\nprompt: hi\n");
     writeFileSync(join(d, "m.yaml"), "baselines: [a, b]\n");
-    const r = run(["run", "s.yaml", "--matrix", "m.yaml", "--repeat", "2"], d);
+    const r = run(["run", "s.yaml", "--matrix", "m.yaml", "--repeat", "2", "--model", "claude-sonnet-5"], d);
     // The combination passes ARG validation (the former v1 rejection is gone). The fake baselines then
     // fail cell RESOLUTION — a run failure (1), observably distinct from a usage error (2).
     expect(r.code).toBe(1);

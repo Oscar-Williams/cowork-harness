@@ -43,7 +43,9 @@ import {
   parseSessionFile,
   slugForPath,
   FidelityMissingError,
+  unresolvedModelPreflight,
 } from "./execute.js";
+import { unresolvedModelRefusal } from "./model-provenance.js";
 import { UsageError, UnknownBaselineError, compactSchemaError } from "../errors.js";
 import { preflightBudget, preflightBatchBudget, batchBudgetTracker, estimateBatchCost, batchCostEstimateLine } from "./budget.js";
 
@@ -3971,6 +3973,11 @@ export async function cmdRecord(args: string[]) {
         // Path-INDEPENDENT: these are the real verdicts on any path, so they still refuse.
         const why = promptPolicyRejection(sc) ?? assertContradiction(sc);
         if (why) refusals.push({ file: f, message: why });
+        // Also path-independent: whether a model resolves depends on `--model` (applied batch-wide), the
+        // session and the environment, all of which this arm knows exactly as the real batch will. Opening
+        // the session is new I/O on this arm; a session that does not load is skipped, not refused.
+        const noModel = unresolvedModelPreflight(sc, modelOverride);
+        if (noModel) refusals.push({ file: f, message: noModel });
         // Path-dependent: reported, never gating. `preSpendVerdicts` re-runs promptPolicyRejection, which is
         // already covered above — drop that one here rather than reporting it twice.
         for (const v of preSpendVerdicts(sc, defaultCassettePath(sc.name), {
@@ -4112,6 +4119,10 @@ export async function cmdRecord(args: string[]) {
     // Exit 1, not the `fail()` default of 2 — see the refusal below for why the preview owes the real
     // command's code.
     if (contradiction) return fail("record", "usage", contradiction, undefined, asJson, 1);
+    // The real record refuses a scenario that resolves no model (executeScenario, and the pre-flight below),
+    // with exit 1. This arm opens the scenario's session to answer it, so the preview agrees.
+    const noModel = unresolvedModelPreflight(scenario, modelOverride);
+    if (noModel) return fail("record", "usage", noModel, undefined, asJson, 1);
     // mirror the EXACT default cassette path recordScenarioObject uses (slugForPath via the shared
     // defaultCassettePath helper) so a name with spaces/separators reports the same path it writes.
     const cassettePath = p.options["--out"] ?? defaultCassettePath(scenario.name);
@@ -4258,6 +4269,30 @@ export async function cmdRecord(args: string[]) {
       const rc = readCassette(cp);
       if (!("error" in rc)) staleNames.push(rc.cassette.scenario.name);
     }
+    // Every item must resolve a model, checked before the first re-record for the same reason as the budget:
+    // an item refused mid-batch would come after the earlier ones were paid for. Each item is resolved the way
+    // the loop below resolves it (its on-disk source, or the embedded snapshot under --from-embedded); one
+    // that cannot be resolved or loaded here is left to the loop, which reports it.
+    const staleUnpinned: string[] = [];
+    for (const { path: cp } of stale) {
+      const rc = readCassette(cp);
+      if ("error" in rc) continue;
+      const src = _resolveRerecordSource(cp, rc.cassette);
+      let sc: Scenario | undefined;
+      if (src.path) {
+        try {
+          sc = parseScenarioFile(src.path);
+        } catch {
+          continue;
+        }
+      } else if (fromEmbedded) {
+        const sessionRef = rc.cassette.scenario.session === "(inline)" ? "(inline)" : join(dirname(cp), rc.cassette.scenario.session);
+        sc = { ...rc.cassette.scenario, session: sessionRef };
+      }
+      if (sc && unresolvedModelPreflight(sc, modelOverride)) staleUnpinned.push(src.path ?? cp);
+    }
+    if (staleUnpinned.length)
+      return fail("record", "usage", `record: ${unresolvedModelRefusal(staleUnpinned.join(", "))}`, undefined, asJson, 1);
     if (maxBudgetUsd !== undefined) {
       preflightBatchBudget("record", staleNames, maxBudgetUsd, asJson);
       if (concurrency > 1) warn(CONCURRENCY_BUDGET_CAVEAT(concurrency));
@@ -4405,6 +4440,18 @@ export async function cmdRecord(args: string[]) {
       );
     }
 
+    // Every scenario must resolve a model (`--model`, its session's `model:`, or COWORK_HARNESS_MODEL). Checked
+    // for the whole batch before the first spawn, as the budget is below; each offender is named. Exit 1, like
+    // the other refusals of a scenario that loaded. An unparseable file is already listed as broken.
+    const unpinned = disc.scenarios.filter((f) => {
+      try {
+        return unresolvedModelPreflight(parseScenarioFile(f), modelOverride) !== undefined;
+      } catch {
+        return false;
+      }
+    });
+    if (unpinned.length) return fail("record", "usage", `record: ${unresolvedModelRefusal(unpinned.join(", "))}`, undefined, asJson, 1);
+
     const total = disc.scenarios.length;
     // Budget pre-flight for the whole batch, BEFORE the first spawn — same rationale as the redaction
     // preflight below and as `run`'s dir sweep: a refusal that spends money before refusing is not one.
@@ -4487,6 +4534,10 @@ export async function cmdRecord(args: string[]) {
   // gate (worst observed cost from this scenario's own history; loud degradation when it has none).
   // Reads the scenario parsed above — the second parse (and its divergent catch, which is why this flag
   // used to change a broken file's exit code) is gone. `preflightBudget` never throws; it `fail()`s.
+  // The same model check executeScenario makes, made here so the refusal comes before the recording's own
+  // pre-flight warnings and matches `record --dry-run` exactly. Exit 1, the record split's pre-spend code.
+  const noModel = unresolvedModelPreflight(scenario!, modelOverride);
+  if (noModel) return fail("record", "usage", `record: ${noModel}`, undefined, asJson, 1);
   if (maxBudgetUsd !== undefined) preflightBudget("record", scenario!.name, maxBudgetUsd, asJson);
   // `--decider-dir` opens an in-band file rendezvous for the driving agent; close it after the run
   // (mirrors `run`'s one-channel lifecycle).

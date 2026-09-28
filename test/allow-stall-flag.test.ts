@@ -46,7 +46,7 @@ describe.skipIf(!can)("--allow-stall is accepted by the open-ended lanes", () =>
     const d = mkdtempSync(join(tmpdir(), "allow-stall-"));
     mkdirSync(join(d, "plugin"));
     writeFileSync(join(d, "plugin", "SKILL.md"), "---\nname: p\ndescription: d\n---\nbody\n");
-    const r = cli(["probe-dispatch", "./plugin", "hi", "--allow-stall", "--fidelity", "container"], d, {
+    const r = cli(["probe-dispatch", "./plugin", "hi", "--allow-stall", "--fidelity", "container", "--model", "claude-sonnet-5"], d, {
       COWORK_HARNESS_FORBID_SPAWN: "1",
     });
     expect(r.out).not.toMatch(/unknown flag/);
