@@ -16,7 +16,7 @@ import {
 } from "./types.js";
 import { writeAllSync } from "./io.js";
 import { loadBaseline, BASELINES_DIR, cmpVersionStrings, sha256File, countStringInFile, newestStagedSibling } from "./baseline.js";
-import { loadSession, resolveSessionPaths, applySessionOverrides, expandUserPath } from "./session.js";
+import { loadSession, resolveSessionPaths, applySessionOverrides } from "./session.js";
 import {
   executeScenario,
   parseScenarioFile,
@@ -65,6 +65,7 @@ import {
   applyParsedCommandGlobals,
   isCommandGlobalFlag,
   recordLeadingGlobals,
+  setRunsDir,
   stripCommandGlobals,
   withCommandGlobals,
 } from "./run/command-globals.js";
@@ -806,7 +807,7 @@ async function main() {
       );
     }
     argv.splice(rdIdx, rdIsEquals ? 1 : 2);
-    process.env.COWORK_HARNESS_RUNS_DIR = expandUserPath(runDirVal);
+    setRunsDir(runDirVal);
   }
 
   // Snapshot what is set BEFORE any .env file loads, so a --dotenv given AFTER the subcommand (applied later,

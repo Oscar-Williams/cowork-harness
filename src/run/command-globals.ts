@@ -39,6 +39,12 @@ interface EnvState {
 let state: EnvState | undefined;
 const applied = new Set<CommandGlobalFlag>();
 
+/** THE one resolver for a `--run-dir` value, before or after the subcommand: a shim over
+ *  COWORK_HARNESS_RUNS_DIR (flag > env > default), relative to the cwd, `~` expanded. */
+export function setRunsDir(value: string): void {
+  process.env.COWORK_HARNESS_RUNS_DIR = expandUserPath(value);
+}
+
 /** Called once by main(), after the leading flags are handled and BEFORE any .env file is loaded. */
 export function recordLeadingGlobals(leading: Record<CommandGlobalFlag, boolean>): void {
   state = { protectedKeys: new Set(Object.keys(process.env)), leading };
@@ -51,7 +57,7 @@ export function applyCommandGlobal(command: string, flag: CommandGlobalFlag, val
   applied.add(flag);
   if (value.trim() === "") fail(command, "usage", `${flag} requires a path (none provided)`, undefined, json);
   if (flag === "--run-dir") {
-    process.env.COWORK_HARNESS_RUNS_DIR = expandUserPath(value);
+    setRunsDir(value);
     // The runs root is now the user's explicit choice: a --dotenv applied after this must not replace it.
     state?.protectedKeys.add("COWORK_HARNESS_RUNS_DIR");
     return;
