@@ -84,6 +84,20 @@ All notable changes to this project are documented here. The format is based on
   from `toolCalls` as `unclassified`. **`--per-call`** adds one row per call with its duration, or "no result" when it
   never paired.
 
+- **`--dotenv` and `--run-dir` after the subcommand, on every command.** Both still work before it.
+  Each command's own parser takes them, so a `--dotenv`-shaped value of another flag is never taken as
+  the flag. Precedence is unchanged (`process.env` > `--dotenv` > `./.env` > `<install>/.env`;
+  `--run-dir` > `COWORK_HARNESS_RUNS_DIR` > default). Giving either flag both before and after the
+  subcommand, or twice, is a usage error. A `--dotenv` file given after the subcommand that would change
+  `COWORK_HARNESS_OUTPUT_FORMAT` is refused, because the output format is fixed before a command's flags
+  are parsed; put that `--dotenv` before the subcommand instead.
+- **One `scaffold` command.** `cowork-harness scaffold --name … --prompt … [--skill …] [--out …]` builds
+  a scenario from flags alone by running the bundled `scenario.py scaffold` (same flags, self-linted,
+  YAML only). `scaffold <run-id | run-dir>` still turns a kept run into a scenario. Combining a run id
+  with the flag-built form, or passing `--output-format json` to it, is a usage error that says why.
+- **`--allow-stall` on `skill` and `probe-dispatch`:** the open-ended lanes' spelling of `allow_stall:
+  true`, which these lanes had no `assert:` block to carry. `critique` forwards it to the task turn.
+
 ### Changed
 
 - **The companion skill's `SKILL.md` is now a short entrypoint (about 14 KB, down from 103 KB).** It keeps
@@ -99,6 +113,18 @@ All notable changes to this project are documented here. The format is based on
 - **SPEC §12 now states for the RunResult envelope what it already stated for the others:** renaming or
   removing a key, or changing an existing key's meaning, is breaking; adding one is not.
 
+- **The `stalled` and `ended_with_question` messages name the opt-out the lane accepts:** `pass
+  --allow-stall` on `skill` / `probe-dispatch`, `assert allow_stall: true` on a scenario.
+- **A host-inventory flag given to the wrong command names the command that owns it.**
+  `verify-cassettes` or `replay` with `--allow-host-inventory-fixture` / `-findings` points at `record`;
+  `record --allow-host-inventory` points at `verify-cassettes --allow-host-inventory <regex>`. Still a
+  usage error (exit 2).
+- **`python3 scenario.py lint` run directly prints a note on stderr** that the scenario loader was
+  skipped and `cowork-harness lint` also checks that each file loads. Its stdout and exit code are
+  unchanged.
+- **A trailing `--dotenv` / `--run-dir` is no longer refused** with "is a GLOBAL flag and must come
+  BEFORE the subcommand"; it is applied (see *Added*).
+
 ### Fixed
 
 - **Recipe 5 (evaluate answer quality) no longer overclaims.** A rep where the skill was not invoked did
@@ -111,6 +137,11 @@ All notable changes to this project are documented here. The format is based on
   same.
 - **"Commit the skill first" is now "freeze a recoverable source"** — commit it, or snapshot the skill
   folder next to the run dir — in the measurement reference, Recipe 6 and the `SKILL.md` measure line.
+- **Docs: what `replay` does with a frozen top-level key an older CLI does not know.** The skill and
+  `docs/scenario.md` said such a key (e.g. `lane:`) is "silently ignored" and "can flip a verdict". The
+  cassette's version stamp decides instead: a key that changes what a verdict means raises the stamp,
+  so an older `replay` / `verify-cassettes` refuses the cassette as too new; a meaning-neutral key is
+  ignored by design.
 
 ## [3.10.0] — 2026-09-27
 
