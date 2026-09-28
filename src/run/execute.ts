@@ -50,7 +50,8 @@ import {
 } from "../runtime/image-capabilities.js";
 import { instanceName, VM_WORK_HOST } from "../runtime/lima.js";
 import { ResourceSampler, makeSampleOnce, foldResources, resolveIntervalMs } from "../runtime/resource-sampler.js";
-import { tierVacuousTool, tierVacuousMessage } from "./tier-vacuous-tools.js";
+import { tierVacuousTool, tierVacuousMessage, objectFormTierVacuous } from "./tier-vacuous-tools.js";
+import { toolCallObjectRegexes } from "../tool-call-assert.js";
 import { decideLoopFromBaseline, readGateFlag, readGateNumber, resolveSkillDiscoveryGates } from "../loop-decision.js";
 import { makeWebFetchDedupCache } from "../hostloop/webfetch-dedup.js";
 import type { WebFetchProvenance } from "../hostloop/workspace-handler.js";
@@ -615,8 +616,12 @@ export async function executeScenario(scenario: Scenario, opts: ExecuteOptions =
     // greening the sub-agent form of the identical claim.
     for (const key of ["tool_not_called", "subagent_tool_absent"] as const) {
       const pattern = a[key];
-      if (typeof pattern !== "string") continue;
-      const finding = tierVacuousTool(pattern, effectiveFidelity, viaApiForVacuity);
+      if (pattern === undefined) continue;
+      // The object form of tool_not_called is refused only when EVERY listed tool is unserved.
+      const finding =
+        typeof pattern === "string"
+          ? tierVacuousTool(pattern, effectiveFidelity, viaApiForVacuity)
+          : objectFormTierVacuous(pattern, effectiveFidelity, viaApiForVacuity);
       if (finding) throw new UsageError(tierVacuousMessage(finding, key, scenario.name));
     }
   }
@@ -2029,6 +2034,13 @@ export function nestedRegexLeaves(a: Assertion): [label: string, pattern: string
     if (holder === undefined || holder === null || typeof holder !== "object") continue;
     const v = (holder as Record<string, unknown>)[child];
     if (typeof v === "string") out.push([`${parent}.${child}`, v]);
+  }
+  // The object form of tool_called / tool_not_called nests regexes up to two levels down (`input.<field>`,
+  // `result.matches`), under author-chosen field names — so it is enumerated by the SAME helper its
+  // evaluator compiles from, never by a table row.
+  for (const key of ["tool_called", "tool_not_called"] as const) {
+    const v = a[key];
+    if (v !== undefined && typeof v === "object") for (const r of toolCallObjectRegexes(v)) out.push([`${key}.${r.where}`, r.source]);
   }
   return out;
 }
