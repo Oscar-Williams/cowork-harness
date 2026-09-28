@@ -293,6 +293,7 @@ Conflating these is the **biggest landmine**. An assertion key has two independe
   not: match prose with `transcript_matches` / `transcript_contains` (stable lexical markers only —
   not semantic content the model paraphrases, which re-records red); check structured JSON with YAML
   `artifact_json` (or the [pytest lane](https://github.com/yaniv-golan/cowork-harness/blob/main/python/README.md) for complex predicates), not via a transcript substring.
+  To check a command that RAN (not one the agent mentioned), use the object form `tool_called: {tool, input: {command: <regex>}, scope?, result?}` — see [scenario-schema.md](references/scenario-schema.md).
 - **Axis B — survives `replay`?** *Independent of Axis A.* On the token-free `replay` lane, only
   **content keys** evaluate; filesystem / egress keys are skipped (live-only) — loudly, via an
   `::warning::` annotation, not a silent no-op. A key

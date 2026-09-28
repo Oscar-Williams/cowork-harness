@@ -168,7 +168,8 @@ degrade the advice. It is real work to calibrate; these steps are the traps that
    first branch that **can never grade true**, no matter how the skill behaves — the evidence simply
    isn't in the document. Such a claim looks reasonable, survives drafting, and silently caps your pass
    rate. Assert tool use with the structural keys instead (`tool_called`, `present_files_called`,
-   `subagent_dispatched`, `hook_blocked`), and reserve `semantic_matches` for what the agent *said* or
+   `subagent_dispatched`, `hook_blocked`) — and, for what a command actually ran, the object form
+   `tool_called: {tool: [Bash, mcp__workspace__bash], input: {command: <regex>}}` — and reserve `semantic_matches` for what the agent *said* or
    *wrote*. For a fan-out skill whose real work happens in sub-agents, add `include_subagent_text: true`.
    If the run authors more than a couple of files, add `evidence_files: ["outputs/report.md"]` naming the
    deliverable — otherwise the 64 KiB capture budget is spent alphabetically and an unrelated intermediate
