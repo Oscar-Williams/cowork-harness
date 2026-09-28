@@ -38,7 +38,10 @@ All notable changes to this project are documented here. The format is based on
   `tool-input-shell-tier` (INFO: a `Bash` command check at `hostloop`/`cowork` should list both shells).
   The tier-vacuity and gate-witness lints now read the object form.
 - **`record` warns** when redaction rewrote a negative tool-input regex, or the bytes it matched. It
-  prints the warning before the existing redaction-verdict check refuses the write.
+  prints the warning before the existing redaction-verdict check refuses the write. This record-time
+  comparison is the exact guard. `lint` resolves the policy differently: it reads `.cowork-redact.json`
+  from the current directory and the scenario's directory only, while `record` also reads the cassette's
+  directory, so a policy that sits only next to the cassette is invisible to `lint`.
 
 ## [3.10.0] — 2026-09-27
 
