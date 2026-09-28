@@ -379,6 +379,9 @@ export const ToolCalledObject = z
         min: z.number().int().nonnegative().optional().describe("minimum satisfying calls (default 1)"),
         max: z.number().int().nonnegative().optional().describe("maximum satisfying calls"),
       })
+      .refine((c) => c.min === undefined || c.max === undefined || c.min <= c.max, {
+        message: "count.min is greater than count.max — no number of calls can satisfy it",
+      })
       .optional()
       .describe("how many calls must satisfy every predicate; default `{min: 1}`"),
   })

@@ -224,6 +224,15 @@ export function checkToolCallObject(
         ? ` No ${shownTool} call was recorded at all.`
         : "") + (scopeHint ? ` ${scopeHint}.` : "");
 
+  // What a negative pass did NOT look at: name-matching calls outside the scope, by origin.
+  const notChecked = (): string => {
+    const by = new Map<string, number>();
+    for (const c of named) if (!inScope(c)) by.set(c.origin, (by.get(c.origin) ?? 0) + 1);
+    if (!by.size) return "";
+    const label = (o: string) => (o === "subagent" ? "sub-agent" : o === "main" ? "main-agent" : "unknown-origin");
+    const parts = [...by].map(([o, n]) => `${n} ${label(o)} call${n === 1 ? "" : "s"}`);
+    return `; ${parts.join(", ")} not checked (use \`scope: any\` to include ${by.size === 1 && [...by.values()][0] === 1 ? "it" : "them"})`;
+  };
   if (negative) {
     if (satisfied.length)
       return fail(
@@ -236,7 +245,9 @@ export function checkToolCallObject(
       );
     return {
       pass: true,
-      evidence: `tool_not_called: no ${shownTool} call in scope ${scope} satisfied every predicate (${named.length} name-matching call(s) checked)`,
+      evidence:
+        `tool_not_called: no ${shownTool} call satisfied every predicate — ${named.filter(inScope).length} in scope ${scope} checked` +
+        notChecked(),
     };
   }
   const min = (o as ToolCalledObject).count?.min ?? 1;

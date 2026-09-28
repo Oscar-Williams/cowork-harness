@@ -824,6 +824,19 @@ def _lint_tool_call_object_form(items, fidelity, path):
                                 path,
                             )
                         )
+            # I: `count: {min: 0}` with no max is satisfied by any number of calls, including none.
+            _cnt = v.get("count") if key == "tool_called" else None
+            if isinstance(_cnt, dict) and _numeric(_cnt.get("min")) == 0 and "max" not in _cnt:
+                out.append(
+                    Finding(
+                        "INFO",
+                        "tool-called-always-passes",
+                        "`tool_called` with `count: {min: 0}` and no `max` is satisfied by any number of calls, "
+                        "including none — it asserts nothing.",
+                        "Add a `max` (e.g. `count: {max: 0}` means \"never\"), raise `min`, or drop the assertion.",
+                        path,
+                    )
+                )
             # I: a literal `Bash` command check at a tier that routes shell through the workspace tool.
             tools = v.get("tool")
             tools = [tools] if isinstance(tools, str) else tools
