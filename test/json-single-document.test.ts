@@ -15,7 +15,7 @@ import { resolve, join } from "node:path";
 //
 // Deliberately absent (JSON-mode gaps of a different kind, not double emission): `critique`'s usage and
 // pre-flight errors print no envelope; `gates <dir>` is a JSONL stream, not a single document;
-// `chat` / `migrate-run-dir` / `prune` do not accept --output-format.
+// `chat` / `migrate-run-dir` / `prune` / `sync` do not accept --output-format.
 const CLI = resolve("dist/cli.js");
 const can = existsSync(CLI);
 
@@ -56,16 +56,15 @@ describe.skipIf(!can)("--output-format json — exactly one JSON document on std
     [["record", `${missing}.yaml`], 2],
     [["record", broken, "--dry-run"], 1],
     [["record", empty, "--dry-run"], 2, false], // nothing discovered: ok:true beside exit 2
-    [["record", "--rerecord-stale", "--dry-run", empty], 2],
+    [["record", "--rerecord-stale", "--dry-run", empty], 2], // the flag-combination refusal, not --rerecord-stale's own paths
     [["replay", missing], 2],
     [["replay", empty], 2],
     [["verify-cassettes", missing], 2],
     [["rehash", missing], 2],
     [["doctor", "--bogus"], 2],
-    [["lint"], 2],
+    [["lint"], 2], // the TS wrapper's fallback envelope: python's usage error is not JSON on --json
     [["lint", join(broken, "b.yaml")], 1],
     [["lint-skill"], 2],
-    [["sync", "extra"], 2],
     [["no-such-command"], 2],
   ];
 
