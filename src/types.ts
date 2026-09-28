@@ -1530,7 +1530,7 @@ export interface RunResult {
   // exists for this run (replayErrorResult — no run ever happened; a corrupt timeline; a cassette with
   // none). Populated for buildPartialResult too. Wall gap between tool_use and tool_result, NOT isolated
   // execution time — see foldToolDurations's doc comment (src/run/timeline-fold.ts). `calls`/`totalMs`/
-  // `maxMs` are over PAIRED calls (0 when calls is 0); `unpaired` counts calls that never got a result.
+  // `maxMs` are over PAIRED calls (0 when calls is 0); `unpaired` counts calls never paired with a `tool_result` the harness observed.
   // Covers main agent AND sub-agent calls. Result files written before `unpaired` existed lack it.
   // `unpaired` is optional in this READER type: the writer always emits it, but an older result.json (which
   // verify-run passes through verbatim) lacks it — absent means unknown, not 0.

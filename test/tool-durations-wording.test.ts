@@ -64,9 +64,11 @@ describe("SPEC §12 RunResult additive-key sentence", () => {
   it("does not claim the other envelope bullets say the same (they cover rename/remove only)", () => {
     expect(bullet).not.toMatch(/as for the envelopes below/);
   });
-  it("says the set of entries in a map-valued key is not the key's meaning", () => {
-    expect(bullet).toMatch(/set of entries in a map-valued key/);
-    expect(bullet).toMatch(/toolDurations/);
+  it("says toolDurations' entry set is not its meaning, scoped to that key rather than every map", () => {
+    expect(bullet).toMatch(/For `toolDurations`[^.]*the set of entries is not the key's meaning/);
     expect(bullet).toMatch(/calls: 0/);
+    // toolCounts' presence means "was called": a blanket map rule would contradict it.
+    expect(bullet).not.toMatch(/set of entries in a map-valued key/);
+    expect(bullet).toMatch(/stated per key, not for every map/);
   });
 });
