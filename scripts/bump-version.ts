@@ -36,60 +36,82 @@ const SEMVER = /^\d+\.\d+\.\d+$/;
 // never matches.
 // ---------------------------------------------------------------------------
 
+/** A single pattern-scoped rewrite. `pattern` carries the `g` flag iff every occurrence is meant to be
+ *  rewritten; a pattern WITHOUT `g` rewrites only the first match, so a second occurrence would be left
+ *  stale silently — which is why the live-rewriter test pins those to exactly one match per file. */
+export interface Rewriter {
+  name: string;
+  pattern: RegExp;
+  replacement: (newVersion: string) => string;
+}
+
 /** Every `cowork-harness@^X.Y.Z` floor. CARET, not `>=`: `>=` crosses majors (measured — `@>=1.0.0`
  *  resolves 2.0.0), so an unbounded floor hands a consumer the next breaking release. */
-function bumpHarnessFloors(content: string, newVersion: string): string {
-  return content.replace(/cowork-harness@\^\d+\.\d+\.\d+/g, `cowork-harness@^${newVersion}`);
-}
+const HARNESS_FLOORS: Rewriter = {
+  name: "harness-floors",
+  pattern: /cowork-harness@\^\d+\.\d+\.\d+/g,
+  replacement: (v) => `cowork-harness@^${v}`,
+};
 
-/** A bare, backtick-delimited `` `@^X.Y.Z` `` floor with no `cowork-harness` prefix (README's Action-inputs mention + SKILL.md's `Pin `@^X`` phrase). */
-function bumpBareFloors(content: string, newVersion: string): string {
-  return content.replace(/`@\^\d+\.\d+\.\d+`/g, `\`@^${newVersion}\``);
-}
+/** A bare, backtick-delimited `` `@^X.Y.Z` `` floor with no `cowork-harness` prefix (SKILL.md's `Pin `@^X`` phrase). */
+const BARE_FLOORS: Rewriter = {
+  name: "bare-floors",
+  pattern: /`@\^\d+\.\d+\.\d+`/g,
+  replacement: (v) => `\`@^${v}\``,
+};
 
 /** The single `"version": "X.Y.Z"` JSON field in a file that carries exactly one such key. */
-function bumpJsonVersionField(content: string, newVersion: string): string {
-  return content.replace(/"version":\s*"\d+\.\d+\.\d+"/, `"version": "${newVersion}"`);
-}
+const JSON_VERSION_FIELD: Rewriter = {
+  name: "json-version-field",
+  pattern: /"version":\s*"\d+\.\d+\.\d+"/,
+  replacement: (v) => `"version": "${v}"`,
+};
 
 /** SKILL.md frontmatter `version:` line. */
-function bumpFrontmatterVersion(content: string, newVersion: string): string {
-  return content.replace(/^(\s*version:\s*)\d+\.\d+\.\d+(\s*)$/m, `$1${newVersion}$2`);
-}
+const FRONTMATTER_VERSION: Rewriter = {
+  name: "frontmatter-version",
+  pattern: /^(\s*version:\s*)\d+\.\d+\.\d+(\s*)$/m,
+  replacement: (v) => `$1${v}$2`,
+};
 
 /**
  * SKILL.md `tracks-harness: cowork-harness X.Y.Z (baseline desktop-A.B.C)` line — bumps only the
  * harness-version token immediately after `cowork-harness `, leaving the `(baseline …)` suffix
  * completely untouched.
  */
-function bumpTracksHarnessLine(content: string, newVersion: string): string {
-  return content.replace(/(tracks-harness:\s*cowork-harness\s+)\d+\.\d+\.\d+/, `$1${newVersion}`);
-}
+const TRACKS_HARNESS_LINE: Rewriter = {
+  name: "tracks-harness-line",
+  pattern: /(tracks-harness:\s*cowork-harness\s+)\d+\.\d+\.\d+/,
+  replacement: (v) => `$1${v}`,
+};
 
 /** SKILL.md `**Version note:** … track \`cowork-harness X.Y.Z\`` line. */
-function bumpVersionNoteLine(content: string, newVersion: string): string {
-  return content.replace(/(track `cowork-harness )\d+\.\d+\.\d+(`)/, `$1${newVersion}$2`);
-}
+const VERSION_NOTE_LINE: Rewriter = {
+  name: "version-note-line",
+  pattern: /(track `cowork-harness )\d+\.\d+\.\d+(`)/,
+  replacement: (v) => `$1${v}$2`,
+};
 
 /** SKILL.md `needs **≥ X.Y.Z**` sentence. */
-function bumpNeedsFloor(content: string, newVersion: string): string {
-  return content.replace(/(needs \*\*≥ )\d+\.\d+\.\d+(\*\*)/, `$1${newVersion}$2`);
-}
-
-/** SKILL.md `What the ≥ X.Y.Z floor gates` heading. */
-function bumpFloorGatesHeading(content: string, newVersion: string): string {
-  return content.replace(/(What the ≥ )\d+\.\d+\.\d+( floor gates)/, `$1${newVersion}$2`);
-}
+const NEEDS_FLOOR: Rewriter = {
+  name: "needs-floor",
+  pattern: /(needs \*\*≥ )\d+\.\d+\.\d+(\*\*)/,
+  replacement: (v) => `$1${v}$2`,
+};
 
 /** references/*.md `` Tracks `cowork-harness X.Y.Z` `` stamp. */
-function bumpTracksStamp(content: string, newVersion: string): string {
-  return content.replace(/Tracks `cowork-harness \d+\.\d+\.\d+`/g, `Tracks \`cowork-harness ${newVersion}\``);
-}
+const TRACKS_STAMP: Rewriter = {
+  name: "tracks-stamp",
+  pattern: /Tracks `cowork-harness \d+\.\d+\.\d+`/g,
+  replacement: (v) => `Tracks \`cowork-harness ${v}\``,
+};
 
 /** ci-recipe.md's `` e.g. `version: "X.Y.Z"` `` example. */
-function bumpCiRecipeExample(content: string, newVersion: string): string {
-  return content.replace(/(e\.g\. `version: ")\d+\.\d+\.\d+(")/, `$1${newVersion}$2`);
-}
+const CI_RECIPE_EXAMPLE: Rewriter = {
+  name: "ci-recipe-example",
+  pattern: /(e\.g\. `version: ")\d+\.\d+\.\d+(")/,
+  replacement: (v) => `$1${v}$2`,
+};
 
 // ---------------------------------------------------------------------------
 // Per-file composition. Each target file gets exactly the pattern set the release-process plan
@@ -112,6 +134,36 @@ const REPLAYS_README = "examples/replays/README.md";
 const COMPANION_SKILL_MD = "docs/companion-skill.md";
 const CLI_MD = "docs/cli.md";
 const CI_MD = "docs/ci.md";
+
+/** The rewriters each target file receives, applied in order. Exported so a test can run every one of
+ *  them against the REAL file and prove it still matches: a rewriter whose pattern matches nothing is a
+ *  silent no-op at bump time, and that is how a dead heading rewriter went unnoticed for releases. */
+export const FILE_REWRITERS: Readonly<Record<string, readonly Rewriter[]>> = {
+  "package.json": [JSON_VERSION_FIELD],
+  [MARKETPLACE_JSON]: [JSON_VERSION_FIELD],
+  [PLUGIN_JSON]: [JSON_VERSION_FIELD],
+  [SKILL_MD]: [
+    FRONTMATTER_VERSION,
+    TRACKS_HARNESS_LINE,
+    VERSION_NOTE_LINE,
+    NEEDS_FLOOR,
+    HARNESS_FLOORS,
+    BARE_FLOORS, // the `Pin `@^X`` phrase — a bare floor, like README's
+  ],
+  [SCENARIO_SCHEMA_MD]: [TRACKS_STAMP],
+  [FIDELITY_AND_ANSWERS_MD]: [TRACKS_STAMP],
+  [TASK_RECIPES_MD]: [TRACKS_STAMP],
+  [CRITIQUE_MD]: [TRACKS_STAMP],
+  [CI_RECIPE_MD]: [TRACKS_STAMP, CI_RECIPE_EXAMPLE, HARNESS_FLOORS],
+  [REPLAYS_README]: [HARNESS_FLOORS],
+  // No BARE_FLOORS on these four: none carries a bare `@^X` any more (README's Action-inputs mention
+  // moved out in the router split), so it was a registered no-op — the dead-rewriter shape the live test
+  // below exists to catch. Re-add it here only together with a bare floor it actually matches.
+  [COMPANION_SKILL_MD]: [HARNESS_FLOORS],
+  [CLI_MD]: [HARNESS_FLOORS],
+  [CI_MD]: [HARNESS_FLOORS],
+  "README.md": [HARNESS_FLOORS],
+};
 
 /** Files this script knows how to edit, in the order they're reported. */
 export const TARGET_FILES: readonly string[] = [
@@ -136,54 +188,9 @@ export const TARGET_FILES: readonly string[] = [
  * exercised directly on fixture strings in tests without touching the repo.
  */
 export function rewriteFileContent(relPath: string, content: string, newVersion: string): string {
-  switch (relPath) {
-    case "package.json":
-    case MARKETPLACE_JSON:
-    case PLUGIN_JSON:
-      return bumpJsonVersionField(content, newVersion);
-
-    case SKILL_MD: {
-      let next = content;
-      next = bumpFrontmatterVersion(next, newVersion);
-      next = bumpTracksHarnessLine(next, newVersion);
-      next = bumpVersionNoteLine(next, newVersion);
-      next = bumpNeedsFloor(next, newVersion);
-      next = bumpFloorGatesHeading(next, newVersion);
-      next = bumpHarnessFloors(next, newVersion);
-      next = bumpBareFloors(next, newVersion); // the `Pin `@^X`` phrase — a bare floor, like README's
-      return next;
-    }
-
-    case SCENARIO_SCHEMA_MD:
-    case FIDELITY_AND_ANSWERS_MD:
-    case TASK_RECIPES_MD:
-    case CRITIQUE_MD:
-      return bumpTracksStamp(content, newVersion);
-
-    case CI_RECIPE_MD: {
-      let next = content;
-      next = bumpTracksStamp(next, newVersion);
-      next = bumpCiRecipeExample(next, newVersion);
-      next = bumpHarnessFloors(next, newVersion);
-      return next;
-    }
-
-    case REPLAYS_README:
-      return bumpHarnessFloors(content, newVersion);
-
-    case "README.md":
-    case COMPANION_SKILL_MD:
-    case CLI_MD:
-    case CI_MD: {
-      let next = content;
-      next = bumpHarnessFloors(next, newVersion);
-      next = bumpBareFloors(next, newVersion);
-      return next;
-    }
-
-    default:
-      throw new Error(`bump-version: no rewrite rule registered for "${relPath}"`);
-  }
+  const rewriters = Object.hasOwn(FILE_REWRITERS, relPath) ? FILE_REWRITERS[relPath] : undefined;
+  if (!rewriters) throw new Error(`bump-version: no rewrite rule registered for "${relPath}"`);
+  return rewriters.reduce((next, rw) => next.replace(rw.pattern, rw.replacement(newVersion)), content);
 }
 
 export interface FileEdit {
