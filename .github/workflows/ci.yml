@@ -476,6 +476,9 @@ jobs:
       - name: Run e2e self-tests (L0 / L1 / hostloop — microvm excluded; needs a real VM)
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          # A run must resolve a model. e2e/sessions/skill.yaml pins one; minimal.yaml cannot without
+          # staling a committed cassette's session fingerprint, so the env default fills it in.
+          COWORK_HARNESS_MODEL: claude-sonnet-5
         run: |
           for s in smoke-askuserquestion smoke-multiselect smoke-multiselect-deciderdir smoke-l1-container smoke-l1-egress smoke-present-files smoke-semantic-evidence-files canary-hostloop; do
             node dist/cli.js run "e2e/scenarios/$s.yaml" || exit 1

@@ -83,6 +83,14 @@ inputs:
       section for a worked self-hosted-runner example.
     required: false
     default: ""
+  model:
+    description: >-
+      Model id for the live `run` lane, e.g. `claude-sonnet-5`. Exported as COWORK_HARNESS_MODEL, which
+      fills in only when the scenario's session sets no `model:` and no `--model` is passed. A `run` that
+      resolves no model is refused (exit 2). Empty (the default) exports nothing, so a job-level
+      COWORK_HARNESS_MODEL still applies. Unused by replay/lint/verify-cassettes.
+    required: false
+    default: ""
 
 outputs:
   ok:
@@ -134,8 +142,11 @@ runs:
         HARNESS_STRICT: ${{ inputs.strict }}
         HARNESS_FAIL_ON_SKILL_DRIFT: ${{ inputs.fail-on-skill-drift }}
         HARNESS_EXTRA_ARGS: ${{ inputs.extra-args }}
+        HARNESS_MODEL: ${{ inputs.model }}
       run: |
         set +e
+        # Only when set: an empty step-level value would mask a job-level COWORK_HARNESS_MODEL.
+        [ -n "$HARNESS_MODEL" ] && export COWORK_HARNESS_MODEL="$HARNESS_MODEL"
         args=("$HARNESS_COMMAND" "$HARNESS_PATH" "--output-format" "json")
         # --strict is accepted only by replay/lint/lint-skill/analyze-skill; verify-cassettes/run exit 2
         # ("unknown flag") on it, so it must NOT be forwarded to those two commands.
