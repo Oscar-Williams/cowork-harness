@@ -145,7 +145,7 @@ behind each, is [`references/gotchas.md`](references/gotchas.md).
 - **Debug:** the triage table in `references/debugging.md` → `inspect`, `trace --view …`,
   `verify-run`, `diff`. For a green you don't trust: `replay --explain`, then the gotchas.
 - **Measure:** `--repeat N` for flakiness. `--ablate-skill` runs the control arm only; run the treatment
-  arm yourself, with the model pinned and the skill committed.
+  arm yourself, with the model pinned and a recoverable source frozen.
 
 ## References — where the detail lives
 

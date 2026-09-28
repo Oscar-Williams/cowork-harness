@@ -868,7 +868,11 @@ Covered-surface changes follow semver as of `1.0.0` — see [RELEASING.md](./REL
 - **Baseline JSON shape** — the `baselines/desktop-*.json` field structure (CI's committed source of
   truth; consumers commit and diff these).
 - **RunResult envelope** — `schema/run-result.json` under `--output-format json` (§11): the
-  `ok` / `results[]` / `error` shape and the verdict-signal codes (§11.0).
+  `ok` / `results[]` / `error` shape and the verdict-signal codes (§11.0). Renaming or removing a key, or
+  changing what an existing key means, is breaking; adding one is not. For `toolDurations` (keyed by tool
+  name) the set of entries is not the key's meaning: adding an entry, such as a tool listed with
+  `calls: 0`, is additive. This is stated per key, not for every map — `toolCounts`, for example, lists
+  only tools that were called.
 - **`verify-cassettes` envelope** — `schema/verify-cassettes.json` under `--output-format json`
   (§11.1): the `command` / `ok` / `coverage` / `results[]` shape with the per-file
   `findings` / `staleness` / `unverifiable` / `notes` / `version` / `error` channels, and the exit-code

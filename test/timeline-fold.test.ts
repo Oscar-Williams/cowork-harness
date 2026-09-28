@@ -12,7 +12,7 @@ describe("foldToolDurations", () => {
       ev({ type: "tool_use", ts: 100, toolUseId: "t1", name: "Bash" }),
       ev({ type: "tool_result", ts: 340, toolUseId: "t1", isError: false }),
     ];
-    expect(foldToolDurations(timeline)).toEqual({ Bash: { calls: 1, totalMs: 240, maxMs: 240 } });
+    expect(foldToolDurations(timeline)).toEqual({ Bash: { calls: 1, totalMs: 240, maxMs: 240, unpaired: 0 } });
   });
 
   it("aggregates multiple calls to the same tool: calls/totalMs/maxMs", () => {
@@ -22,7 +22,7 @@ describe("foldToolDurations", () => {
       ev({ type: "tool_use", ts: 100, toolUseId: "t2", name: "Read" }),
       ev({ type: "tool_result", ts: 300, toolUseId: "t2", isError: false }),
     ];
-    expect(foldToolDurations(timeline)).toEqual({ Read: { calls: 2, totalMs: 250, maxMs: 200 } });
+    expect(foldToolDurations(timeline)).toEqual({ Read: { calls: 2, totalMs: 250, maxMs: 200, unpaired: 0 } });
   });
 
   it("keeps different tool names in separate buckets", () => {
@@ -33,21 +33,40 @@ describe("foldToolDurations", () => {
       ev({ type: "tool_result", ts: 25, toolUseId: "t2", isError: false }),
     ];
     expect(foldToolDurations(timeline)).toEqual({
-      Bash: { calls: 1, totalMs: 10, maxMs: 10 },
-      Read: { calls: 1, totalMs: 5, maxMs: 5 },
+      Bash: { calls: 1, totalMs: 10, maxMs: 10, unpaired: 0 },
+      Read: { calls: 1, totalMs: 5, maxMs: 5, unpaired: 0 },
     });
   });
 
-  it("excludes an unpaired tool_use (no matching tool_result — e.g. the run ended mid-call)", () => {
+  it("counts an unpaired tool_use (no matching tool_result — e.g. the run ended mid-call) instead of dropping it silently", () => {
     const timeline: TimelineEvent[] = [ev({ type: "tool_use", ts: 0, toolUseId: "t1", name: "Bash" })];
-    expect(foldToolDurations(timeline)).toEqual({});
+    // A tool whose only call never paired still gets an entry: calls/totalMs/maxMs are over PAIRED calls
+    // (0 here), and `unpaired` says a call happened that the timing cannot see.
+    expect(foldToolDurations(timeline)).toEqual({ Bash: { calls: 0, totalMs: 0, maxMs: 0, unpaired: 1 } });
   });
 
-  it("excludes a tool_use with no toolUseId (cannot be paired reliably)", () => {
+  it("counts unpaired calls next to paired ones of the same tool without touching the paired timing", () => {
     const timeline: TimelineEvent[] = [
-      ev({ type: "tool_use", ts: 0, name: "Bash" }),
+      ev({ type: "tool_use", ts: 0, toolUseId: "t1", name: "Bash" }),
+      ev({ type: "tool_result", ts: 40, toolUseId: "t1", isError: false }),
+      ev({ type: "tool_use", ts: 50, toolUseId: "t2", name: "Bash" }),
+    ];
+    expect(foldToolDurations(timeline)).toEqual({ Bash: { calls: 1, totalMs: 40, maxMs: 40, unpaired: 1 } });
+  });
+
+  it("does NOT count a tool_use with no toolUseId as unpaired — on a real stream that is the synthetic MCP echo of a call that already arrived with an id", () => {
+    // The echo (session.ts marks it `synthetic`; the timeline drops that flag) carries no id. Counting it
+    // would report every paired hostloop shell call as {calls: 1, unpaired: 1}.
+    const timeline: TimelineEvent[] = [
+      ev({ type: "tool_use", ts: 0, toolUseId: "t1", name: "mcp__workspace__bash" }),
+      ev({ type: "tool_use", ts: 1, name: "mcp__workspace__bash" }),
       ev({ type: "tool_result", ts: 10, toolUseId: "t1", isError: false }),
     ];
+    expect(foldToolDurations(timeline)).toEqual({ mcp__workspace__bash: { calls: 1, totalMs: 10, maxMs: 10, unpaired: 0 } });
+  });
+
+  it("ignores a tool_result with no matching tool_use (it pairs nothing and is not an unpaired CALL)", () => {
+    const timeline: TimelineEvent[] = [ev({ type: "tool_result", ts: 10, toolUseId: "orphan", isError: false })];
     expect(foldToolDurations(timeline)).toEqual({});
   });
 
@@ -62,7 +81,7 @@ describe("foldToolDurations", () => {
       ev({ type: "result", isError: false }),
       ev({ type: "tool_result", ts: 5, toolUseId: "t1", isError: false }),
     ];
-    expect(foldToolDurations(timeline)).toEqual({ Bash: { calls: 1, totalMs: 5, maxMs: 5 } });
+    expect(foldToolDurations(timeline)).toEqual({ Bash: { calls: 1, totalMs: 5, maxMs: 5, unpaired: 0 } });
   });
 });
 

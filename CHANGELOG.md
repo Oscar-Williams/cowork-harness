@@ -21,6 +21,15 @@ All notable changes to this project are documented here. The format is based on
 - **`lint-skill --strict` can newly fail on a skill's size:** a `SKILL.md` body over 19,000 B, or a
   `references/**.md` file over 60,000 B. Move detail out of the body into `references/`, and split an
   oversized reference by topic.
+- **`toolDurations` entries gain `unpaired`, and a tool can now appear with `calls: 0`.** A tool whose
+  calls all went unpaired used to be absent; it is now listed with `calls: 0, totalMs: 0, maxMs: 0` and
+  its `unpaired` count. `calls`/`totalMs`/`maxMs` keep their meaning (paired calls only), so an average
+  `totalMs / calls` needs a `calls > 0` guard. A consumer that validates `result.json` against an older copy of
+  `schema/run-result.json` will reject the new keys; use the current schema.
+- **`trace --view tool-durations` output changed.** The text view opens with a basis line and shows
+  paired/unpaired counts per tool. The JSON payload is now `{file, basis, scope, available, durations,
+  …}` instead of `{file, durations}`, and a corrupt timeline reports `available: false` where it used
+  to fold whatever lines parsed.
 
 ### Added
 
@@ -57,6 +66,23 @@ All notable changes to this project are documented here. The format is based on
     never fewer than the characters the agent counts, so it warns early. The reference cap is in real
     tokens (the agent asks the API's `count_tokens` above a size threshold); 60,000 B leaves a margin under
     the ~2.65 B per token measured on this skill's own markdown.
+- **`RunResult.toolDurationsBasis`** (`"wall_gap"`) states what `toolDurations` measures: the
+  harness-observed gap from `tool_use` to `tool_result`, which includes model/transport and permission
+  latency, with an `Agent`/`Task` entry spanning its whole sub-agent run. In result files written by this
+  version or later it is present exactly when `toolDurations` is, on the live, replay and chat lanes; `verify-run` passes the kept run's value
+  through, and a `result.json` written before this release has neither it nor `unpaired`.
+- **`toolDurations[tool].unpaired`:** calls that carried an id but never paired with a `tool_result` the
+  harness observed (e.g. the run ended mid-call). They were silently excluded before. MCP
+  round-trip/handshake echoes, which carry no id, are not counted. Sub-agent calls are covered where
+  observed: microvm sub-agent result delivery is unobserved.
+- **`trace --view tool-durations --scope main|subagent|any`** (default `any`) narrows the table using
+  the run's own `toolCalls` classification from `result.json`, the same scopes as `tool_called`'s object
+  form — but it defaults to `any`, where `tool_called`'s object form defaults to `main`. A narrowed scope
+  with no `result.json`, or one without `toolCalls`, reports unavailable instead of rendering every call.
+  `main` + `subagent` can be fewer than `any`: a call whose parent is not a recorded dispatch (origin
+  `unknown`) is kept only by `any`, and a narrowed scope counts those as `unknownOrigin` and calls absent
+  from `toolCalls` as `unclassified`. **`--per-call`** adds one row per call with its duration, or "no result" when it
+  never paired.
 
 ### Changed
 
@@ -70,6 +96,21 @@ All notable changes to this project are documented here. The format is based on
   anchor now point at `references/gotchas.md`, where the same heading lives.
 - **`npm run check:claims` also reports version stamps in the companion-skill payload,** including the
   size caps' stamp in `scenario.py`.
+- **SPEC §12 now states for the RunResult envelope what it already stated for the others:** renaming or
+  removing a key, or changing an existing key's meaning, is breaking; adding one is not.
+
+### Fixed
+
+- **Recipe 5 (evaluate answer quality) no longer overclaims.** A rep where the skill was not invoked did
+  not necessarily answer from the model's priors: outside the ablated arm the skill's source is mounted
+  and readable, so the model may read it directly. Step 3 now classifies each rep by invocation
+  (`skillsInvoked`), observed source access (the object form of `tool_called` over `SKILL.md`, plus
+  `reference_read`) and answer quality. Step 6 calls a before/after drop a regression signal to
+  investigate, not proof the edit caused it. Step 5 no longer offers a not-invoked rep as a stand-in
+  control: outside `--ablate-skill` it can still read the source. The measurement hygiene list says the
+  same.
+- **"Commit the skill first" is now "freeze a recoverable source"** — commit it, or snapshot the skill
+  folder next to the run dir — in the measurement reference, Recipe 6 and the `SKILL.md` measure line.
 
 ## [3.10.0] — 2026-09-27
 

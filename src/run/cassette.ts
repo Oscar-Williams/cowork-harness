@@ -79,7 +79,7 @@ import { HOSTLOOP_PATH_GATE_ID } from "../runtime/hostloop.js";
 import { resolveAgentImageProvenance, type AgentImageProvenance } from "../runtime/image-capabilities.js";
 import { resolveAgentImage, resolveContainerRuntime } from "../runtime/agent-image.js";
 import { readTimeline, type TimelineHeader, type TimelineEvent } from "../agent/timeline.js";
-import { foldToolDurations, foldSkillActivity, attributeSubagentSkills } from "./timeline-fold.js";
+import { toolDurationFields, foldSkillActivity, attributeSubagentSkills } from "./timeline-fold.js";
 import { ABSTAIN, UnansweredError, type Decider, type OnUnanswered } from "../decide/decider.js";
 import { fileChannel, writeDoneMarker, type DecisionChannel } from "../decide/external-channel.js";
 import { pMapBounded } from "../async-pool.js";
@@ -5041,6 +5041,7 @@ function replayErrorResult(file: string): RunResult {
     infraErrors: undefined,
     evidenceErrors: undefined,
     toolDurations: undefined,
+    toolDurationsBasis: undefined,
     skillActivity: undefined,
     models: undefined,
     ...noModelProvenance(),
@@ -7873,7 +7874,7 @@ export async function replayCassette(
       webSearches: rec.webSearches.length ? rec.webSearches : undefined,
       infraErrors: infraErrorsForResult(rec),
       evidenceErrors: evidenceErrorsForResult(rec),
-      toolDurations: cassette.timeline ? foldToolDurations(cassette.timeline) : undefined,
+      ...toolDurationFields(cassette.timeline), // record-time wall gaps, frozen in the cassette; basis travels with them
       skillActivity: cassette.timeline ? foldSkillActivity(cassette.timeline) : undefined,
       models: rec.models.length ? rec.models : undefined,
       // Replay re-drives FROZEN events and resolves no model of its own, so the pin is genuinely

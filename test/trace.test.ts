@@ -483,20 +483,25 @@ describe("buildToolDurations / formatToolDurations", () => {
       JSON.stringify({ seq: 1, ts: 120, line: 1, type: "tool_result", toolUseId: "t1", isError: false }),
     ];
     writeFileSync(join(f, "..", "timeline.jsonl"), lines.join("\n") + "\n");
-    expect(buildToolDurations(f)).toEqual({ Bash: { calls: 1, totalMs: 120, maxMs: 120 } });
+    expect(buildToolDurations(f).durations).toEqual({ Bash: { calls: 1, totalMs: 120, maxMs: 120, unpaired: 0 } });
   });
 
   it("returns {} when no sibling timeline.jsonl exists (a pre-M1 run dir)", () => {
     const f = eventsFile([]);
-    expect(buildToolDurations(f)).toEqual({});
+    expect(buildToolDurations(f)).toEqual({ basis: "wall_gap", scope: "any", available: true, durations: {} });
   });
 
   it("formats an empty duration table as a no-data message", () => {
-    expect(formatToolDurations({})).toContain("no tool-duration data");
+    expect(formatToolDurations({ basis: "wall_gap", scope: "any", available: true, durations: {} })).toContain("no tool-duration data");
   });
 
   it("formats a populated duration table with a per-tool row and a total footer", () => {
-    const out = formatToolDurations({ Bash: { calls: 2, totalMs: 300, maxMs: 200 } });
+    const out = formatToolDurations({
+      basis: "wall_gap",
+      scope: "any",
+      available: true,
+      durations: { Bash: { calls: 2, totalMs: 300, maxMs: 200, unpaired: 0 } },
+    });
     expect(out).toContain("Bash");
     expect(out).toContain("2");
   });

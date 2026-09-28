@@ -73,7 +73,7 @@ decide which assertions from *Assertions: two orthogonal axes* in `assertions-gu
   walk observe this run — what distinguishes "nothing was left undelivered" from "cannot tell"), `cost` (`cost.usd` = the SDK's
   `total_cost_usd` for the run — the authoritative single-run spend; NOT the same source as summing
   `modelUsage[].costUSD`, which is what `trace --view usage` reports, so the two can differ),
-  `usage` (`input_tokens`/`output_tokens`/`turns`), `toolDurations`, `models`, `toolErrors`,
+  `usage` (`input_tokens`/`output_tokens`/`turns`), `toolDurations` (with `toolDurationsBasis`), `models`, `toolErrors`,
   `redundantToolCalls`, `modelUsage`, `thinking`, `skillActivity`, `subagents[]` (prompt/`dispatchModel`/
   `resolvedModel`/output/`attributedSkillId`, `outputTruncated`, `referencesRead`, `reasoning`/`reasoningElided`),
   `context` (tools/mcpServers/availableSkills), `tasks`,
@@ -86,7 +86,9 @@ decide which assertions from *Assertions: two orthogonal axes* in `assertions-gu
   cassette's record-time value, not a fresh recompute), and `assertTextTruncated` (companion to
   `outputTruncated` on a matched tool result). Three separately-shaped rollups, easy to conflate in a
   `jq` recipe: `toolCounts` is a flat `{tool: number}` call-count map, `toolErrors` is
-  `{tool: {calls, errors}}`, and `toolDurations` is `{tool: {calls, totalMs, maxMs}}`. (Full per-field
+  `{tool: {calls, errors}}`, and `toolDurations` is `{tool: {calls, totalMs, maxMs, unpaired}}` — a wall
+  gap over main-agent and sub-agent calls alike, where observed, not execution time (`calls` counts paired calls only;
+  see `measurement.md`). (Full per-field
   semantics: [`docs/cli.md` → What you get out](https://github.com/yaniv-golan/cowork-harness/blob/main/docs/cli.md#what-you-get-out-inspectable-output) (repo-only); [`schema/run-result.json`](https://github.com/yaniv-golan/cowork-harness/blob/main/schema/run-result.json) is the
   machine source.)
 - **Opaque failure?** A failed run also records **`errorSource`** (where the failure originated) and

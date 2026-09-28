@@ -3091,6 +3091,10 @@
       ".toolDurations": {
         "type": "object"
       },
+      ".toolDurationsBasis": {
+        "type": "string",
+        "enum": ["wall_gap"]
+      },
       ".toolDurations{}": {
         "type": "object",
         "closed": true
@@ -3106,6 +3110,9 @@
       ".toolDurations{}.totalMs": {
         "type": "number",
         "required": true
+      },
+      ".toolDurations{}.unpaired": {
+        "type": "number"
       },
       ".toolErrors": {
         "type": "object"
