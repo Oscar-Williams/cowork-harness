@@ -15,7 +15,7 @@ const LIVE_SETUP = "test/setup/live-model.ts";
 
 describe("the live lane pins a model", () => {
   it("the setup sets the default only when COWORK_HARNESS_MODEL is unset or empty", async () => {
-    const { applyLiveModelDefault, LIVE_DEFAULT_MODEL } = await import("./setup/live-model.js");
+    const { applyLiveModelDefault, LIVE_DEFAULT_MODEL } = await import("./setup/live-model-default.js");
     const unset: NodeJS.ProcessEnv = {};
     applyLiveModelDefault(unset);
     expect(unset.COWORK_HARNESS_MODEL).toBe(LIVE_DEFAULT_MODEL);
@@ -25,6 +25,12 @@ describe("the live lane pins a model", () => {
     const explicit: NodeJS.ProcessEnv = { COWORK_HARNESS_MODEL: "claude-opus-5" };
     applyLiveModelDefault(explicit);
     expect(explicit.COWORK_HARNESS_MODEL).toBe("claude-opus-5");
+  });
+
+  it("the pure module has no import-time side effect on this worker's environment", async () => {
+    const before = process.env.COWORK_HARNESS_MODEL;
+    await import("./setup/live-model-default.js");
+    expect(process.env.COWORK_HARNESS_MODEL).toBe(before);
   });
 
   it("vitest.config.live.ts loads the setup in every worker", () => {
