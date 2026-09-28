@@ -29,8 +29,19 @@ export function routedToolGlobs(v: unknown): string[] | undefined {
   if (typeof v === "string") return [v];
   if (!v || typeof v !== "object") return undefined;
   const o = v as Record<string, unknown>;
-  const extra = Object.keys(o).filter((k) => k !== "tool" && o[k] !== undefined);
-  if (extra.length === 1 && extra[0] === "scope" && o.scope === "main") extra.length = 0;
+  // A predicate that constrains nothing — `input: {}`, `result: {}`, `count: {}` (count's default is
+  // min 1, exactly the string form's meaning), `scope: main` — is no predicate: an empty conjunction is
+  // true. Routing these keeps `{tool: X, input: {}}` ≡ `"X"` on every lane instead of making an empty
+  // object fail evidence-unavailable on a result.json that predates toolCalls.
+  const isEmptyObject = (x: unknown) =>
+    !!x && typeof x === "object" && !Array.isArray(x) && Object.values(x as object).every((y) => y === undefined);
+  const extra = Object.keys(o).filter(
+    (k) =>
+      k !== "tool" &&
+      o[k] !== undefined &&
+      !(k === "scope" && o.scope === "main") &&
+      !((k === "input" || k === "result" || k === "count") && isEmptyObject(o[k])),
+  );
   if (extra.length) return undefined;
   if (typeof o.tool === "string") return [o.tool];
   if (Array.isArray(o.tool) && o.tool.every((g) => typeof g === "string")) return o.tool as string[];
@@ -226,6 +237,11 @@ export function checkToolCallObject(
   const min = (o as ToolCalledObject).count?.min ?? 1;
   const max = (o as ToolCalledObject).count?.max;
   const n = satisfied.length;
+  if (n === 0 && min === 0 && (max === undefined || unknown.length <= max))
+    return {
+      pass: true,
+      evidence: `tool_called: 0 ${shownTool} call(s) in scope ${scope} satisfied every predicate, which count.min 0 allows (${named.length} name-matching call(s) checked)`,
+    };
   if (n >= min && (max === undefined || n + unknown.length <= max))
     return {
       pass: true,
