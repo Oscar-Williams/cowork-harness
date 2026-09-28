@@ -66,6 +66,10 @@ jobs:
           model: claude-sonnet-5 # used only where a scenario's session sets no `model:`
 ```
 
+The live lane needs a model: each scenario's session sets `model:`, or the Action's `model` input (exported
+as `COWORK_HARNESS_MODEL`) fills in where a session does not. A `run` that resolves none is refused (exit 2)
+before anything runs.
+
 Why this is a step *you* write, not an Action input the harness provides for you: pulling Anthropic's
 binary is a call about your own relationship with their distribution terms — keeping it in your own
 version-controlled workflow keeps that decision and its execution yours, auditable, and outside any

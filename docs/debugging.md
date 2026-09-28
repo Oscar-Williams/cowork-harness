@@ -162,8 +162,8 @@ the reason to read the *record* rather than the answer. (`critique` is built on 
   too), so on a self-referential prompt the model may read `SKILL.md` and answer from it without ever
   invoking anything. Assert it with `skill_triggered` on the `run` lane; on an open-ended `skill` run
   there are no assertions, so this field **is** the signal. Also worth checking before you compare
-  anything across runs: **`models`** (which model actually served the run — with nothing pinned, that's
-  whatever the staged binary defaults to; **ignore any `<…>`-wrapped entry such as `<synthetic>`, which
+  anything across runs: **`models`** (which model actually served the run — the pinned one unless `modelFallbacks` says the agent
+  switched; **ignore any `<…>`-wrapped entry such as `<synthetic>`, which
   is the agent's marker for a turn it fabricated locally, not a model** — see
   [gotchas.md](./gotchas.md#operational-tools-when-youre-stuck)), **`modelSource`** and
   **`modelPinHonored`** (did anything pin the model, and did the pin survive — an absent

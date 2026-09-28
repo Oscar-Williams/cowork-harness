@@ -539,11 +539,11 @@ comparisons across runs are unsound for the same reason.
 re-run or compare. Every lane also takes `--model <id>` for a one-off — `run`, `record`, `skill`,
 `probe-dispatch` and `chat` — overriding the session for that invocation, with `COWORK_HARNESS_MODEL` as
 the default and a matrix `models:` axis outranking both. On the ad-hoc `skill` lane there is no session
-file, so the flag is the only way. A run with nothing pinned warns; omitting it is deprecated and becomes
-an error in the next major.
+file, so the flag (or the env var) is the only way. A run that resolves no model is refused before it
+spends.
 
 **What a result tells you.** `modelSource` says where the run's model came from — `user_setting` when
-something pinned it, `unresolved` when nothing did. `modelPinHonored` answers whether the pin survived,
+something pinned it; `unresolved` appears only where no agent ran, or on a result recorded before 4.0.0. `modelPinHonored` answers whether the pin survived,
 in three states: `true`, `false`, and **absent for unverifiable** (nothing pinned, no model evidence in
 the run, or a pin like `best`/`opusplan` that names no comparable model) — absence is not a pass. A
 family pin (`opus`, `sonnet`) is checked as family membership rather than equality: the agent resolves an

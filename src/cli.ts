@@ -204,7 +204,7 @@ const HELP = `cowork-harness <command>   (v${"$VERSION"})
 
 ── Automated scenarios ────────────────────────────────────────────────────────
   run <scenario.yaml | dir/>   run one scenario or every *.yaml in a dir (CI-ready exit code)
-      [--model <id>]   pin the model (overrides the session's 'model:'; unset warns)
+      [--model <id>]   pin the model (overrides the session's 'model:'; a run that resolves none is refused)
       [--on-unanswered fail|first]   ('prompt' rejected — breaks determinism)
       [--decider-cmd '<helper>']   answer live questions via a spawned helper
       [--decider-dir <dir>]   answer live questions in-band; then use 'gates'/'answer' to stream/respond
@@ -432,7 +432,8 @@ Output:
   --allow-host-writes              consent to a writable hostloop connected folder (native host FS access,
                                    no container sandbox); refused loud otherwise. Forwarded to both turns
                                    by critique. No effect off hostloop or without a writable --folder
-  --model <id>                     override the session model
+  --model <id>                     pin the model (or set COWORK_HARNESS_MODEL); a run that resolves none is
+                                   refused (exit 2) — --dry-run reports it as model: null instead
   --dry-run                        preview scenarios, token and binary checks, without recording     NO_COLOR=1   disable ANSI
 
 Long runs:  an idle "still running" heartbeat prints on stderr after ~30s of silence.
@@ -561,7 +562,7 @@ const SUBCOMMAND_USAGE: Record<string, string> = {
   list: "usage: list [--output-format text|json]   (list available platform baselines)",
   "boundary-check": "usage: boundary-check [<baseline>] [--session <file>] [--output-format text|json]",
   vm: "usage: vm <init|status|delete|prune> [<baseline>] [--output-format text|json]   (macOS arm64 only)\n  init    create the L2 Apple-VZ microVM\n  status  show running VM state\n  delete  remove the VM\n  prune   drop all orphaned VMs\n  <baseline> (default: latest) is a baseline name like desktop-<version>, not a VM name — each acts on that baseline's VM",
-  chat: "usage: chat <skill-folder> [prompt] [--fidelity protocol|container|hostloop] [--model <id>]\n              [--upload <file>]... [--folder <dir>]... [--plugin <dir>]... [--verbose] [--raw] [--allow-host-writes]\n       --raw: native cowork mode via docker run -it; egress sandbox NOT applied; rejects --upload/--folder/--plugin/--fidelity/--allow-host-writes (only --model applies)\n       --allow-host-writes: consent to a writable hostloop connected folder (native host FS access); refused loud otherwise\n       --fidelity: protocol/container/hostloop only (no microvm/cowork); protocol = no Docker, no sandbox",
+  chat: "usage: chat <skill-folder> [prompt] [--fidelity protocol|container|hostloop] [--model <id>]\n              [--upload <file>]... [--folder <dir>]... [--plugin <dir>]... [--verbose] [--raw] [--allow-host-writes]\n       --raw: native cowork mode via docker run -it; egress sandbox NOT applied; rejects --upload/--folder/--plugin/--fidelity/--allow-host-writes (only --model applies)\n       --model: required unless COWORK_HARNESS_MODEL is set — a session that resolves no model is refused (exit 2), with or without --raw\n       --allow-host-writes: consent to a writable hostloop connected folder (native host FS access); refused loud otherwise\n       --fidelity: protocol/container/hostloop only (no microvm/cowork); protocol = no Docker, no sandbox",
   // Single-sourced from src/run/cassette.ts's RECORD_USAGE/REPLAY_USAGE/VERIFY_CASSETTES_USAGE (also each
   // command's own `parseArgs` no-target usage error) so this text and each command's *_BOOLEAN_FLAGS/
   // *_VALUE_FLAGS consts can't drift apart again — see P3 (record) and P9 (replay/verify-cassettes,
@@ -2379,7 +2380,8 @@ Files:
   --folder <dir>                 connect a folder at mnt/<folder-name> (repeatable)
 
 Probe tuning:
-  --model <id>                   override the session model (e.g. pin a cheaper model for the probe)
+  --model <id>                   pin the model (or set COWORK_HARNESS_MODEL); a run that resolves none is
+                                 refused (exit 2)
   --expect-write <suffix>         narrow "delivered" to a sub-agent write whose path ends with this suffix
                                  (default: ANY sub-agent-origin write under the dispatch's own toolUseId)
   --allow-stall                  don't fail the verdict when the run ends on a question (the \`stalled\` signal) —

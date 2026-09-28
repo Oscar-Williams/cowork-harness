@@ -36,7 +36,7 @@ The 10-second inner loop, once the CLI is on PATH:
 
 ```bash
 cowork-harness doctor                       # prerequisites OK? (Docker, agent, token, baseline)
-cowork-harness skill ./my-skill "do X"      # run the skill once against the staged agent
+cowork-harness skill ./my-skill "do X" --model claude-sonnet-5   # run once (or set COWORK_HARNESS_MODEL)
 ```
 
 Before the first command, confirm the CLI is reachable and **fail loud** (never fake a pass) when a tier's dependencies are missing:

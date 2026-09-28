@@ -144,7 +144,7 @@ ignored.
 
 | Flag | |
 |---|---|
-| `--model <id>` | session model for the agent doing the work *and* reflecting |
+| `--model <id>` | session model for the agent doing the work *and* reflecting. Required unless `COWORK_HARNESS_MODEL` is set (from the environment or `--dotenv`): without either, critique refuses before its task turn (exit 2) |
 | `--allow-missing-capability` | don't fail either turn when the lean image omits a capability |
 | `--allow-host-writes` | consent to a writable connected folder at `--fidelity hostloop` (native host FS access); forwarded to both turns. No effect off hostloop or without a writable `--folder`. Refused loud otherwise |
 
@@ -663,10 +663,9 @@ reach into `turns/1/` yourself:
   tool stream the report makes **no claim** rather than rendering a clean negative;
 - the graded turn's **model ids are in the report itself** (`gradedModels` in `--output-format json`, and
   as `graded model(s):` in the text header), read back from the graded turn's own `result.json`. **The
-  turns are a subprocess and inherit no model from whatever invoked `critique`** — with no `--model`, the
-  graded run uses the spawned agent's own default, which may not be the model you are otherwise working
-  under. Pin it with `--model <id>` when the comparison matters, and read `gradedModels` back to confirm
-  it took. Note this is **observed, not requested**: the ids come from the model stamped on the graded
+  turns are a subprocess and inherit no model from whatever invoked `critique`** — they take `--model`,
+  or `COWORK_HARNESS_MODEL` from critique's own environment, and critique refuses before the task turn
+  when neither is set. Read `gradedModels` back to confirm which model served the run. Note this is **observed, not requested**: the ids come from the model stamped on the graded
   turn's assistant messages, never from the flag — so `graded model(s): unknown` means no assistant
   message reached the run (a crash, a kill, a gate before the first reply), which passing `--model`
   does not change;
