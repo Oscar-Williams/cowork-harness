@@ -832,6 +832,12 @@ export async function executeScenario(scenario: Scenario, opts: ExecuteOptions =
   // neither spawn function receives `session` itself.
   const { suggestSkillsEnabled, proactiveSkillSuggestEnabled } = resolveSkillDiscoveryGates(baseline, session.skills);
 
+  // Top of the stage/launch step: everything above is a load-time refusal or pure bookkeeping (the launch
+  // PLAN is computed, not executed); from here down the run probes images, acquires the egress sidecar,
+  // and spawns the agent. The unit lane sets COWORK_HARNESS_FORBID_SPAWN so a scenario a refusal should
+  // have caught fails red instead of launching a real agent.
+  assertSpawnAllowed(scenario.name);
+
   // Pre-flight: if the skill DECLARES required capabilities and the image provably omits one, FAIL FAST here
   // — before any paid agent run — instead of burning ~12 min to reach a verdict the post-run guard already
   // knows. The author can opt out with `allow_missing_capability: true` (the fallback is equivalent), which
@@ -1989,6 +1995,20 @@ export function loadScenarioPure(path: string, hooks: { onFidelityDefaulted?: (n
   // pass through here — the runtime try/catch in assert.ts and decider.ts is their safety net.
   validateScenarioRegexes(scenario, path);
   return scenario;
+}
+
+/** The unit-lane spawn guard. `test/setup/forbid-spawn.ts` sets COWORK_HARNESS_FORBID_SPAWN=1 for the fast
+ *  test lane, and executeScenario calls this at the top of its stage/launch step — after every load-time
+ *  refusal, before any staging, image probe, sidecar or agent spawn. A test driving a scenario that SHOULD
+ *  have been refused then fails red for free, instead of launching a real agent (a host-loop agent can
+ *  find the operator's own credentials, so that launch can cost money). */
+export function assertSpawnAllowed(scenarioName: string, env: NodeJS.ProcessEnv = process.env): void {
+  const v = env.COWORK_HARNESS_FORBID_SPAWN;
+  if (v !== undefined && v !== "" && v !== "0")
+    throw new Error(
+      `COWORK_HARNESS_FORBID_SPAWN is set: refusing to stage or launch an agent for scenario "${scenarioName}". ` +
+        `The unit test lane never runs a real agent — a scenario reaching this point passed every load-time refusal.`,
+    );
 }
 
 /** Every nested `{ …: <regex> }` leaf in the Assertion schema, derived from zod rather than enumerated.
