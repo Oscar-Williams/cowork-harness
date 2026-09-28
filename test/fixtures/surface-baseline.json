@@ -3112,8 +3112,7 @@
         "required": true
       },
       ".toolDurations{}.unpaired": {
-        "type": "number",
-        "required": true
+        "type": "number"
       },
       ".toolErrors": {
         "type": "object"

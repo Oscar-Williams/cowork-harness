@@ -701,7 +701,7 @@ export function buildToolDurations(file: string, opts: { scope?: ToolDurationSco
 const BASIS_LINE =
   "basis: wall gap from tool_use to tool_result, as the harness saw them — includes model/transport and permission latency; an Agent/Task entry spans its whole sub-agent run. Not isolated execution time.";
 const SCOPE_TEXT: Record<ToolDurationScope, string> = {
-  any: "any (main agent and sub-agents)",
+  any: "any (every call: main agent, sub-agents, and calls whose parent is not a dispatch this run recorded)",
   main: "main (the main agent, including a Skill's or Agent(fork)'s children)",
   subagent: "subagent (calls under a sub-agent dispatch this run recorded)",
 };

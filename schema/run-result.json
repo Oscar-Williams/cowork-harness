@@ -422,10 +422,10 @@
           },
           "unpaired": {
             "type": "number",
-            "description": "calls to this tool that carried an id but never paired with a tool_result, so they have no duration. The synthetic MCP round-trip echo (no id) is not counted."
+            "description": "calls to this tool that carried an id but never paired with a tool_result, so they have no duration. The synthetic MCP round-trip echo (no id) is not counted. Always written from the release that added it; absent in older result files, where it means unknown, not 0 — so it is not in required, and result files written earlier still validate."
           }
         },
-        "required": ["calls", "totalMs", "maxMs", "unpaired"],
+        "required": ["calls", "totalMs", "maxMs"],
         "additionalProperties": false
       }
     },

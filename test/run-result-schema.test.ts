@@ -259,8 +259,9 @@ describe("docs ↔ schema/run-result.json verdict-shape sync", () => {
 
 describe("toolDurations basis + unpaired (schema)", () => {
   const props = (schema as { properties: Record<string, any> }).properties;
-  it("every per-tool entry must carry `unpaired` — the writer always emits it, so its absence is not a 0", () => {
-    expect(props.toolDurations.additionalProperties.required).toContain("unpaired");
+  it("each per-tool entry declares `unpaired`, optional so result files written before it still validate", () => {
+    expect(props.toolDurations.additionalProperties.properties.unpaired.type).toBe("number");
+    expect(props.toolDurations.additionalProperties.required).not.toContain("unpaired");
   });
   it("toolDurationsBasis is a closed enum naming the one basis the fold measures", () => {
     expect(props.toolDurationsBasis.enum).toEqual(["wall_gap"]);
