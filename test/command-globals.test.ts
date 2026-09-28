@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -180,11 +180,21 @@ describe.skipIf(!can)("a --dotenv-shaped token that is another flag's VALUE is n
   });
 
   it("run --label=--run-dir=x keeps the literal label (a common value flag consumed it first)", () => {
+    // The spawn guard stops the run right after it is staged, but status.json is already written, so the
+    // label that reached the run is observable, and the runs root it landed in shows --run-dir was not applied
+    // from inside the label.
     const d = mkdtempSync(join(tmpdir(), "cmd-globals-hijack-"));
-    mkdirSync(join(d, "none"));
-    const r = cli(["run", "none", "--label=--run-dir=x"], { cwd: d });
-    // The empty dir is the command's own error; the point is that --run-dir was not applied as a flag.
-    expect(r.out).not.toMatch(/--run-dir/);
+    writeFileSync(
+      join(d, "s.yaml"),
+      "baseline: latest\nfidelity: container\non_unanswered: fail\nprompt: hello\nassert:\n  - result: success\n",
+    );
+    const runs = join(d, "runs");
+    const r = cli(["run", "s.yaml", "--label=--run-dir=x", "--run-dir", runs], { cwd: d, env: { COWORK_HARNESS_FORBID_SPAWN: "1" } });
+    expect(r.out).toMatch(/COWORK_HARNESS_FORBID_SPAWN/);
+    const statusFiles = readdirSync(join(runs, "s")).map((id) => join(runs, "s", id, "status.json"));
+    expect(statusFiles).toHaveLength(1);
+    expect(JSON.parse(readFileSync(statusFiles[0], "utf8")).runLabel).toBe("--run-dir=x");
+    expect(existsSync(join(d, "x"))).toBe(false);
   });
 });
 
