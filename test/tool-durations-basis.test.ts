@@ -42,7 +42,8 @@ describe("replay lane (a real recorded stream)", () => {
     expect(echoes.length).toBeGreaterThan(0);
     const r = await replayCassette(FIXTURE, [], { cassetteDir: DIR });
     for (const e of echoes) expect(r.toolDurations?.[(e as { name: string }).name]).toBeUndefined();
-    expect(Object.values(r.toolDurations ?? {}).reduce((n, d) => n + d.unpaired, 0)).toBe(0);
+    expect(Object.values(r.toolDurations ?? {}).every((d) => typeof d.unpaired === "number")).toBe(true); // the writer emits it; ?? below is for the type only
+    expect(Object.values(r.toolDurations ?? {}).reduce((n, d) => n + (d.unpaired ?? 0), 0)).toBe(0);
   });
 
   it("a cassette with no frozen timeline → neither field", async () => {
@@ -121,5 +122,14 @@ describe("chat lane", () => {
     const r = buildChatResult(record, opts(mkdtempSync(join(tmpdir(), "chat-durations-"))));
     expect(r.toolDurations).toBeUndefined();
     expect(r.toolDurationsBasis).toBeUndefined();
+  });
+});
+
+import type { RunResult } from "../src/types.js";
+describe("RunResult.toolDurations type admits an older result file", () => {
+  it("an entry without `unpaired` (written before it existed, passed through by verify-run) type-checks", () => {
+    // Compile-time check (tsc -p tsconfig.test.json): the reader type must not claim a key old files lack.
+    const legacy: RunResult["toolDurations"] = { Bash: { calls: 1, totalMs: 10, maxMs: 10 } };
+    expect(legacy?.Bash.unpaired).toBeUndefined();
   });
 });
