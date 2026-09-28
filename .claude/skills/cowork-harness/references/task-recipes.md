@@ -225,7 +225,7 @@ Hardening a skill is a loop: run → read what it did → fix → run again. Two
 
 1. **Verify before you trust.** A green run is not a correct run, and a skill's self-reported finding (a
    self-critique appendix, "I extracted X") is not real until its cited evidence is found in the run's own
-   output. **Reproduce before acting on a finding:** `cowork-harness skill <folder> "<prompt>" --repeat 5 --label gen-1`
+   output. **Reproduce before acting on a finding:** `cowork-harness skill <folder> "<prompt>" --model <id> --repeat 5 --label gen-1`
    runs the same skill+prompt N times (2-100) and prints a variance rollup instead of a single pass/fail —
    `--repeat` works on the `skill` lane, not just `run`. A single green run proves it passed *once*.
    Companions: `--min-pass-rate`, `--stop-on-diverge`, `--max-budget-usd`, `--allow-budget-stop`.

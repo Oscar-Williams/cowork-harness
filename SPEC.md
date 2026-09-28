@@ -713,7 +713,9 @@ otherwise report every valid scenario with the same code as a broken one. The sc
 BEFORE the credential guard, so "does this file load" never depends on holding a token. "Would this
 record" reads a second file: to answer the model refusal, `--dry-run` also opens the scenario's session
 (the model resolves from `--model`, the session's `model:`, then `COWORK_HARNESS_MODEL`). A session that
-does not load is skipped by that check, not refused; the real record reports it.
+does not load is skipped by that check, not refused; the real record reports it. On the real
+`record <file>` the credential guard still comes first: with no credentials, `record` exits `2` (`runtime`,
+"no model credentials") before the model refusal can answer.
 A `record <dir/>` target keeps the same 1-vs-2 meaning at batch scale: a directory whose files all fail
 to load exits `1` (they are broken, not absent), while a directory with no scenarios at all exits `2`.
 Where a `--max-budget-usd` cap could also refuse, both outcomes exit `1`: **all** files broken exits `1`

@@ -638,7 +638,7 @@ The git-tracked-files-only default and its `git add`/hard-fail rationale are exp
 Each is overridden by the matching explicit flag.
 
 - `COWORK_HARNESS_FIDELITY` — the default fidelity tier for ad-hoc `skill`/`chat` runs (a `--fidelity` flag or a scenario's `fidelity:` still wins). **Caveat:** `chat` only accepts `protocol`/`container`/`hostloop` — `microvm` and `cowork` are rejected (no Lima/auto-pick plumbing in the interactive REPL), so a `COWORK_HARNESS_FIDELITY` set to either is rejected loudly for `chat` even though `skill` accepts the full tier set.
-- `COWORK_HARNESS_MODEL` — the default model on every lane that takes `--model` (`run`, `record`, `skill`, `probe-dispatch`, `chat`, and `critique`'s two turns), where an explicit flag and a matrix `models:` axis both outrank it. An empty value counts as unset.
+- `COWORK_HARNESS_MODEL` — the default model on every lane that takes `--model` (`run`, `record`, `skill`, `probe-dispatch`, `chat`, and `critique`'s two turns), where an explicit flag and a matrix `models:` axis both outrank it. An empty value counts as unset, but an exported empty value still blocks the one in `./.env` or `--dotenv` (a dotenv file never overrides an exported variable), so `unset COWORK_HARNESS_MODEL` rather than exporting it empty.
 - `COWORK_HARNESS_OUTPUT_FORMAT` (`text`|`json`) — the default output format.
 
 ### Secret scrubbing and cassette redaction

@@ -72,7 +72,10 @@ All notable changes to this project are documented here. The format is based on
     a scenario that loaded, on every path: a file, a directory, `--rerecord-stale`, and `--dry-run`, which
     now opens the scenario's session file to answer this. `record <dir/> --dry-run` lists each such file
     under `refusals[]`. A batch (`run <dir/>`, `--matrix`, `record <dir/>`, `--rerecord-stale`) checks
-    every item before the first one runs and names each offender.
+    every item before the first one runs and names each offender. A real `record` with no credentials
+    still answers with the credential refusal first (exit 2, `runtime`); `--dry-run` needs none.
+  - *An empty `COWORK_HARNESS_MODEL`* counts as unset, but an exported empty value still blocks one in
+    `.env` or `--dotenv`, since a dotenv file never overrides an exported variable. Unset it instead.
   - *Not refused:* `skill --dry-run` reports `"model": null` in its preview instead. `critique
     --corpus-only` runs no turn. `replay`, `verify-cassettes` and `lint` run no agent and are unaffected.
   - *Who is affected:* any session file without `model:` that is run without `--model` or
