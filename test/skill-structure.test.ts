@@ -30,7 +30,14 @@ describe("cowork-harness SKILL.md structural tripwire", () => {
   });
 
   it("the orientation router offers critique, and states the skill-vs-critique routing rule", () => {
-    const router = doc.slice(doc.indexOf("## Orient — the three loops"), doc.indexOf("## Part I"));
+    // Bounded by the NEXT `## ` heading, not by a named one: the slice used to end at "## Part I", and
+    // indexOf returning -1 there (the heading moved out of SKILL.md) silently widened it to the rest of the
+    // file — green, while checking the wrong region. Both ends are asserted found.
+    const start = doc.indexOf("## Orient — the three loops");
+    expect(start, "the Orient router heading is gone").toBeGreaterThan(-1);
+    const end = doc.indexOf("\n## ", start + 1);
+    expect(end, "no heading follows the Orient router, so its end is unbounded").toBeGreaterThan(start);
+    const router = doc.slice(start, end);
     expect(router).toContain("cowork-harness critique");
     // \s+ not a literal space: the bullet wraps across lines at exactly this phrase.
     expect(router).toMatch(/what does this skill\s+\*\*DO\*\*/i);

@@ -285,3 +285,45 @@ describe("explicit `<a id>` anchors count only where GitHub would render them", 
     expect(pageAnchors('```html\n<a id="dead-four"></a>\n```\n').has("dead-four")).toBe(false);
   });
 });
+
+/**
+ * Repo docs linking INTO the companion-skill payload (`../.claude/skills/cowork-harness/<file>.md#slug`).
+ *
+ * The suites above cover links into README and into a sibling doc; a link into the skill payload fell
+ * between them. That mattered the moment the payload was restructured: docs/debugging.md and
+ * docs/gotchas.md both linked `SKILL.md#gotchas--…`, and moving that section into a reference would
+ * have left both pointing at a heading that no longer exists — the file still resolves, so nothing
+ * else notices. Both the file and the fragment are checked.
+ */
+function skillPayloadRefs(file: string): { file: string; target: string; slug: string | undefined; raw: string }[] {
+  const text = readFileSync(file, "utf8");
+  const out: { file: string; target: string; slug: string | undefined; raw: string }[] = [];
+  for (const m of text.matchAll(/\]\(((?:\.\.?\/)*\.claude\/skills\/[^)#\s]+\.md)(?:#([^)\s]+))?\)/g)) {
+    out.push({ file, target: resolve(join(file, ".."), m[1]), slug: m[2], raw: m[0] });
+  }
+  return out;
+}
+
+describe("repo docs' links into the skill payload resolve — file AND heading", () => {
+  const refs = allMarkdownPages().flatMap(skillPayloadRefs);
+
+  it("found payload links to check, including at least one with a #fragment (guards a vacuous pass)", () => {
+    expect(refs.length).toBeGreaterThan(0);
+    expect(refs.some((r) => r.slug)).toBe(true);
+  });
+
+  it("every linked payload file exists", () => {
+    const missing = refs.filter((r) => !existsSync(r.target));
+    expect(missing.map((r) => `${relative(resolve("."), r.file)}: ${r.raw}`).join("\n")).toBe("");
+  });
+
+  it("every #fragment names a heading in the linked payload file", () => {
+    const broken = refs.filter((r) => r.slug && existsSync(r.target) && !pageAnchors(readFileSync(r.target, "utf8")).has(r.slug));
+    expect(
+      broken,
+      broken
+        .map((r) => `${relative(resolve("."), r.file)}: ${r.raw} — #${r.slug} is not a heading in ${relative(resolve("."), r.target)}`)
+        .join("\n"),
+    ).toEqual([]);
+  });
+});

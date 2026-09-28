@@ -627,15 +627,20 @@ export function checkVersions(): { ok: boolean; errors: string[]; values: Record
   //    `(baseline desktop-X.Y.Z)` pin in the doc must match SKILL.md's tracks-harness baseline. The
   //    baseline half is what caught the refs pinning desktop-1.20186.1 two Desktop syncs after
   //    SKILL.md moved on — RELEASING's checklist alone didn't hold.
-  const refFiles = [
-    ".claude/skills/cowork-harness/references/ci-recipe.md",
-    ".claude/skills/cowork-harness/references/scenario-schema.md",
-    ".claude/skills/cowork-harness/references/fidelity-and-answers.md",
-    ".claude/skills/cowork-harness/references/task-recipes.md",
-    ".claude/skills/cowork-harness/references/critique.md",
-  ];
+  //    Enumerated from the directory, not a hand list: a reference added without a stamp fails by RULE,
+  //    where a hardcoded list silently skipped it.
+  const refFiles = readdirSync(join(REPO_ROOT, ".claude/skills/cowork-harness/references"))
+    .filter((f) => f.endsWith(".md"))
+    .sort()
+    .map((f) => `.claude/skills/cowork-harness/references/${f}`);
+  if (refFiles.length < 5) errors.push(`only ${refFiles.length} references/*.md found — invariant 6 would pass vacuously`);
   for (const f of refFiles) {
     const refText = r(f);
+    // 5b, extended to every reference: a bare or prefixed `@^X` floor anywhere in the payload must equal
+    // SKILL.md's bootstrap floor, so moving a floor out of SKILL.md cannot take it out of the check.
+    if (floor)
+      for (const m of refText.matchAll(/@\^(\d+\.\d+\.\d+)/g))
+        if (m[1] !== floor) errors.push(`${f} floor "@^${m[1]}" != SKILL.md bootstrap floor "@^${floor}"`);
     if (tracks) {
       const stamp = refText.match(/Tracks\s+`cowork-harness\s+(\d+\.\d+\.\d+)`/)?.[1];
       if (!stamp) errors.push(`${f} has no "Tracks \`cowork-harness X.Y.Z\`" stamp`);
