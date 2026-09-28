@@ -1629,3 +1629,16 @@ def test_prose_about_tools_is_not_command_shaped(value, tmp_path):
 )
 def test_tool_invocations_are_command_shaped(value, tmp_path):
     assert CMD_RULE in _rules(f"assert:\n  - transcript_matches: '{value}'\n", tmp_path)
+
+
+@pytest.mark.parametrize("key", ["tool_called", "tool_not_called"])
+def test_object_form_scope_enum_is_checked_offline(key, tmp_path):
+    # The scope enum lives inside an anyOf arm of the published schema; the generated enum map must reach it.
+    assert "enum-value-invalid" in _rules(f"assert:\n  - {key}: {{ tool: Bash, scope: everywhere }}\n", tmp_path)
+    assert "enum-value-invalid" not in _rules(f"assert:\n  - {key}: {{ tool: Bash, scope: any }}\n", tmp_path)
+
+
+def test_generated_enum_map_reaches_union_arms():
+    enums = json.loads(KEYS_JSON.read_text(encoding="utf-8"))["enums"]
+    assert enums["assert.tool_called.scope"] == ["main", "subagent", "any"]
+    assert enums["assert.tool_not_called.scope"] == ["main", "subagent", "any"]
