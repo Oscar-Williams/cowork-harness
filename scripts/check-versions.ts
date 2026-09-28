@@ -13,9 +13,10 @@
 //                              can publish (else the skill ships ahead of npm).
 //   5. README floor === floor: every `cowork-harness@>=X.Y.Z` in README.md matches the SKILL.md floor
 //                              (README is not version-controlled by the package; it drifts silently otherwise).
-//   5b. SKILL floors === floor: every `@>=X.Y.Z` in SKILL.md (incl. a BARE `Pin `@>=X`` with no
-//                              `cowork-harness` prefix) matches the floor — invariant 3 reads only the
-//                              first prefixed match, so a bare floor drifted silently (stale 0.33.0→1.0.0).
+//   5b. skill floors === floor: every `@^X.Y.Z` in SKILL.md AND in every references/*.md (incl. a BARE
+//                              `Pin `@^X`` with no `cowork-harness` prefix) matches the floor — invariant 3
+//                              reads only the first prefixed match in SKILL.md, so a bare floor drifts silently
+//                              without this.
 //   6. ref stamps === tracks:  each `references/*.md` "Tracks `cowork-harness X.Y.Z`" matches tracks-harness,
 //                              and any `(baseline desktop-X.Y.Z)` pin next to that stamp matches SKILL.md's
 //                              tracks-harness baseline (the refs lagged two Desktop syncs before this check).
@@ -614,9 +615,9 @@ export function checkVersions(): { ok: boolean; errors: string[]; values: Record
     for (const f of readmeFloors) if (f !== floor) errors.push(`README.md floor "@^${f}" != SKILL.md floor "@^${floor}"`);
   }
 
-  // 5b. EVERY `@>=X.Y.Z` inside SKILL.md must equal the floor — including a BARE `Pin `@>=X`` with no
-  //     `cowork-harness` prefix. Invariant 3 reads only the FIRST `cowork-harness@>=` match, so a bare
-  //     floor drifted silently (it shipped stale from 0.33.0 through 1.0.0). This catches all of them.
+  // 5b. EVERY `@^X.Y.Z` inside SKILL.md must equal the floor — including a BARE `Pin `@^X`` with no
+  //     `cowork-harness` prefix. Invariant 3 reads only the FIRST `cowork-harness@^` match, so a bare
+  //     floor would drift silently. The references/*.md half of 5b runs in the invariant-6 loop below.
   if (floor) {
     const skillFloors = [...skillMd.matchAll(/@\^(\d+\.\d+\.\d+)/g)].map((m) => m[1]);
     for (const f of skillFloors)

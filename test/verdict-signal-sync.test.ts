@@ -57,15 +57,15 @@ const verdictSrc = read("src/run/verdict.ts");
 const typesSrc = read("src/types.ts");
 const schemaRefMd = read(SCHEMA_REF);
 const scenarioMd = read("docs/scenario.md");
-// The curated signal bullets and the "full N-code signal table" pointer moved with *Interpreting verdict
-// signals* out of SKILL.md into this reference when the skill entrypoint was split.
+// The curated signal bullets and the "full N-code signal table" pointer live in the skill's
+// *Interpreting verdict signals* section, in references/run-record-replay.md.
 const RUN_REF = ".claude/skills/cowork-harness/references/run-record-replay.md";
-const skillMd = read(RUN_REF);
+const runRefMd = read(RUN_REF);
 
-/** SKILL.md's signal bullets: `- **\`code\`** (\`WARN\`, …) — prose`. The severity marker is optional —
+/** run-record-replay.md's signal bullets: `- **\`code\`** (\`WARN\`, …) — prose`. The severity marker is optional —
  *  a bullet that omits it simply makes no severity claim to check. */
 function skillBullets(): Array<[string, string | undefined]> {
-  return [...skillMd.matchAll(/^- \*\*`([a-z0-9_]+)`\*\*(?:\s*\(`(WARN|FAIL)`)?/gm)].map((m) => [m[1], m[2]]);
+  return [...runRefMd.matchAll(/^- \*\*`([a-z0-9_]+)`\*\*(?:\s*\(`(WARN|FAIL)`)?/gm)].map((m) => [m[1], m[2]]);
 }
 
 // The source of truth. Everything else is compared against this.
@@ -108,13 +108,13 @@ describe("verdict-signal code set ↔ its five hand-maintained copies", () => {
     }
   });
 
-  // SKILL.md's list is CURATED, not exhaustive: it documents the signals an author is likely to
+  // run-record-replay.md's list is CURATED, not exhaustive: it documents the signals an author is likely to
   // misread (a warn worth watching, plus the fail-severity ones that are tier/image artifacts rather
   // than skill defects), and points at the reference table for the rest. So exact-set equality is the
   // wrong contract here — these guards instead pin that whatever it DOES name is real and correctly
   // described, and that every omission stays deliberate. Same allowlist convention as the llms.txt
   // guard in test/docs-index-sync.test.ts.
-  const SKILL_MD_UNDOCUMENTED = new Set([
+  const RUN_REF_UNDOCUMENTED = new Set([
     "assertion", // a failing assertion — self-explanatory in the run output
     "result_error", // the agent turn itself errored
     "transport_error", // connection dropped; not skill-authorable
@@ -127,32 +127,32 @@ describe("verdict-signal code set ↔ its five hand-maintained copies", () => {
     "stalled", // covered at length by the gate/answer-scripting sections
   ]);
 
-  it("every signal SKILL.md names is a real code (catches a stale or renamed one lingering)", () => {
+  it("every signal run-record-replay.md names is a real code (catches a stale or renamed one lingering)", () => {
     const named = skillBullets().map(([code]) => code);
     expect(named.length).toBeGreaterThan(3); // the bullets were found and parsed
     for (const code of named) {
-      expect(CODES, `SKILL.md documents \`${code}\`, which is not a VerdictSignal code`).toContain(code);
+      expect(CODES, `run-record-replay.md documents \`${code}\`, which is not a VerdictSignal code`).toContain(code);
     }
   });
 
-  it("every severity SKILL.md states matches the severity the code actually pushes", () => {
+  it("every severity run-record-replay.md states matches the severity the code actually pushes", () => {
     for (const [code, stated] of skillBullets()) {
       if (!stated) continue; // a bullet that declares no severity makes no claim to check
-      expect(stated.toLowerCase(), `SKILL.md severity for \`${code}\``).toBe(SEVERITY.get(code));
+      expect(stated.toLowerCase(), `run-record-replay.md severity for \`${code}\``).toBe(SEVERITY.get(code));
     }
   });
 
-  it("every code SKILL.md omits is omitted DELIBERATELY, not by drift", () => {
-    // A new signal lands here on its first CI run, forcing a decision: document it in SKILL.md, or add
-    // it to SKILL_MD_UNDOCUMENTED with a reason. Silence is not one of the options.
+  it("every code run-record-replay.md omits is omitted DELIBERATELY, not by drift", () => {
+    // A new signal lands here on its first CI run, forcing a decision: document it in run-record-replay.md, or add
+    // it to RUN_REF_UNDOCUMENTED with a reason. Silence is not one of the options.
     const named = new Set(skillBullets().map(([code]) => code));
     const omitted = CODES.filter((c) => !named.has(c));
-    expect(new Set(omitted)).toEqual(SKILL_MD_UNDOCUMENTED);
+    expect(new Set(omitted)).toEqual(RUN_REF_UNDOCUMENTED);
   });
 
   // The three counts below rotted in exactly the way this file's header warns about: the schema
   // reference's TABLE was guarded (above) and stayed correct, while the two prose sentences wrapping it
-  // and SKILL.md's pointer to it drifted to "four", "five" and "17" against an actual 11/9/20. A count
+  // and the skill's pointer to it drifted to "four", "five" and "17" against an actual 11/9/20. A count
   // stated in prose beside a guarded table is not covered by the table's guard — pin it explicitly.
   const WORDS = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve"];
 
@@ -174,8 +174,8 @@ describe("verdict-signal code set ↔ its five hand-maintained copies", () => {
     expect(schemaRefMd, `${SCHEMA_REF} total-count prose`).toContain(`All ${total} signal\ncodes`);
   });
 
-  it("SKILL.md's pointer states the real size of the signal table", () => {
-    expect(skillMd, "SKILL.md N-code signal table pointer").toContain(`The full ${CODES.length}-code signal table`);
+  it("run-record-replay.md's pointer states the real size of the signal table", () => {
+    expect(runRefMd, "run-record-replay.md N-code signal table pointer").toContain(`The full ${CODES.length}-code signal table`);
   });
 
   it("docs/scenario.md enumerates every warn-severity code, and claims the right count", () => {

@@ -295,17 +295,23 @@ describe("explicit `<a id>` anchors count only where GitHub would render them", 
  * have left both pointing at a heading that no longer exists — the file still resolves, so nothing
  * else notices. Both the file and the fragment are checked.
  */
-function skillPayloadRefs(file: string): { file: string; target: string; slug: string | undefined; raw: string }[] {
-  const text = readFileSync(file, "utf8");
-  const out: { file: string; target: string; slug: string | undefined; raw: string }[] = [];
+type PayloadRef = { file: string; target: string; slug: string | undefined; raw: string };
+
+function skillPayloadRefs(file: string, text = readFileSync(file, "utf8")): PayloadRef[] {
+  const out: PayloadRef[] = [];
   for (const m of text.matchAll(/\]\(((?:\.\.?\/)*\.claude\/skills\/[^)#\s]+\.md)(?:#([^)\s]+))?\)/g)) {
     out.push({ file, target: resolve(join(file, ".."), m[1]), slug: m[2], raw: m[0] });
   }
   return out;
 }
 
+/** The refs whose #fragment names no heading (or explicit anchor) in an existing target file. */
+function brokenPayloadFragments(refs: PayloadRef[]): PayloadRef[] {
+  return refs.filter((r) => r.slug && existsSync(r.target) && !pageAnchors(readFileSync(r.target, "utf8")).has(r.slug));
+}
+
 describe("repo docs' links into the skill payload resolve — file AND heading", () => {
-  const refs = allMarkdownPages().flatMap(skillPayloadRefs);
+  const refs = allMarkdownPages().flatMap((f) => skillPayloadRefs(f));
 
   it("found payload links to check, including at least one with a #fragment (guards a vacuous pass)", () => {
     expect(refs.length).toBeGreaterThan(0);
@@ -318,12 +324,28 @@ describe("repo docs' links into the skill payload resolve — file AND heading",
   });
 
   it("every #fragment names a heading in the linked payload file", () => {
-    const broken = refs.filter((r) => r.slug && existsSync(r.target) && !pageAnchors(readFileSync(r.target, "utf8")).has(r.slug));
+    const broken = brokenPayloadFragments(refs);
     expect(
       broken,
       broken
         .map((r) => `${relative(resolve("."), r.file)}: ${r.raw} — #${r.slug} is not a heading in ${relative(resolve("."), r.target)}`)
         .join("\n"),
     ).toEqual([]);
+  });
+});
+
+describe("the payload-link checker flags a missing heading (synthetic negative case)", () => {
+  // Parsed from text as if it lived in docs/, so the relative path resolves exactly as a real doc's would.
+  const fakeDoc = resolve("docs/__synthetic__.md");
+  const refs = (slug: string) => skillPayloadRefs(fakeDoc, `See [x](../.claude/skills/cowork-harness/references/gotchas.md#${slug}).`);
+
+  it("a link to a heading that does not exist is reported", () => {
+    const r = refs("no-such-heading-anywhere");
+    expect(r).toHaveLength(1);
+    expect(brokenPayloadFragments(r)).toHaveLength(1);
+  });
+
+  it("the same link to the real heading is not", () => {
+    expect(brokenPayloadFragments(refs("gotchas--the--passed--correct-landmines"))).toEqual([]);
   });
 });

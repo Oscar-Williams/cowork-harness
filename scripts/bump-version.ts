@@ -16,8 +16,9 @@
 // move and the new SKILL.md release-note bullet are also NOT automated here — both are content, not
 // mechanical substitution; main() prints a reminder.
 //
-// This design folds in adversarial-review hardening: dry-run-by-default (see above), tolerating the
-// README's bare `@>=X` floor, and a test that the current-version release-note bullet survives the bump.
+// Dry-run is the default (see above). Each rewriter is registered per file in FILE_REWRITERS, and a test
+// runs every one against the real file it is registered for, so a rewriter whose target has left the file
+// fails instead of silently no-opping at bump time.
 
 import { execSync } from "node:child_process";
 import { readdirSync, readFileSync, writeFileSync } from "node:fs";
