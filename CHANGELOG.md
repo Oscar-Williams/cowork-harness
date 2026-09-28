@@ -105,9 +105,11 @@ All notable changes to this project are documented here. The format is based on
   and readable, so the model may read it directly. Step 3 now classifies each rep by invocation
   (`skillsInvoked`), observed source access (the object form of `tool_called` over `SKILL.md`, plus
   `reference_read`) and answer quality. Step 6 calls a before/after drop a regression signal to
-  investigate, not proof the edit caused it. The measurement hygiene list says the same.
+  investigate, not proof the edit caused it. Step 5 no longer offers a not-invoked rep as a stand-in
+  control: outside `--ablate-skill` it can still read the source. The measurement hygiene list says the
+  same.
 - **"Commit the skill first" is now "freeze a recoverable source"** — commit it, or snapshot the skill
-  folder next to the run dir — in both the measurement reference and Recipe 6.
+  folder next to the run dir — in the measurement reference, Recipe 6 and the `SKILL.md` measure line.
 
 ## [3.10.0] — 2026-09-27
 

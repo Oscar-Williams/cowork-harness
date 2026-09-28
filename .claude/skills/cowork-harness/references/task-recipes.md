@@ -203,8 +203,8 @@ degrade the advice. It is real work to calibrate; these steps are the traps that
    **that one invocation**, so the agent answers from its own priors, and stamps the result
    `ablated: true`. It is the **control arm only** — run the same prompt again *without* the flag for
    the treatment arm; `--ablate-skill --repeat 5` gives you 5 control runs and 0 treatment runs, not an
-   A/B — and the rollup labels it `PASS [ABLATED — control arm]` so you cannot bank it as one. (Inspecting an organically not-invoked rep works too, but is not a substitute: that rep may
-   differ for other reasons.) If the answer still scores high without the skill, that claim is
+   A/B — and the rollup labels it `PASS [ABLATED — control arm]` so you cannot bank it as one. A not-invoked rep is not a control:
+   outside `--ablate-skill` it can still read the source (see step 3). If the answer still scores high without the skill, that claim is
    answerable from priors and tests the model, not your skill — strengthen it (a skill-specific fact) or
    drop it. Everything past "run both arms" — scrubbing giveaways, shuffling, judging blind, unblinding
    after grading — is yours to build; the harness supplies the runs and the control.

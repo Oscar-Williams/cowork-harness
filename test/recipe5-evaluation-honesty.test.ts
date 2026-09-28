@@ -34,6 +34,8 @@ describe("Recipe 5 / measurement: no overclaims", () => {
     ["not invoked ⇒ answered from priors", /answered from the model's priors/i],
     ["a drop is a regression the edit caused", /regression your edit caused/i],
     ["commit the skill first / before", /commit the skill (first|before)/i],
+    ["the skill committed (as the freeze discipline)", /skill committed/i],
+    ["a not-invoked rep works as a control", /organically not-invoked rep works too/i],
     ["a not-invoked rep measures the model", /never triggered is a measurement of the model/i],
   ] as const)
     it(`no reference says: ${label}`, () => {
@@ -57,6 +59,11 @@ describe("Recipe 5: the three-way classification", () => {
   it("scopes 'the source is readable' to non-ablated reps", () => {
     expect(recipe5).toMatch(/non-ablated rep/i);
     expect(recipe5).toMatch(/--ablate-skill.{0,120}no skill mounted/i);
+  });
+
+  it("step 5 says a not-invoked rep is not a control, pointing back to step 3", () => {
+    expect(recipe5).toMatch(/not-invoked rep is not a control/i);
+    expect(recipe5).toMatch(/outside `--ablate-skill` it can still read the source \(see step 3\)/i);
   });
 
   it("frames a before/after drop as a signal to investigate", () => {
