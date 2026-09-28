@@ -1,0 +1,28 @@
+# yaml-language-server: $schema=../../../schema/scenario.schema.json
+# Real-stream fixture for the object form of tool_called / tool_not_called: a main agent that
+# DISPATCHES a sub-agent, and a sub-agent that runs a shell command. It exists so the scope tests
+# (scope: main / subagent / any) arm on parented tool_use frames the real agent emitted, not only on
+# synthetic streams. Recorded once at container (sealed, committable); replayed token-free by
+# test/tool-call-real-stream.test.ts.
+name: tool-call-dispatch-shell
+baseline: latest
+session: (inline)
+fidelity: container
+
+prompt: |
+  Please use a sub-agent to find out which Python version is installed in this sandbox, and have it
+  report the version back to you. Don't check it yourself — delegate it. Then tell me the version.
+
+answers:
+  - when_tool: Agent
+    decide: allow
+  - when_tool: Task
+    decide: allow
+  - when_tool: Bash
+    allow_if: "!command.includes('rm') && !command.includes('curl')"
+    else: deny
+
+assert:
+  - result: success
+  - subagent_dispatched: "."
+  - tool_called: { tool: [Bash, mcp__workspace__bash], input: { command: "python" }, scope: any }
