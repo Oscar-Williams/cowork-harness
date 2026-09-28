@@ -76,8 +76,11 @@ All notable changes to this project are documented here. The format is based on
   carries no id, is still not counted.
 - **`trace --view tool-durations --scope main|subagent|any`** (default `any`) narrows the table using
   the run's own `toolCalls` classification from `result.json`, the same scopes as `tool_called`'s object
-  form. A narrowed scope with no `result.json`, or one without `toolCalls`, reports unavailable instead of
-  rendering every call. **`--per-call`** adds one row per call with its duration, or "no result" when it
+  form — but it defaults to `any`, where `tool_called`'s object form defaults to `main`. A narrowed scope
+  with no `result.json`, or one without `toolCalls`, reports unavailable instead of rendering every call.
+  `main` + `subagent` can be fewer than `any`: a call whose parent is not a recorded dispatch (origin
+  `unknown`) is kept only by `any`, and a narrowed scope counts those as `unknownOrigin` and calls absent
+  from `toolCalls` as `unclassified`. **`--per-call`** adds one row per call with its duration, or "no result" when it
   never paired.
 
 ### Changed

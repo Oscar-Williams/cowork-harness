@@ -628,9 +628,14 @@ export interface ToolDurationsView {
   available: boolean;
   reason?: string;
   durations: Record<string, ToolDurationEntry>;
-  /** Calls the timeline holds that result.json's `toolCalls` has no entry for — excluded from a narrowed
-   *  scope, and counted so the exclusion is visible. Present only under `--scope main|subagent`. */
+  /** Calls absent from toolCalls: the timeline holds them but result.json's `toolCalls` has no entry —
+   *  excluded from a narrowed scope, and counted so the exclusion is visible. Present only under
+   *  `--scope main|subagent`. */
   unclassified?: number;
+  /** Calls the run classified `origin: "unknown"` (parent not a recorded dispatch). Neither `main` nor
+   *  `subagent` keeps them — only `any` does — so `main` + `subagent` can be fewer calls than `any`.
+   *  Counted here so a narrowed scope never drops them silently. Present only under `--scope main|subagent`. */
+  unknownOrigin?: number;
   /** One row per call (stream order), only with `--per-call`. */
   calls?: ToolDurationCallRow[];
 }
@@ -662,6 +667,7 @@ export function buildToolDurations(file: string, opts: { scope?: ToolDurationSco
 
   let events = timelineData.events;
   let unclassified: number | undefined;
+  let unknownOrigin: number | undefined;
   const originById = new Map<string, "main" | "subagent" | "unknown">();
   const result = readSiblingResult(file);
   for (const c of result?.toolCalls ?? []) if (c.toolUseId) originById.set(c.toolUseId, c.origin);
@@ -671,11 +677,13 @@ export function buildToolDurations(file: string, opts: { scope?: ToolDurationSco
     if (result.toolCalls === undefined)
       return unavailable(`--scope ${scope} needs result.json's toolCalls, which this run's result.json predates`);
     unclassified = 0;
+    unknownOrigin = 0;
     const keep = new Set<string>();
     for (const ev of events) {
       if (ev.type !== "tool_use" || !ev.toolUseId) continue;
       const origin = originById.get(ev.toolUseId);
       if (origin === undefined) unclassified++;
+      else if (origin === "unknown") unknownOrigin++;
       else if (origin === scope) keep.add(ev.toolUseId);
     }
     // Keep only in-scope tool_use events; results pair by id, so an out-of-scope result pairs nothing.
@@ -686,6 +694,7 @@ export function buildToolDurations(file: string, opts: { scope?: ToolDurationSco
     available: true,
     durations: foldToolDurations(events),
     ...(unclassified !== undefined ? { unclassified } : {}),
+    ...(unknownOrigin !== undefined ? { unknownOrigin } : {}),
   };
   if (opts.perCall)
     view.calls = pairToolCalls(events).map((c) => ({
@@ -730,8 +739,10 @@ export function formatToolDurations(v: ToolDurationsView): string {
         (unpaired ? `; ${unpaired} unpaired call(s) have no duration` : ""),
     );
   }
+  if (v.unknownOrigin)
+    lines.push(`${v.unknownOrigin} call(s) with unknown origin (parent not a recorded dispatch) excluded; use --scope any`);
   if (v.unclassified)
-    lines.push(`${v.unclassified} call(s) in the timeline were not classified by the run (no toolCalls entry) — excluded from this scope`);
+    lines.push(`${v.unclassified} call(s) absent from toolCalls (the run never classified them) — excluded from this scope`);
   if (v.calls) {
     lines.push("\nper call (stream order):");
     for (const c of v.calls)

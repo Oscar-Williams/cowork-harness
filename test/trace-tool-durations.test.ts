@@ -103,7 +103,7 @@ describe("trace --view tool-durations: --scope", () => {
     const v = buildToolDurations(runDir({ timeline: TIMELINE, result: { toolCalls: TOOL_CALLS.slice(0, 3) } }), { scope: "main" });
     expect(v.unclassified).toBe(1); // b2
     expect(v.durations.Bash).toBeUndefined();
-    expect(formatToolDurations(v)).toMatch(/1 call.*not classified/);
+    expect(formatToolDurations(v)).toMatch(/1 call\(s\) absent from toolCalls/);
   });
 });
 
@@ -172,5 +172,45 @@ describe.skipIf(!existsSync(CLI))("trace CLI: --scope=<v> equals form", () => {
     expect(r.status, r.stderr).toBe(0);
     const payload = JSON.parse(r.stdout);
     expect((payload.results?.[0] ?? payload).scope).toBe("subagent");
+  });
+});
+
+describe("trace --view tool-durations: unknown-origin calls under a narrowed scope", () => {
+  // Read r1 (main); Skill s1 whose parent "ghost" is not a recorded dispatch (unknown); Bash b1 under s1 (unknown).
+  const tl = [
+    HEADER,
+    use(0, 0, "r1", "Read"),
+    res(1, 5, "r1"),
+    use(2, 10, "s1", "Skill", "ghost"),
+    res(3, 20, "s1"),
+    use(4, 30, "b1", "Bash", "s1"),
+    res(5, 40, "b1"),
+  ];
+  const calls = [
+    { toolUseId: "r1", name: "Read", input: {}, origin: "main" },
+    { toolUseId: "s1", name: "Skill", input: {}, origin: "unknown", parentToolUseId: "ghost" },
+    { toolUseId: "b1", name: "Bash", input: {}, origin: "unknown", parentToolUseId: "s1" },
+  ];
+
+  it("--scope main counts them in unknownOrigin (not silently dropped) and says to use --scope any", () => {
+    const v = buildToolDurations(runDir({ timeline: tl, result: { toolCalls: calls } }), { scope: "main" });
+    expect(v.durations).toEqual({ Read: { calls: 1, totalMs: 5, maxMs: 5, unpaired: 0 } });
+    expect(v.unknownOrigin).toBe(2);
+    expect(v.unclassified).toBe(0);
+    const text = formatToolDurations(v);
+    expect(text).toMatch(/2 call\(s\) with unknown origin \(parent not a recorded dispatch\) excluded; use --scope any/);
+  });
+
+  it("--scope subagent counts them too; --scope any keeps them and reports no unknownOrigin exclusion", () => {
+    expect(buildToolDurations(runDir({ timeline: tl, result: { toolCalls: calls } }), { scope: "subagent" }).unknownOrigin).toBe(2);
+    const any = buildToolDurations(runDir({ timeline: tl, result: { toolCalls: calls } }));
+    expect(any.unknownOrigin).toBeUndefined();
+    expect(Object.keys(any.durations).sort()).toEqual(["Bash", "Read", "Skill"]);
+  });
+
+  it("the unclassified line names what it counts: calls absent from toolCalls", () => {
+    const v = buildToolDurations(runDir({ timeline: tl, result: { toolCalls: calls.slice(0, 1) } }), { scope: "main" });
+    expect(v.unclassified).toBe(2);
+    expect(formatToolDurations(v)).toMatch(/2 call\(s\) absent from toolCalls/);
   });
 });
