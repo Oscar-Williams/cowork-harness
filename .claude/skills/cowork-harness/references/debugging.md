@@ -87,7 +87,7 @@ decide which assertions from *Assertions: two orthogonal axes* in `assertions-gu
   `outputTruncated` on a matched tool result). Three separately-shaped rollups, easy to conflate in a
   `jq` recipe: `toolCounts` is a flat `{tool: number}` call-count map, `toolErrors` is
   `{tool: {calls, errors}}`, and `toolDurations` is `{tool: {calls, totalMs, maxMs, unpaired}}` — a wall
-  gap over main-agent and sub-agent calls alike, not execution time (`calls` counts paired calls only;
+  gap over main-agent and sub-agent calls alike, where observed, not execution time (`calls` counts paired calls only;
   see `measurement.md`). (Full per-field
   semantics: [`docs/cli.md` → What you get out](https://github.com/yaniv-golan/cowork-harness/blob/main/docs/cli.md#what-you-get-out-inspectable-output) (repo-only); [`schema/run-result.json`](https://github.com/yaniv-golan/cowork-harness/blob/main/schema/run-result.json) is the
   machine source.)

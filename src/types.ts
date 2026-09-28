@@ -1535,7 +1535,8 @@ export interface RunResult {
   // `unpaired` is optional in this READER type: the writer always emits it, but an older result.json (which
   // verify-run passes through verbatim) lacks it — absent means unknown, not 0.
   toolDurations?: Record<string, { calls: number; totalMs: number; maxMs: number; unpaired?: number }>;
-  /** What `toolDurations` measures — present exactly when `toolDurations` is. `"wall_gap"`: harness-
+  /** What `toolDurations` measures — present exactly when `toolDurations` is (result files written by this
+   *  version or later). `"wall_gap"`: harness-
    *  observed wall time from tool_use to tool_result, including model/transport and permission latency;
    *  an Agent/Task entry spans its whole sub-agent run. On replay, the record-time gaps. Absent on a
    *  result file written before this field existed (the measure was the same wall gap then). */

@@ -30,7 +30,7 @@ from `tool_use` to `tool_result`** as the harness saw them (`toolDurationsBasis:
 includes model/transport and permission latency, and an `Agent`/`Task` entry spans its whole sub-agent
 run, so it is not execution time and summing it across tools double-counts. `calls`, `totalMs` and
 `maxMs` cover paired calls only; `unpaired` counts calls that never got a result, which have no duration.
-The fold covers main-agent and sub-agent calls alike. Narrow the trace view with `--scope main|subagent`,
+The fold covers main-agent and sub-agent calls alike, where observed (microvm sub-agent result delivery is unobserved). Narrow the trace view with `--scope main|subagent`,
 which reads the run's own classification from `result.json`, and add `--per-call` for one row per call.
 Compare timings between runs of the same tier and model only.
 

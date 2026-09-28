@@ -869,7 +869,9 @@ Covered-surface changes follow semver as of `1.0.0` — see [RELEASING.md](./REL
   truth; consumers commit and diff these).
 - **RunResult envelope** — `schema/run-result.json` under `--output-format json` (§11): the
   `ok` / `results[]` / `error` shape and the verdict-signal codes (§11.0). Renaming or removing a key, or
-  changing what an existing key means, is breaking; adding one is not (as for the envelopes below).
+  changing what an existing key means, is breaking; adding one is not. The set of entries in a map-valued
+  key (e.g. `toolDurations`, keyed by tool name) is not the key's meaning: adding an entry, such as a tool
+  listed with `calls: 0`, is additive.
 - **`verify-cassettes` envelope** — `schema/verify-cassettes.json` under `--output-format json`
   (§11.1): the `command` / `ok` / `coverage` / `results[]` shape with the per-file
   `findings` / `staleness` / `unverifiable` / `notes` / `version` / `error` channels, and the exit-code

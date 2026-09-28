@@ -2,7 +2,8 @@ import type { TimelineEvent } from "../agent/timeline.js";
 
 /** One tool's entry in `RunResult.toolDurations`. `calls`/`totalMs`/`maxMs` are over PAIRED calls only
  *  (a `tool_use` whose `tool_result` arrived in this timeline); both are 0 when `calls` is 0. `unpaired`
- *  counts this tool's calls that carried an id but never paired, so they have no duration. */
+ *  counts this tool's calls that carried an id but never paired with a `tool_result` the harness
+ *  observed, so they have no duration. */
 export interface ToolDurationEntry {
   calls: number;
   totalMs: number;
@@ -23,15 +24,16 @@ export type ToolDurationsBasis = "wall_gap";
  * sub-agent run. It is not isolated execution time: the SDK stream carries no runtime-side exec
  * start/end stamp. On replay these are the record-time timestamps, frozen in the cassette.
  *
- * Scope: every call in the timeline — main agent and sub-agents alike. `trace --view tool-durations
- * --scope` narrows it.
+ * Scope: every call in the timeline — main agent and sub-agents alike, where observed (sub-agent
+ * results reach the parent stream on container and hostloop; microvm sub-agent result delivery is
+ * unobserved). `trace --view tool-durations --scope` narrows it.
  *
- * Unpaired: a `tool_use` WITH an id and no matching `tool_result` (e.g. the run ended mid-call) is
- * counted in `unpaired`, so a tool is listed even when none of its calls paired. A `tool_use` with NO id
- * is not counted anywhere: on a real stream it is the synthetic MCP round-trip echo of a call that
- * already arrived with an id (session.ts marks it `synthetic`; the timeline keeps no flag), and counting
- * it would report every paired `mcp__*` call as unpaired too. A `tool_result` with no matching
- * `tool_use` pairs nothing and is ignored.
+ * Unpaired: a `tool_use` WITH an id and no matching `tool_result` the harness observed (e.g. the run
+ * ended mid-call) is counted in `unpaired`, so a tool is listed even when none of its calls paired. A
+ * `tool_use` with NO id is not counted anywhere: on a real stream those are MCP round-trip/handshake
+ * echoes, which carry no id (session.ts marks them `synthetic`; the timeline keeps no flag) — every
+ * recorded timeline carries a dozen `mcp__<server>__*` handshake echoes, and counting them would invent
+ * unpaired calls. A `tool_result` with no matching `tool_use` pairs nothing and is ignored.
  */
 export function foldToolDurations(timeline: TimelineEvent[]): Record<string, ToolDurationEntry> {
   const out: Record<string, ToolDurationEntry> = {};

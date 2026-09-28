@@ -23,8 +23,8 @@ All notable changes to this project are documented here. The format is based on
   oversized reference by topic.
 - **`toolDurations` entries gain `unpaired`, and a tool can now appear with `calls: 0`.** A tool whose
   calls all went unpaired used to be absent; it is now listed with `calls: 0, totalMs: 0, maxMs: 0` and
-  its `unpaired` count. `calls`/`totalMs`/`maxMs` keep their meaning (paired calls only), so guard an
-  average against `calls: 0`. A consumer that validates `result.json` against an older copy of
+  its `unpaired` count. `calls`/`totalMs`/`maxMs` keep their meaning (paired calls only), so an average
+  `totalMs / calls` needs a `calls > 0` guard. A consumer that validates `result.json` against an older copy of
   `schema/run-result.json` will reject the new keys; use the current schema.
 - **`trace --view tool-durations` output changed.** The text view opens with a basis line and shows
   paired/unpaired counts per tool. The JSON payload is now `{file, basis, scope, available, durations,
@@ -68,12 +68,13 @@ All notable changes to this project are documented here. The format is based on
     the ~2.65 B per token measured on this skill's own markdown.
 - **`RunResult.toolDurationsBasis`** (`"wall_gap"`) states what `toolDurations` measures: the
   harness-observed gap from `tool_use` to `tool_result`, which includes model/transport and permission
-  latency, with an `Agent`/`Task` entry spanning its whole sub-agent run. It is present exactly when
-  `toolDurations` is, on the live, replay and chat lanes; `verify-run` passes the kept run's value
+  latency, with an `Agent`/`Task` entry spanning its whole sub-agent run. In result files written by this
+  version or later it is present exactly when `toolDurations` is, on the live, replay and chat lanes; `verify-run` passes the kept run's value
   through, and a `result.json` written before this release has neither it nor `unpaired`.
-- **`toolDurations[tool].unpaired`:** calls that carried an id but never got a `tool_result` (e.g. the
-  run ended mid-call). They were silently excluded before. The synthetic MCP round-trip echo, which
-  carries no id, is still not counted.
+- **`toolDurations[tool].unpaired`:** calls that carried an id but never paired with a `tool_result` the
+  harness observed (e.g. the run ended mid-call). They were silently excluded before. MCP
+  round-trip/handshake echoes, which carry no id, are not counted. Sub-agent calls are covered where
+  observed: microvm sub-agent result delivery is unobserved.
 - **`trace --view tool-durations --scope main|subagent|any`** (default `any`) narrows the table using
   the run's own `toolCalls` classification from `result.json`, the same scopes as `tool_called`'s object
   form — but it defaults to `any`, where `tool_called`'s object form defaults to `main`. A narrowed scope

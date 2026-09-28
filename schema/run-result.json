@@ -407,7 +407,7 @@
     },
     "toolDurations": {
       "type": "object",
-      "description": "Per-tool timing folded from the run's timeline, over main-agent AND sub-agent calls. What the numbers measure is named by toolDurationsBasis. calls/totalMs/maxMs are over PAIRED calls (a tool_use whose tool_result arrived); totalMs and maxMs are 0 when calls is 0. unpaired counts the tool's calls that never got a result (e.g. the run ended mid-call), so a tool can appear with calls 0.",
+      "description": "Per-tool timing folded from the run's timeline, over main-agent AND sub-agent calls, where observed (sub-agent results reach the parent stream on container and hostloop; microvm sub-agent result delivery is unobserved). What the numbers measure is named by toolDurationsBasis. calls/totalMs/maxMs are over PAIRED calls (a tool_use whose tool_result arrived); totalMs and maxMs are 0 when calls is 0. unpaired counts the tool's calls that never paired with a tool_result the harness observed (e.g. the run ended mid-call), so a tool can appear with calls 0.",
       "additionalProperties": {
         "type": "object",
         "properties": {
@@ -422,7 +422,7 @@
           },
           "unpaired": {
             "type": "number",
-            "description": "calls to this tool that carried an id but never paired with a tool_result, so they have no duration. The synthetic MCP round-trip echo (no id) is not counted. Always written from the release that added it; absent in older result files, where it means unknown, not 0 — so it is not in required, and result files written earlier still validate."
+            "description": "calls to this tool that carried an id but never paired with a tool_result the harness observed, so they have no duration. MCP round-trip/handshake echoes, which carry no id, are not counted. Always written from the release that added it; absent in older result files, where it means unknown, not 0 \u2014 so it is not in required, and result files written earlier still validate."
           }
         },
         "required": ["calls", "totalMs", "maxMs"],
@@ -432,7 +432,7 @@
     "toolDurationsBasis": {
       "type": "string",
       "enum": ["wall_gap"],
-      "description": "What toolDurations measures; present exactly when toolDurations is. wall_gap: harness-observed wall time from tool_use to tool_result, including model/transport and permission/decider latency; an Agent/Task entry spans its whole sub-agent run. It is not isolated execution time. On replay these are the record-time gaps frozen in the cassette."
+      "description": "What toolDurations measures; present exactly when toolDurations is (result files written by this version or later). wall_gap: harness-observed wall time from tool_use to tool_result, including model/transport and permission/decider latency; an Agent/Task entry spans its whole sub-agent run. It is not isolated execution time. On replay these are the record-time gaps frozen in the cassette."
     },
     "models": {
       "type": "array",
