@@ -1020,6 +1020,7 @@ describe("executeScenario refuses a contradictory scenario before doing any work
   const contradictory = {
     name: "wired",
     prompt: "hi",
+    fidelity: "container",
     baseline: "desktop-0.0.0-does-not-exist",
     assert: [{ questions_count_max: 0 }, { gate_answer_count_min: 1 }],
   } as unknown as Parameters<typeof executeScenario>[0];

@@ -159,7 +159,7 @@ describe("question_options wiring", () => {
   // spawn. The evaluator repeats the check for hand-built contexts, which is why an evaluate()-only
   // test passed while the schema still accepted the document.
   it("rejects equals + contains at LOAD, before any run is spent", () => {
-    const doc = (qo: unknown) => ({ prompt: "p", assert: [{ question_options: qo }] });
+    const doc = (qo: unknown) => ({ prompt: "p", fidelity: "container", assert: [{ question_options: qo }] });
     expect(() => ScenarioObject.parse(doc({ equals: ["a"], contains: ["a"] }))).toThrow(/exactly one of/);
     expect(() => ScenarioObject.parse(doc({ when_question: "x" }))).toThrow(/exactly one of/);
     // The valid forms still parse.

@@ -11,7 +11,7 @@ import { ScenarioObject } from "../src/types.js";
 // re-record" — the wrong remedy, and the `--best-effort-future-cassette` path is unreachable. With it, an
 // older CLI says "cassette format too new; upgrade", which is the truth.
 
-const parse = (assert: unknown[]) => ScenarioObject.parse({ prompt: "x", assert });
+const parse = (assert: unknown[]) => ScenarioObject.parse({ prompt: "x", fidelity: "container", assert });
 
 describe("the `assert` entry of the stamp is value-aware", () => {
   it("an object-form tool_called lifts the stamp to 13", () => {

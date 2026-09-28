@@ -59,7 +59,7 @@ function cassetteJson(opts: { name?: string; assert?: unknown[]; controlOut?: un
   );
 }
 function scenarioYaml(assertBody: string, extra = ""): string {
-  return `name: c\nprompt: do the thing\n${extra}assert:\n${assertBody}`;
+  return `name: c\nfidelity: container\nprompt: do the thing\n${extra}assert:\n${assertBody}`;
 }
 
 describe.skipIf(!can)("replay --reassert --write — persist a stream-derivable assert edit", () => {
@@ -153,7 +153,7 @@ describe.skipIf(!can)("replay --reassert --write — refuse buckets (no silent f
     write(cwd, "c.cassette.json", cassetteJson({ assert: [{ result: "success" }] }));
     // The sibling changes the PROMPT (a recording-shaping field): the frozen events no longer correspond to
     // this scenario, so --reassert must hard-fail before the write step ever runs — you must re-record.
-    write(cwd, "c.yaml", "name: c\nprompt: a DIFFERENT prompt\nassert:\n  - transcript_contains: hello\n");
+    write(cwd, "c.yaml", "name: c\nfidelity: container\nprompt: a DIFFERENT prompt\nassert:\n  - transcript_contains: hello\n");
     const before = readFileSync(join(cwd, "c.cassette.json"), "utf8");
     const w = replay(cwd, ["c.cassette.json", "--reassert", "--write"]);
     expect(w.code).not.toBe(0);
@@ -201,7 +201,7 @@ describe.skipIf(!can)("replay --reassert --write — redaction v2 (block-only, v
     cass.scenario.prompt = "call [REDACTED:apikey]"; // frozen prompt, redacted at record time
     write(cwd, "c.cassette.json", JSON.stringify(cass, null, 2));
     write(cwd, ".cowork-redact.json", JSON.stringify({ patterns: [{ regex: "ACME-\\d+-KEY", label: "apikey" }] }));
-    write(cwd, "c.yaml", "name: c\nprompt: call ACME-1234-KEY\nassert:\n  - transcript_contains: hello\n"); // plaintext
+    write(cwd, "c.yaml", "name: c\nfidelity: container\nprompt: call ACME-1234-KEY\nassert:\n  - transcript_contains: hello\n"); // plaintext
     const before = readFileSync(join(cwd, "c.cassette.json"), "utf8");
     const w = replay(cwd, ["c.cassette.json", "--reassert", "--write"]);
     expect(w.code).not.toBe(0);

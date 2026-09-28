@@ -4011,7 +4011,8 @@
       },
       ".fidelity": {
         "type": "string",
-        "enum": ["protocol", "container", "microvm", "hostloop", "cowork"]
+        "enum": ["protocol", "container", "microvm", "hostloop", "cowork"],
+        "required": true
       },
       ".lane": {
         "type": "string",

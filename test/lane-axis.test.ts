@@ -10,15 +10,15 @@ import { resolve } from "node:path";
  *  root is delivered by location; remotely nothing is delivered by location at all. */
 describe("lane axis — schema", () => {
   it("defaults to local, so every existing scenario keeps its meaning", () => {
-    expect(Scenario.parse({ prompt: "x" }).lane).toBe("local");
+    expect(Scenario.parse({ prompt: "x", fidelity: "container" }).lane).toBe("local");
   });
 
   it("accepts remote", () => {
-    expect(Scenario.parse({ prompt: "x", lane: "remote" }).lane).toBe("remote");
+    expect(Scenario.parse({ prompt: "x", fidelity: "container", lane: "remote" }).lane).toBe("remote");
   });
 
   it("rejects anything else rather than silently coercing", () => {
-    expect(() => Scenario.parse({ prompt: "x", lane: "cloud" })).toThrow();
+    expect(() => Scenario.parse({ prompt: "x", fidelity: "container", lane: "cloud" })).toThrow();
   });
 
   // Three axes that are easy to conflate and must stay independent: the isolation tier, where the run

@@ -261,7 +261,7 @@ describe.skipIf(!can)("cli: stats — generation queries", () => {
     seedRun(root, "pricey", "local_1", { cost: { usd: 3.5 } });
     run(["stats", "--reindex"], root);
     const d = mkdtempSync(join(tmpdir(), "cli-stats-budget-"));
-    writeFileSync(join(d, "pricey.yaml"), "name: pricey\nprompt: hi\n");
+    writeFileSync(join(d, "pricey.yaml"), "name: pricey\nfidelity: container\nprompt: hi\n");
     const r = spawnSync("node", [CLI, "run", join(d, "pricey.yaml"), "--max-budget-usd", "1.0"], {
       encoding: "utf8",
       env: { ...process.env, COWORK_HARNESS_RUNS_DIR: root },

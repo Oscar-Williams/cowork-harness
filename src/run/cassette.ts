@@ -35,7 +35,15 @@ import {
   FIDELITY_TIERS,
   isLiveModelId,
 } from "../types.js";
-import { executeScenario, assertContradiction, parseScenarioFile, collectArtifactPaths, parseSessionFile, slugForPath } from "./execute.js";
+import {
+  executeScenario,
+  assertContradiction,
+  parseScenarioFile,
+  collectArtifactPaths,
+  parseSessionFile,
+  slugForPath,
+  FidelityMissingError,
+} from "./execute.js";
 import { UsageError, UnknownBaselineError, compactSchemaError } from "../errors.js";
 import { preflightBudget, preflightBatchBudget, batchBudgetTracker, estimateBatchCost, batchCostEstimateLine } from "./budget.js";
 
@@ -138,7 +146,7 @@ import {
   type AllowInput,
   type AllowPattern,
 } from "../scan.js";
-import { parse as parseYaml } from "yaml";
+import { parse as parseYaml, YAMLParseError } from "yaml";
 
 // Synchronous fd writes (match cli.ts): a `process.stdout.write` + `process.exit()` pair truncates the
 // machine envelope on a PIPE (fd 1 goes non-blocking once the stream is touched; the async tail is dropped
@@ -4338,7 +4346,11 @@ export async function cmdRecord(args: string[]) {
         log(`  ✓ ${tag} ${cp} (${r.result.result})`);
         return true;
       } catch (e) {
-        log(`  ✗ ${tag} ${cp}: ${recordErrorText(e)}`);
+        // A source without `fidelity:` gets the remedy worded for THIS cassette: add the tier it recorded.
+        // The generic remedy leads with `container`, which on a hostloop/protocol cassette would switch the
+        // tier on the next record — a recording-shaping change nobody chose.
+        const why = e instanceof FidelityMissingError ? fidelityMissingForCassette(e, cassette.scenario) : recordErrorText(e);
+        log(`  ✗ ${tag} ${cp}: ${why}`);
         return false;
       }
     });
@@ -5182,13 +5194,31 @@ const normRecordingShapingValue = (v: unknown) => JSON.stringify(v ?? null);
 const RECORDING_SHAPING_CHECKS: Record<(typeof RECORDING_SHAPING_FIELDS)[number], (frozen: Scenario, onDisk: Scenario) => boolean> = {
   prompt: (frozen, onDisk) => (frozen.prompt ?? "") === (onDisk.prompt ?? ""),
   baseline: (frozen, onDisk) => (frozen.baseline ?? "latest") === (onDisk.baseline ?? "latest"),
-  fidelity: (frozen, onDisk) => (frozen.fidelity ?? "container") === (onDisk.fidelity ?? "container"),
+  // The frozen side keeps its fallback (a hand-built cassette may lack the key); the on-disk side is a loaded
+  // scenario, where `fidelity` is required.
+  fidelity: (frozen, onDisk) => (frozen.fidelity ?? "container") === onDisk.fidelity,
   lane: (frozen, onDisk) => (frozen.lane ?? "local") === (onDisk.lane ?? "local"),
   answers: (frozen, onDisk) => normRecordingShapingValue(frozen.answers ?? []) === normRecordingShapingValue(onDisk.answers ?? []),
   skills: (frozen, onDisk) => normRecordingShapingValue(frozen.skills ?? []) === normRecordingShapingValue(onDisk.skills ?? []),
   requires_capabilities: (frozen, onDisk) =>
     normRecordingShapingValue(frozen.requires_capabilities ?? []) === normRecordingShapingValue(onDisk.requires_capabilities ?? []),
 };
+
+/** The remedy for an on-disk sibling that omits `fidelity:`, worded for a path that HAS a cassette: the
+ *  answer is not "pick a tier" but "add the tier this cassette recorded". Any other tier is a recording-shaping
+ *  change (see RECORDING_SHAPING_CHECKS), so the generic `container` advice would turn a missing key into a
+ *  drift on a `hostloop` or `protocol` cassette. The frozen side falls back to `container` for a hand-built
+ *  cassette, the same fallback the drift check uses. Shared by the paths that read the sibling: the
+ *  default `replay` notice, `replay --assert-from`, `verify-cassettes`' drift check, and
+ *  `record --rerecord-stale`. */
+export function fidelityMissingForCassette(e: FidelityMissingError, frozen: Pick<Scenario, "fidelity">): string {
+  const tier = frozen.fidelity ?? "container";
+  return (
+    `\`fidelity:\` is required (since 4.0.0) — add \`fidelity: ${tier}\` to ${e.path}, the tier this cassette recorded ` +
+    `(a different tier is a recording-shaping change and needs a re-record)` +
+    (e.otherIssues ? `. Also: ${e.otherIssues}` : "")
+  );
+}
 
 function recordingShapingDrift(frozen: Scenario, onDisk: Scenario): string[] {
   return RECORDING_SHAPING_FIELDS.filter((key) => !RECORDING_SHAPING_CHECKS[key](frozen, onDisk));
@@ -5200,13 +5230,15 @@ function recordingShapingDrift(frozen: Scenario, onDisk: Scenario): string[] {
  *  and caught only by the opt-in `--assert-from`. Covers every field in `RECORDING_SHAPING_FIELDS` (prompt,
  *  baseline, fidelity, lane, answers, skills, requires_capabilities — see recordingShapingDrift), each
  *  default-normalized so a `[]`-vs-undefined churn can't false-positive. A resolvable+drifted field from an EXACTLY-recorded
- *  (persisted) source is a DEFINITE divergence → hard fail; a name-resolved match, or an unresolvable/
- *  unparseable source, is "can't compare" → a non-failing note, never a false-red (many valid cassettes ship
- *  without a committed source). */
+ *  (persisted) source is a DEFINITE divergence → hard fail. A persisted source the LOADER rejects (a schema
+ *  violation such as no `fidelity:`, a bad assertion regex, a reserved value) is `unverifiable: true` — the check cannot run until the file is fixed, and
+ *  "cannot verify" is not green. A name-resolved match, an unresolvable source, or a YAML syntax break is
+ *  "can't compare" → a non-failing note, never a false-red (many valid cassettes ship without a committed
+ *  source, and a half-written sibling is a normal mid-edit state). */
 export function scenarioContentDrift(
   cassette: Pick<Cassette, "scenarioSource" | "scenario">,
   cassetteFile: string,
-): { verifiable: true; drifted: string[] } | { verifiable: false; reason?: string } {
+): { verifiable: true; drifted: string[] } | { verifiable: false; reason?: string; unverifiable?: true } {
   try {
     const src = _resolveRerecordSource(cassetteFile, cassette);
     // No on-disk source at all is the NORMAL standalone-cassette case — nothing to compare, and that's
@@ -5216,14 +5248,34 @@ export function scenarioContentDrift(
     try {
       onDisk = parseScenarioFile(src.path);
     } catch (e) {
-      // A source that DOES resolve but won't parse is a genuine "should be checkable but isn't" — worth a
-      // note. Mirror the default replay lane: a mid-edit/invalid on-disk YAML must NEVER abort verify-cassettes.
+      // The loader REJECTED the recorded source — a schema violation (e.g. no `fidelity:`, required since
+      // 4.0.0), a malformed assertion regex, a reserved value. None of those is transient: until the file
+      // is fixed, an edited-but-not-re-recorded prompt goes undetected on every run of this gate. "Cannot
+      // verify" is not green, so it is `unverifiable` (exit 3) — but only for a PERSISTED source, the one
+      // this cassette really was recorded from. A name-lookup match may be an unrelated file. A YAML
+      // SYNTAX break is the one exception: that is the half-written, mid-edit state, and it stays a note.
+      if (!(e instanceof YAMLParseError) && src.via === "persisted")
+        return {
+          verifiable: false,
+          unverifiable: true,
+          reason:
+            e instanceof FidelityMissingError
+              ? `the recorded scenario source does not load, so prompt drift was not checked: ${fidelityMissingForCassette(e, cassette.scenario)}`
+              : `the recorded scenario source ${src.path} does not load (${compactSchemaError((e as Error).message)}), so prompt drift was not checked — fix the file; \`cowork-harness record ${src.path} --dry-run\` shows the full error`,
+        };
+      // Anything else — a YAML syntax break (the mid-edit case) or a name-lookup source — stays a
+      // non-failing note. Mirror the default replay lane: a mid-edit on-disk YAML must NEVER abort or red
+      // verify-cassettes.
       return {
         verifiable: false,
         // COMPACT, deliberately: this string lands in the `notes[]` array of a schema-covered envelope.
         // The raw Zod message put 13 lines of JSON between the `(` and the `— prompt drift not checked`
-        // that closes the sentence.
-        reason: `on-disk scenario ${src.path} did not parse (${compactSchemaError((e as Error).message)}) — prompt drift not checked`,
+        // that closes the sentence. A missing `fidelity:` carries its own one-line remedy instead, whole —
+        // the 200-char compaction cut it before the tier to add.
+        reason:
+          e instanceof FidelityMissingError
+            ? `on-disk scenario ${src.path} did not load — prompt drift not checked: ${fidelityMissingForCassette(e, cassette.scenario)}`
+            : `on-disk scenario ${src.path} did not parse (${compactSchemaError((e as Error).message)}) — prompt drift not checked`,
       };
     }
     const drifted = recordingShapingDrift(cassette.scenario as Scenario, onDisk);
@@ -5824,6 +5876,8 @@ export async function cmdReplay(args: string[]) {
         try {
           onDisk = parseScenarioFile(srcPath);
         } catch (e) {
+          if (e instanceof FidelityMissingError)
+            throw new Error(`--assert-from: ${srcPath} does not load: ${fidelityMissingForCassette(e, rc.cassette.scenario)}`);
           throw new Error(`--assert-from: failed to parse ${srcPath}: ${compactSchemaError((e as Error).message)}`);
         }
         const drift = recordingShapingDrift(rc.cassette.scenario, onDisk);
@@ -5877,7 +5931,11 @@ export async function cmdReplay(args: string[]) {
             try {
               onDisk = parseScenarioFile(src.path);
             } catch (e) {
-              if (e instanceof UsageError)
+              if (e instanceof FidelityMissingError)
+                warn(
+                  `::notice:: [replay] ${src.path} does not load: ${fidelityMissingForCassette(e, rc.cassette.scenario)} — replay used the scenario frozen in the cassette and is unaffected.\n`,
+                );
+              else if (e instanceof UsageError)
                 warn(
                   `::notice:: [replay] ${src.path} does not load: ${compactSchemaError(e.message)} — replay used the scenario frozen in the cassette and is unaffected. ` +
                     `Run \`cowork-harness record ${src.path} --dry-run\` for the full error.\n`,
@@ -6041,8 +6099,9 @@ async function computeCassetteMargins(cassette: Cassette, cassetteDir: string, s
  *  staleness check over one cassette or every `*.cassette.json` in a dir (non-recursive). Exit codes are
  *  split by whether verification actually ran: exit 1 = verification RAN and found a real problem (a PII
  *  finding, a genuine `StalenessFinding.class` — one NOT prefixed `unverifiable-` — or scenario-prompt
- *  drift); exit 3 = verification could NOT complete (any `unverifiable-*` staleness class, a cassette
- *  format newer than this harness understands, or a per-file read error/crash). A finding always wins
+ *  drift); exit 3 = verification could NOT complete (any `unverifiable-*` staleness class, a recorded
+ *  scenario source the loader rejects, a cassette format newer than this harness understands, or a
+ *  per-file read error/crash). A finding always wins
  *  over an unverifiable when both occur in the same run. `unscanned` notes are informational. Dedicated
  *  JSON envelope. `--margins` adds a per-count-assert recorded-vs-budget report (a per-cassette replay
  *  cost, single-sample). */
@@ -6387,8 +6446,9 @@ export async function cmdVerifyCassettes(args: string[]) {
     }
     // Scenario-content (prompt) drift: the fingerprint doesn't cover the scenario's own prompt, so an
     // edited-but-not-re-recorded prompt would otherwise pass clean. A resolvable+drifted prompt is a hard
-    // fail (its own bucket, so --skip-staleness can't mask it); an unresolvable/unparseable source is a
-    // non-failing note (can't compare ⇒ not a false-red).
+    // fail (its own bucket, so --skip-staleness can't mask it); a recorded source the loader rejects is
+    // unverifiable (exit 3); an unresolvable source or a YAML syntax break is a non-failing note (can't
+    // compare ⇒ not a false-red).
     const scenarioDrift: string[] = [];
     if (doScenarioDrift) {
       const drift = scenarioContentDrift(rc.cassette, f);
@@ -6397,6 +6457,9 @@ export async function cmdVerifyCassettes(args: string[]) {
           scenarioDrift.push(
             `scenario recording-shaping field(s) [${drift.drifted.join(", ")}] differ from the cassette's frozen copy — the frozen events no longer correspond to this scenario; re-record or \`replay --assert-from\``,
           );
+      } else if (drift.unverifiable && drift.reason) {
+        // The recorded source is rejected by the loader: the drift check could not run ⇒ not green.
+        unverifiable.push(`scenario-drift: ${drift.reason}`);
       } else if (drift.reason) {
         // Only when a resolvable source failed to parse — the common "no committed source" case is silent.
         notes.push(`scenario-drift: ${drift.reason}`);

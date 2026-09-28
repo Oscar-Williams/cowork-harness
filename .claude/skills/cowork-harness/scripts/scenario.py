@@ -23,6 +23,8 @@ lint flags (see references/scenario-schema.md for the why of each):
                                                   (runtime rejects at LOAD time; tier rules suppressed)
   E  `requires_capabilities` on `fidelity: protocol` (probe can't run → hard-fails
                                                       unless allow_missing_capability)
+  E  `fidelity-missing`        a scenario (it has `prompt:`) with no `fidelity:` key -- required since
+                               4.0.0 (the loader refuses the file); the tier-dependent rules are skipped
   E  `enum-value-invalid`      any enum-valued field carries a value the schema rejects (fidelity,
                                execution, lane, on_unanswered, answers[].decide/else/grant,
                                assert[].result/path_denied.*/question_options.order) — `agent` gets a
@@ -880,29 +882,36 @@ def lint_doc(doc, path, raw_lines):
         )
         return findings
 
-    fidelity = (doc.get("fidelity") or "container")
+    # No `fidelity:` → no tier. The tier-dependent rules below compare against named tiers, so `None`
+    # leaves every one of them silent: running them against a phantom `container` would report
+    # findings about a lane the author never chose. The ERROR just below covers the missing key.
+    # A key that is present but null keeps the old reading; `enum-value-invalid` reports it.
+    fidelity = (doc.get("fidelity") or "container") if "fidelity" in doc else None
     lane = (doc.get("lane") or "local")
 
-    # W: no `fidelity:` — the default models the WRONG LANE.
-    # `container` (the schema default) models VM-loop; production runs HOST-LOOP, gate 1143815894 is
-    # force-ON in every shipped baseline. So an omitted key measures the scenario against a lane real
-    # users are not on: the file tools resolve a bare relative path differently, the shell starts
+    # E: no `fidelity:` — the key is REQUIRED since 4.0.0 (it defaulted to `container` before, with a
+    # warning from 2.4.0). The loader refuses the file too; under the `cowork-harness lint` wrapper that
+    # shows up again as `scenario-invalid` (a duplicate, like `enum-value-invalid`), and on a direct
+    # `scenario.py lint` this is the only coverage.
+    # `container` models VM-loop; production runs HOST-LOOP, gate 1143815894 is force-ON in every
+    # shipped baseline: the file tools resolve a bare relative path differently, the shell starts
     # somewhere else, and the offered tool set differs (measured 2026-08-27).
-    # Read the KEY, not the resolved value: `fidelity: container` is a deliberate choice and must not warn.
-    # DEPRECATION — `fidelity:` becomes REQUIRED in the next major; this is the warning window.
-    if "fidelity" not in doc:
+    # Read the KEY, not a resolved value. Only on a SCENARIO (it has `prompt:`, the loader's own signal): a
+    # session or matrix YAML in a linted set carries no tier by design.
+    if "prompt" in doc and "fidelity" not in doc:
         findings.append(
             Finding(
-                "WARN",
-                "fidelity-defaulted",
-                "no `fidelity:` — defaulting to `container`, which models the VM-LOOP lane. Production "
-                "runs HOST-LOOP by default (gate 1143815894), so this scenario is likely measured "
-                "against a lane your users are not on.",
-                "Name a tier: `fidelity: hostloop` to match production, `fidelity: cowork` to auto-pick "
-                "the way Cowork does, or `fidelity: container` to keep today's behaviour deliberately. "
+                "ERROR",
+                "fidelity-missing",
+                "no `fidelity:` — the key is required (since 4.0.0); `run`, `record` and the loader "
+                "refuse this scenario.",
+                "Add a tier: `fidelity: container` keeps the pre-4.0 behaviour (it was the default) and "
+                "models the VM-LOOP lane; production runs HOST-LOOP by default (gate 1143815894), so "
+                "`fidelity: hostloop` matches it and `fidelity: cowork` auto-picks the way Cowork does. "
                 "Switching tiers can COST you assertions: `no_scratchpad_leak` is container-only (an "
                 "error elsewhere) and `transcript_no_host_path` fails by design at hostloop/protocol. "
-                "The default is being removed — `fidelity:` becomes REQUIRED in the next major.",
+                "If this scenario already has a cassette, add the tier it recorded — a different tier "
+                "is a recording-shaping change and needs a re-record.",
                 path,
             )
         )

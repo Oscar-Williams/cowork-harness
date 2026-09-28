@@ -61,7 +61,7 @@ function run(args: string[], cwd: string, env: Record<string, string> = {}) {
 describe.skipIf(!can)("record --concurrency validation", () => {
   it("out-of-range / non-integer → exit 2 (parse-time, no token needed)", () => {
     const d = mkdtempSync(join(tmpdir(), "rc-"));
-    writeFileSync(join(d, "s.yaml"), "prompt: hi\n");
+    writeFileSync(join(d, "s.yaml"), "fidelity: container\nprompt: hi\n");
     expect(run(["record", "s.yaml", "--concurrency", "0"], d).code).toBe(2);
     expect(run(["record", "s.yaml", "--concurrency", "99"], d).code).toBe(2);
     expect(run(["record", "s.yaml", "--concurrency", "abc"], d).code).toBe(2);
@@ -69,7 +69,7 @@ describe.skipIf(!can)("record --concurrency validation", () => {
 
   it("--concurrency on a SINGLE scenario → exit 2 (nothing to parallelize)", () => {
     const d = mkdtempSync(join(tmpdir(), "rc-"));
-    writeFileSync(join(d, "s.yaml"), "prompt: hi\n");
+    writeFileSync(join(d, "s.yaml"), "fidelity: container\nprompt: hi\n");
     const r = run(["record", "s.yaml", "--concurrency", "2"], d);
     expect(r.code).toBe(2);
     expect(r.out).toMatch(/applies to a directory batch/);

@@ -57,7 +57,7 @@ import {
 } from "../src/sync/cowork-sync.js";
 import { checkNormalizationSanity, checkEgressContractFacts } from "../src/sync/cowork-sync.js";
 import { hostLoopCwds } from "../src/runtime/hostloop.js";
-import { fidelityWasDefaulted, defaultedFidelityNotice } from "../src/run/execute.js";
+import { fidelityOmitted } from "../src/run/execute.js";
 import { buildJudgedDocument } from "../src/assert.js";
 import { renderPrompts } from "../src/prompt.js";
 import { checkPathHookFacts } from "../src/sync/cowork-sync.js";
@@ -1958,10 +1958,6 @@ describe("prompt drift guard (H1-H3)", () => {
 // Do NOT "fix" the agent cwd to match the shell. That was this investigation's first instinct and it is
 // backwards: the file-tool base is correct, the shell was the wrong one.
 // ==========================================================================================
-// The deprecation window before `fidelity` becomes REQUIRED. The default models VM-LOOP while production
-// runs HOST-LOOP by default (gate 1143815894 — per-account, read from the fcache, so never state it as a
-// live fact), so an omitted key silently measures the wrong lane. Warn now,
-// fail at the next major — consumers get told before they get an error.
 // AUTHORED is not DELIVERED. The authored-file capture deliberately includes the scratchpad — the run did
 // write those files — but production DISCARDS anything outside `mnt/` ("never reaches the user or your file
 // tools"). Unlabelled, a rubric like "the report was written" grades TRUE on a file the user never receives.
@@ -2017,32 +2013,20 @@ describe("judged document — scratch files are labelled as undelivered", () => 
   });
 });
 
-describe("defaulted fidelity — the deprecation notice", () => {
-  it("detects the OMITTED key, and does not fire when the tier was chosen deliberately", () => {
-    expect(fidelityWasDefaulted({ prompt: "x" })).toBe(true);
-    // The load-bearing half: Zod's .default() makes these two indistinguishable AFTER parse, so the
-    // detector must read the RAW document. An author who wrote `fidelity: container` has made the choice
-    // and must not be nagged.
-    expect(fidelityWasDefaulted({ prompt: "x", fidelity: "container" })).toBe(false);
-    expect(fidelityWasDefaulted({ prompt: "x", fidelity: "hostloop" })).toBe(false);
+// `fidelity` is REQUIRED (since 4.0.0). The old default modelled VM-LOOP while production runs HOST-LOOP by
+// default (gate 1143815894 — per-account, read from the fcache, so never state it as a live fact), so an
+// omitted key silently measured the wrong lane. The loader now refuses it; the detector reads the RAW doc.
+describe("omitted fidelity — the loader's detector", () => {
+  it("detects the OMITTED key, and does not fire when the tier was named", () => {
+    expect(fidelityOmitted({ prompt: "x" })).toBe(true);
+    // A key that is present with a bad value is a different mistake (Zod's enum message covers it).
+    expect(fidelityOmitted({ prompt: "x", fidelity: "container" })).toBe(false);
+    expect(fidelityOmitted({ prompt: "x", fidelity: "hostloop" })).toBe(false);
   });
 
   it("is inert on a non-object document rather than throwing", () => {
-    expect(fidelityWasDefaulted(null)).toBe(false);
-    expect(fidelityWasDefaulted("not-a-doc")).toBe(false);
-  });
-
-  // A deprecation notice that does not say what to do, or why, trains people to ignore it.
-  it("names the lane mismatch, the gate, every remedy, and the deprecation", () => {
-    const m = defaultedFidelityNotice("my-scenario");
-    expect(m).toContain("my-scenario");
-    expect(m, "must say which lane the default models").toMatch(/VM-LOOP/);
-    expect(m, "must say which lane production runs").toMatch(/HOST-LOOP/);
-    expect(m, "must cite the gate, so the claim is checkable").toMatch(/1143815894/);
-    expect(m, "must offer the production-matching tier").toMatch(/fidelity: hostloop/);
-    expect(m, "must offer the auto-picking tier").toMatch(/fidelity: cowork/);
-    expect(m, "must let an author keep today's behaviour deliberately").toMatch(/fidelity: container/);
-    expect(m, "must announce the removal, or it is just a nag").toMatch(/REQUIRED in the next major/);
+    expect(fidelityOmitted(null)).toBe(false);
+    expect(fidelityOmitted("not-a-doc")).toBe(false);
   });
 });
 

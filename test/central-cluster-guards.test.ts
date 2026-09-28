@@ -219,7 +219,7 @@ describe("#7/#8 tool-glob validation rejects vacuous negatives at scenario load"
   const writeScenario = (assertLine: string): string => {
     const dir = mkdtempSync(join(tmpdir(), "glob-guard-"));
     const p = join(dir, "s.yaml");
-    writeFileSync(p, `name: s\nprompt: hi\nassert:\n${assertLine}\n`);
+    writeFileSync(p, `name: s\nfidelity: container\nprompt: hi\nassert:\n${assertLine}\n`);
     return p;
   };
 

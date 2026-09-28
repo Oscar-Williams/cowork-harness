@@ -98,14 +98,18 @@ function shellQuote(p: string): string {
   return `'${p.replace(/'/g, `'\\''`)}'`;
 }
 
-function zodIssues(e: unknown): { message: string; path: unknown }[] | undefined {
+/** One issue from a schema refusal's `hint`. `fix` is present when the loader wrote a specific remedy for
+ *  that issue (a missing `fidelity:` — see `FidelityMissingError`); lint then uses it as the finding's fix
+ *  instead of the generic "fix the value" text. */
+type HintIssue = { message: string; path: unknown; fix?: unknown };
+
+function zodIssues(e: unknown): HintIssue[] | undefined {
   if (!(e instanceof UsageError) || typeof e.hint !== "string") return undefined;
   try {
     const parsed: unknown = JSON.parse(e.hint);
     if (!Array.isArray(parsed) || parsed.length === 0) return undefined;
     const issues = parsed.filter(
-      (i): i is { message: string; path: unknown } =>
-        !!i && typeof i === "object" && typeof (i as { message?: unknown }).message === "string",
+      (i): i is HintIssue => !!i && typeof i === "object" && typeof (i as { message?: unknown }).message === "string",
     );
     return issues.length ? issues : undefined;
   } catch {
@@ -130,7 +134,9 @@ function loadRefusalFindings(file: string, e: unknown): LintFinding[] {
       severity: "ERROR",
       rule: "scenario-invalid",
       message: `${who} — ${where}: ${i.message}`,
-      fix: `Fix the value at ${where}; ${dryRun} ${NOT_A_SCENARIO}`,
+      // The loader's own remedy when it wrote one. The generic text would point a scenario that only lacks
+      // its tier at "fix the value" and "move it out of the linted set" — away from the one-line fix.
+      fix: typeof i.fix === "string" ? `${i.fix} ${dryRun}` : `Fix the value at ${where}; ${dryRun} ${NOT_A_SCENARIO}`,
       file,
       line: null,
     };
