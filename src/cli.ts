@@ -409,6 +409,8 @@ Output:
   --allow-missing-capability       don't fail the verdict when the (partial 'core') image omits a capability
                                    the skill used but real Cowork ships — open-ended-run equivalent of a
                                    scenario asserting allow_missing_capability: true
+  --allow-stall                    don't fail the verdict when the run ends on a question (the \`stalled\` signal) —
+                                   open-ended-run equivalent of a scenario asserting allow_stall: true
   --allow-host-hooks              consent to running a staged plugin's hooks as native host processes at
                                   protocol (no container sandbox); refused loud otherwise
   --allow-host-writes              consent to a writable hostloop connected folder (native host FS access,
@@ -1965,6 +1967,7 @@ async function cmdSkill(rawArgs: string[]) {
   let deciderModel: string | undefined;
   let deciderLlm = false;
   let allowMissingCapability = false; // --allow-missing-capability: open-ended-lane opt-out (merged into the synthesized assert)
+  let allowStall = false; // --allow-stall: the open-ended lane's spelling of `allow_stall: true` (merged the same way)
   let allowHostWrites = false; // --allow-host-writes: hostloop writable-folder consent (ad-hoc lane has no scenario YAML)
   let allowHostHooks = false; // --allow-host-hooks: protocol plugin-hook consent, same reason — this lane has no YAML to carry it
   let resume = false;
@@ -2009,6 +2012,7 @@ async function cmdSkill(rawArgs: string[]) {
         name === "--dry-run" ||
         name === "--keep" ||
         name === "--allow-missing-capability" ||
+        name === "--allow-stall" ||
         name === "--allow-host-writes" ||
         name === "--allow-host-hooks")
     ) {
@@ -2030,6 +2034,7 @@ async function cmdSkill(rawArgs: string[]) {
     else if (a === "--resume") resume = true;
     else if (a === "--decider-llm") deciderLlm = true;
     else if (a === "--allow-missing-capability") allowMissingCapability = true;
+    else if (a === "--allow-stall") allowStall = true;
     else if (a === "--allow-host-writes") allowHostWrites = true;
     else if (a === "--allow-host-hooks") allowHostHooks = true;
     else if (name === "--intent") intent = nextValStrict();
@@ -2205,6 +2210,7 @@ async function cmdSkill(rawArgs: string[]) {
           ...(flags.deciderDir != null ? { decider: "decider-dir" } : flags.deciderCmd != null ? { decider: "decider-cmd" } : {}),
           ...(useLlm ? { decider: "decider-llm" } : {}),
           ...(timeoutMs !== undefined ? { timeout_ms: timeoutMs } : {}),
+          ...(allowStall ? { allow_stall: true } : {}),
         },
         null,
         2,
@@ -2243,7 +2249,14 @@ async function cmdSkill(rawArgs: string[]) {
     // Open-ended lane has no authored assert: block, so --allow-missing-capability merges the modifier onto
     // the synthesized success assertion — this suppresses BOTH capability fail sources (verdict.ts) AND the
     // pre-flight abort (execute.ts) with no verdict.ts change, and persists in result.json for verify-run.
-    assert: [{ result: "success", ...(allowMissingCapability ? { allow_missing_capability: true as const } : {}) }],
+    // --allow-stall merges `allow_stall: true` the same way: the only place this lane can author the modifier.
+    assert: [
+      {
+        result: "success",
+        ...(allowMissingCapability ? { allow_missing_capability: true as const } : {}),
+        ...(allowStall ? { allow_stall: true as const } : {}),
+      },
+    ],
   });
 
   const externalChannel = resolveExternal("skill", flags);
@@ -2334,6 +2347,8 @@ Probe tuning:
   --model <id>                   override the session model (e.g. pin a cheaper model for the probe)
   --expect-write <suffix>         narrow "delivered" to a sub-agent write whose path ends with this suffix
                                  (default: ANY sub-agent-origin write under the dispatch's own toolUseId)
+  --allow-stall                  don't fail the verdict when the run ends on a question (the \`stalled\` signal) —
+                                 the equivalent of a scenario asserting allow_stall: true
 
 Answering / common flags (inherited from the shared flag set, honored here too):
   --decider-cmd <cmd>            answer gates via an external command
@@ -2366,6 +2381,7 @@ async function cmdProbeDispatch(rawArgs: string[]) {
   let fidelity: (typeof PD_FID)[number] = "hostloop"; // forced-default: path-fidelity (this probe's whole point) only matters on hostloop
   let model: string | undefined = process.env.COWORK_HARNESS_MODEL;
   let expectWriteSuffix: string | undefined;
+  let allowStall = false; // --allow-stall: this lane's spelling of `allow_stall: true` (no assert: block to author it in)
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
     const eq = a.startsWith("--") ? a.indexOf("=") : -1;
@@ -2388,14 +2404,17 @@ async function cmdProbeDispatch(rawArgs: string[]) {
     else if (name === "--upload") uploads.push(nextVal());
     else if (name === "--folder") folders.push(nextVal());
     else if (name === "--expect-write") expectWriteSuffix = nextVal();
-    else if (a.startsWith("-")) fail("probe-dispatch", "usage", `unknown flag: ${a}`, undefined, isJson);
+    else if (name === "--allow-stall") {
+      if (eqVal !== undefined) fail("probe-dispatch", "usage", "--allow-stall takes no value", undefined, isJson);
+      allowStall = true;
+    } else if (a.startsWith("-")) fail("probe-dispatch", "usage", `unknown flag: ${a}`, undefined, isJson);
     else positional.push(a);
   }
   if (positional.length !== 2)
     fail(
       "probe-dispatch",
       "usage",
-      'usage: cowork-harness probe-dispatch <skill-dir> "<prompt>" [--fidelity container|microvm|hostloop] [--model <id>] [--expect-write <suffix>] [--plugin <dir>]… [--upload <file>]… [--folder <dir>]… [--output-format text|json]  (probe-dispatch --help for the full flag reference)',
+      'usage: cowork-harness probe-dispatch <skill-dir> "<prompt>" [--fidelity container|microvm|hostloop] [--model <id>] [--expect-write <suffix>] [--allow-stall] [--plugin <dir>]… [--upload <file>]… [--folder <dir>]… [--output-format text|json]  (probe-dispatch --help for the full flag reference)',
       undefined,
       isJson,
     );
@@ -2429,7 +2448,7 @@ async function cmdProbeDispatch(rawArgs: string[]) {
     prompt,
     answers: [],
     // Note in --help/docs: PROMPT-SCOPED, not enforced — this just flags a prompt that fanned out.
-    assert: [{ subagent_dispatched: ".*" }, { dispatch_count_max: 1 }],
+    assert: [{ subagent_dispatched: ".*" }, { dispatch_count_max: 1 }, ...(allowStall ? [{ allow_stall: true as const }] : [])],
   });
 
   // --decider-dir/--decider-cmd (captured generically by takeCommonFlags) are honored here for free via

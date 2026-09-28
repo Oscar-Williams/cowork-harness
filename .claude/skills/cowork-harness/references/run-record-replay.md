@@ -185,7 +185,8 @@ Recognize these before "fixing" a non-bug:
   `stalled` already catches a *trailing*-`?` final turn that did no tool work after the last gate; this
   covers the residual (a mid-message `?`, or tool work after the last gate that still ended asking). Read
   the final message before acting — a legitimate question-posing answer that wrote a file never fires.
-  Assert `allow_stall: true` if ending on a question is the intended terminal state.
+  Assert `allow_stall: true` if ending on a question is the intended terminal state (on an open-ended
+  `skill` / `probe-dispatch` run, pass **`--allow-stall`** — the CLI equivalent).
 - **`undelivered_deliverables`** (`WARN`) — the skill produced file(s) **outside every user-visible root**
   and never delivered them. On a **remote** Cowork session the workspace is reclaimed at session end, so
   they are destroyed; on a **local** one they persist but stay invisible to the user. Either way the user

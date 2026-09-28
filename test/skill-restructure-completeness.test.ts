@@ -80,7 +80,8 @@ const FROZEN_NUMBERED_ITEMS = [
   "24. **Never name the file-delivery tool in a `SKILL.md`.** *Why:* Cowork has **two**, one per product",
   "25. **Three host-inventory flags — two on `record`, one on `verify-cassettes`.** `record",
   "26. **A `skill`-lane `PASS` does not mean the skill ran, or that the run was the one you wanted.** *Why:*",
-  "27. **`allow_stall: true` is a scenario assertion, so the `skill` lane cannot use it.** *Why:* the",
+  // Reworded when `skill`/`probe-dispatch` gained `--allow-stall`: the lane can now perform the opt-out.
+  "27. **`stalled` also fails a complete answer that closes by offering a follow-up.** *Why:* the",
 ];
 
 function payloadLines(): Set<string> {

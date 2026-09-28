@@ -62,6 +62,9 @@ export const SKILL_FLAG_SURFACE: SkillFlagSpec[] = [
   // Without this a lean-image capability gap makes the task turn error, and the critique harvests a fact
   // about the rig instead of the skill — the same failure class as a missing upload.
   { flag: "--allow-missing-capability", arity: 0, critique: forwardBoth() },
+  // The open-ended lane's spelling of `allow_stall: true`. TASK-only: it changes the graded run's verdict, and
+  // the reflection turn is a fixed self-report whose own stall is not what critique grades.
+  { flag: "--allow-stall", arity: 0, critique: forwardTask() },
   // hostloop host-write consent. forwardBoth is load-bearing: checkHostLoopWriteConsent runs on EVERY
   // executeScenario at hostloop (the reflection resume included), so a task-only forward would refuse
   // every reflection turn of a folder-bearing hostloop critique.
