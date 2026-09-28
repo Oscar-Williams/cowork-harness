@@ -14,14 +14,14 @@ const frozen = (prompt: string) => ({ scenarioSource: "s.yaml", scenario: { name
 describe("scenarioContentDrift (function-level)", () => {
   it("matching prompt → verifiable, no drift", () => {
     const d = mkdtempSync(join(tmpdir(), "cwh-scd-"));
-    writeFileSync(join(d, "s.yaml"), "prompt: hi\n");
+    writeFileSync(join(d, "s.yaml"), "fidelity: container\nprompt: hi\n");
     const r = scenarioContentDrift(frozen("hi"), join(d, "x.cassette.json"));
     expect(r).toEqual({ verifiable: true, drifted: [] });
   });
 
   it("edited on-disk prompt → verifiable drift on `prompt`", () => {
     const d = mkdtempSync(join(tmpdir(), "cwh-scd-"));
-    writeFileSync(join(d, "s.yaml"), "prompt: CHANGED\n");
+    writeFileSync(join(d, "s.yaml"), "fidelity: container\nprompt: CHANGED\n");
     const r = scenarioContentDrift(frozen("hi"), join(d, "x.cassette.json"));
     expect(r).toEqual({ verifiable: true, drifted: ["prompt"] });
   });
@@ -40,6 +40,45 @@ describe("scenarioContentDrift (function-level)", () => {
     expect(r.verifiable).toBe(false);
   });
 
+  it("a persisted source the LOADER rejects → unverifiable, not a note (the check cannot run until it is fixed)", () => {
+    const d = mkdtempSync(join(tmpdir(), "cwh-scd-"));
+    writeFileSync(join(d, "s.yaml"), "prompt: hi\n"); // no `fidelity:` — required since 4.0.0
+    const r = scenarioContentDrift(frozen("hi"), join(d, "x.cassette.json"));
+    expect(r).toEqual({ verifiable: false, unverifiable: true, reason: expect.stringMatching(/fidelity: container/) });
+  });
+
+  // Every loader rejection that is not a YAML syntax break is a state of the FILE, not a mid-edit moment:
+  // until someone fixes it, the drift check never runs. The regex and reserved-value refusals throw a plain
+  // Error (not a schema UsageError), so a gate keyed on UsageError alone let them fall to a note.
+  it.each([
+    ["a bad assertion regex", "fidelity: container\nprompt: hi\nassert:\n  - transcript_matches: '('\n", /regex/i],
+    ["a reserved value", "fidelity: container\nprompt: hi\nexecution: cloud-describe\n", /cloud-describe/],
+  ])("a persisted source refused for %s → unverifiable, not a note", (_what, body, why) => {
+    const d = mkdtempSync(join(tmpdir(), "cwh-scd-"));
+    writeFileSync(join(d, "s.yaml"), body);
+    const r = scenarioContentDrift(frozen("hi"), join(d, "x.cassette.json"));
+    expect(r).toEqual({ verifiable: false, unverifiable: true, reason: expect.stringMatching(why) });
+  });
+
+  it("a NAME-LOOKUP source without `fidelity:` is a note carrying the whole remedy, not a truncated one", () => {
+    const d = mkdtempSync(join(tmpdir(), "cwh-scd-"));
+    writeFileSync(join(d, "c.yaml"), "prompt: hi\n");
+    const cassette = { scenarioSource: "gone.yaml", scenario: { name: "c", prompt: "hi", fidelity: "hostloop" } } as any;
+    const r = scenarioContentDrift(cassette, join(d, "x.cassette.json")) as { reason?: string };
+    expect(r.reason).toMatch(/fidelity: hostloop/);
+    expect(r.reason, "the sentence must reach its end").toMatch(/re-record/);
+    expect(r.reason).not.toMatch(/…/);
+  });
+
+  it("a NAME-LOOKUP source the loader rejects stays a note — it may be an unrelated same-named file", () => {
+    const d = mkdtempSync(join(tmpdir(), "cwh-scd-"));
+    writeFileSync(join(d, "c.yaml"), "prompt: hi\n");
+    const cassette = { scenarioSource: "gone.yaml", scenario: { name: "c", prompt: "hi" } } as any;
+    const r = scenarioContentDrift(cassette, join(d, "x.cassette.json"));
+    expect(r.verifiable).toBe(false);
+    expect((r as { unverifiable?: true }).unverifiable).toBeUndefined();
+  });
+
   it("a lenient cassette missing scenario.name does NOT throw (would otherwise abort the batch)", () => {
     const d = mkdtempSync(join(tmpdir(), "cwh-scd-"));
     // No scenarioSource and no name → resolution would slug(undefined) and throw; must be caught.
@@ -51,7 +90,7 @@ describe("scenarioContentDrift (function-level)", () => {
   it("a name-lookup match (recorded source gone) is a NOTE, not a hard-fail — avoids same-name false-red", () => {
     const d = mkdtempSync(join(tmpdir(), "cwh-scd-"));
     // scenarioSource recorded but missing → falls back to a fuzzy <name>.yaml sibling that may be unrelated.
-    writeFileSync(join(d, "c.yaml"), "prompt: a totally different scenario reusing the name\n");
+    writeFileSync(join(d, "c.yaml"), "fidelity: container\nprompt: a totally different scenario reusing the name\n");
     const cassette = { scenarioSource: "gone.yaml", scenario: { name: "c", prompt: "hi" } } as any;
     const r = scenarioContentDrift(cassette, join(d, "x.cassette.json"));
     // resolvable-by-name + drifted → downgraded to a non-failing note, NOT a { verifiable:true, drifted:["prompt"] } finding
@@ -87,7 +126,7 @@ describe.skipIf(!existsSync(CLI))("verify-cassettes gates on scenario prompt dri
     const d = mkdtempSync(join(tmpdir(), "cwh-scd-e2e-"));
     const cassettePath = join(d, "c.cassette.json");
     writeFileSync(cassettePath, JSON.stringify(cassetteFixture("hi")));
-    writeFileSync(join(d, "s.yaml"), "prompt: hi\n");
+    writeFileSync(join(d, "s.yaml"), "fidelity: container\nprompt: hi\n");
 
     const clean = envelope(["verify-cassettes", cassettePath], d);
     expect(clean.ok).toBe(true);
@@ -95,7 +134,7 @@ describe.skipIf(!existsSync(CLI))("verify-cassettes gates on scenario prompt dri
     expect(clean.results[0].scenarioDrift).toEqual([]);
 
     // Edit the committed prompt → the frozen cassette prompt now diverges → hard fail.
-    writeFileSync(join(d, "s.yaml"), "prompt: a DIFFERENT prompt\n");
+    writeFileSync(join(d, "s.yaml"), "fidelity: container\nprompt: a DIFFERENT prompt\n");
     const drifted = envelope(["verify-cassettes", cassettePath], d);
     expect(drifted.ok).toBe(false);
     expect(drifted.results[0].scenarioDrift.length).toBeGreaterThan(0);

@@ -145,7 +145,7 @@ describe("scenario.py assertion-keys.json is in sync with the zod Assertion sche
   // modifier) — ScenarioObject is a strictObject, so it must round-trip through parse() and appear in
   // the generated topLevelKeys cascade like any other field, while staying OUT of VERDICT_MODIFIER_KEYS.
   it("allow_host_writes round-trips through ScenarioObject.parse() and is in topLevelKeys, not VERDICT_MODIFIER_KEYS", () => {
-    const parsed = ScenarioObject.parse({ prompt: "x", allow_host_writes: true });
+    const parsed = ScenarioObject.parse({ prompt: "x", fidelity: "container", allow_host_writes: true });
     expect(parsed.allow_host_writes).toBe(true);
     const keys = JSON.parse(buildAssertionKeys()).topLevelKeys as string[];
     expect(keys).toContain("allow_host_writes");
@@ -248,16 +248,16 @@ describe("scenario.py assertion-keys.json is in sync with the zod Assertion sche
 // rejected at load time (see execute.test.ts); only `local` is a live, runnable value today.
 describe("execution field (location axis, orthogonal to fidelity)", () => {
   it("defaults to `local` when omitted", () => {
-    expect(ScenarioObject.parse({ prompt: "x" }).execution).toBe("local");
+    expect(ScenarioObject.parse({ prompt: "x", fidelity: "container" }).execution).toBe("local");
   });
   it("accepts an explicit `local` value", () => {
-    expect(ScenarioObject.parse({ prompt: "x", execution: "local" }).execution).toBe("local");
+    expect(ScenarioObject.parse({ prompt: "x", fidelity: "container", execution: "local" }).execution).toBe("local");
   });
   it("round-trips `cloud-describe` through the schema itself (the load-time reject lives in execute.ts, not here)", () => {
-    expect(ScenarioObject.parse({ prompt: "x", execution: "cloud-describe" }).execution).toBe("cloud-describe");
+    expect(ScenarioObject.parse({ prompt: "x", fidelity: "container", execution: "cloud-describe" }).execution).toBe("cloud-describe");
   });
   it("rejects an unknown execution value", () => {
-    expect(ScenarioObject.safeParse({ prompt: "x", execution: "bogus" }).success).toBe(false);
+    expect(ScenarioObject.safeParse({ prompt: "x", fidelity: "container", execution: "bogus" }).success).toBe(false);
   });
   it("is in topLevelKeys and is not a VERDICT_MODIFIER_KEYS entry", () => {
     const keys = JSON.parse(buildAssertionKeys()).topLevelKeys as string[];
@@ -281,28 +281,28 @@ describe("published scenario schema enforces cross-key rules the loader enforces
 
   it("accepts either outputs-delete key alone", () => {
     const v = compiled();
-    expect(v({ prompt: "x", assert: [{ no_delete_in_outputs: true }] })).toBe(true);
-    expect(v({ prompt: "x", assert: [{ allow_outputs_delete: true }] })).toBe(true);
+    expect(v({ prompt: "x", fidelity: "container", assert: [{ no_delete_in_outputs: true }] })).toBe(true);
+    expect(v({ prompt: "x", fidelity: "container", assert: [{ allow_outputs_delete: true }] })).toBe(true);
   });
 
   it("rejects the mutually exclusive pair, in one entry OR across entries", () => {
     const v = compiled();
-    expect(v({ prompt: "x", assert: [{ no_delete_in_outputs: true, allow_outputs_delete: true }] })).toBe(false);
-    expect(v({ prompt: "x", assert: [{ no_delete_in_outputs: true }, { allow_outputs_delete: true }] })).toBe(false);
+    expect(v({ prompt: "x", fidelity: "container", assert: [{ no_delete_in_outputs: true, allow_outputs_delete: true }] })).toBe(false);
+    expect(v({ prompt: "x", fidelity: "container", assert: [{ no_delete_in_outputs: true }, { allow_outputs_delete: true }] })).toBe(false);
   });
 });
 
 describe("cross-key rule: allow_delete_in must not waive outputs alongside no_delete_in_outputs", () => {
   it("the loader rejects the contradiction", () => {
-    const bad = { prompt: "p", assert: [{ no_delete_in_outputs: true }, { allow_delete_in: ["outputs"] }] };
+    const bad = { prompt: "p", fidelity: "container", assert: [{ no_delete_in_outputs: true }, { allow_delete_in: ["outputs"] }] };
     expect(Scenario.safeParse(bad).success).toBe(false);
   });
   it("waiving a DIFFERENT mount alongside no_delete_in_outputs is fine — not a contradiction", () => {
-    const ok = { prompt: "p", assert: [{ no_delete_in_outputs: true }, { allow_delete_in: ["reports"] }] };
+    const ok = { prompt: "p", fidelity: "container", assert: [{ no_delete_in_outputs: true }, { allow_delete_in: ["reports"] }] };
     expect(Scenario.safeParse(ok).success).toBe(true);
   });
   it("no_delete_in_mounts + allow_delete_in COMPOSE — 'none except these' is coherent", () => {
-    const ok = { prompt: "p", assert: [{ no_delete_in_mounts: true }, { allow_delete_in: ["reports"] }] };
+    const ok = { prompt: "p", fidelity: "container", assert: [{ no_delete_in_mounts: true }, { allow_delete_in: ["reports"] }] };
     expect(Scenario.safeParse(ok).success).toBe(true);
   });
   it("the published JSON Schema mirrors the refinement (editors/CI must agree with the loader)", () => {

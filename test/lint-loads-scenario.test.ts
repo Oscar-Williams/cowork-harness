@@ -102,13 +102,29 @@ describe.skipIf(!can || !havePython)("lint reports what the scenario loader reje
     expect(jsonFindings(r.stdout)).toEqual([]);
   });
 
-  it("the loader's defaulted-fidelity notice is not printed by lint; python's WARN still is, once", () => {
+  it("a scenario without `fidelity:` is a loader ERROR whose fix is the loader's remedy, printed once", () => {
     const d = mkdtempSync(join(tmpdir(), "cwh-lint-load-"));
-    const f = scenario(d, "s.yaml", ["baseline: latest", "prompt: hello", "assert:", "  - transcript_matches: '('"]);
-    const r = runCli(["lint", f]);
-    expect(r.stderr).not.toMatch(/::warning:: \[scenario\]/);
-    expect(r.stdout.match(/fidelity-defaulted/g)?.length).toBe(1);
-    expect(r.stdout).toMatch(/scenario-invalid/);
+    const f = scenario(d, "s.yaml", ["baseline: latest", "prompt: hello", "assert:", "  - result: success"]);
+    const r = runCli(["lint", f, "--output-format", "json"]);
+    expect(r.code).toBe(1);
+    expect(r.stderr, "lint prints findings, not loader notices").not.toMatch(/::warning:: \[scenario\]/);
+    const loader = jsonFindings(r.stdout).filter((x) => x.rule === "scenario-invalid");
+    expect(loader).toHaveLength(1);
+    expect(loader[0].message).toMatch(/`fidelity:` is required/);
+    expect(loader[0].fix).toMatch(/fidelity: container/);
+    expect(loader[0].fix).toMatch(/fidelity: hostloop/);
+  });
+
+  it("python reports the same file as ERROR fidelity-missing, once, beside the loader's finding", () => {
+    // A duplicate under the wrapper (like `enum-value-invalid`); on a direct `scenario.py lint` it is the only
+    // coverage. The retired WARN must not appear next to it.
+    const d = mkdtempSync(join(tmpdir(), "cwh-lint-load-"));
+    const f = scenario(d, "s.yaml", ["baseline: latest", "prompt: hello", "assert:", "  - result: success"]);
+    const found = jsonFindings(runCli(["lint", f, "--output-format", "json"]).stdout);
+    const py = found.filter((x) => x.rule === "fidelity-missing");
+    expect(py).toHaveLength(1);
+    expect(py[0].severity).toBe("ERROR");
+    expect(found.map((x) => x.rule)).not.toContain("fidelity-defaulted");
   });
 
   it("a directory target attributes the loader finding to the same path python prints", () => {
@@ -223,18 +239,6 @@ describe.skipIf(!can || !havePython)("a pre-pass machinery failure reaches pytho
     expect(r.stdout).toMatch(/ERROR \[lint-loader-internal\]/);
     expect(r.stdout).toMatch(/expansion exploded/);
     expect(r.stderr).not.toMatch(/\bat \S+ \(/);
-  });
-});
-
-describe.skipIf(!can)("record --dry-run keeps the defaulted-fidelity notice ahead of a regex refusal", () => {
-  it("prints the notice once, then the load error", () => {
-    const d = mkdtempSync(join(tmpdir(), "cwh-lint-load-"));
-    scenario(d, "s.yaml", ["baseline: latest", "prompt: hello", "assert:", "  - transcript_matches: '('"]);
-    const r = runCli(["record", "s.yaml", "--dry-run"], {}, d);
-    expect(r.code).toBe(2);
-    const all = r.stdout + r.stderr;
-    expect(all.match(/::warning:: \[scenario\]/g)?.length).toBe(1);
-    expect(all.indexOf("::warning:: [scenario]")).toBeLessThan(all.indexOf("bad regex"));
   });
 });
 

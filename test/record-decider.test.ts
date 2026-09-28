@@ -22,7 +22,7 @@ function run(args: string[], cwd: string) {
 describe.skipIf(!can)("record live-decider flag validation", () => {
   it("--intent without --decider-llm → exit 2", () => {
     const d = mkdtempSync(join(tmpdir(), "rd-"));
-    writeFileSync(join(d, "s.yaml"), "prompt: hi\n");
+    writeFileSync(join(d, "s.yaml"), "fidelity: container\nprompt: hi\n");
     const r = run(["record", "s.yaml", "--intent", "test the thing"], d);
     expect(r.code).toBe(2);
     expect(r.out).toMatch(/--intent requires --decider-llm/);
@@ -30,7 +30,7 @@ describe.skipIf(!can)("record live-decider flag validation", () => {
 
   it("--decider-llm + --decider-dir (mutually exclusive terminals) → exit 2", () => {
     const d = mkdtempSync(join(tmpdir(), "rd-"));
-    writeFileSync(join(d, "s.yaml"), "prompt: hi\n");
+    writeFileSync(join(d, "s.yaml"), "fidelity: container\nprompt: hi\n");
     const r = run(["record", "s.yaml", "--decider-llm", "--decider-dir", join(d, "gates")], d);
     expect(r.code).toBe(2);
     expect(r.out).toMatch(/mutually exclusive terminals/);
@@ -38,7 +38,7 @@ describe.skipIf(!can)("record live-decider flag validation", () => {
 
   it("--decider-llm + --on-unanswered (llm forces the terminal) → exit 2", () => {
     const d = mkdtempSync(join(tmpdir(), "rd-"));
-    writeFileSync(join(d, "s.yaml"), "prompt: hi\n");
+    writeFileSync(join(d, "s.yaml"), "fidelity: container\nprompt: hi\n");
     const r = run(["record", "s.yaml", "--decider-llm", "--on-unanswered", "first"], d);
     expect(r.code).toBe(2);
     expect(r.out).toMatch(/--decider-llm conflicts with --on-unanswered/);
@@ -53,7 +53,7 @@ describe.skipIf(!can)("record live-decider flag validation", () => {
 
   it("--decider-dir on a DIRECTORY batch → exit 2 (single scenario only)", () => {
     const d = mkdtempSync(join(tmpdir(), "rd-"));
-    writeFileSync(join(d, "a.yaml"), "prompt: hi\n");
+    writeFileSync(join(d, "a.yaml"), "fidelity: container\nprompt: hi\n");
     const r = run(["record", d, "--decider-dir", join(d, "gates")], d);
     expect(r.code).toBe(2);
     expect(r.out).toMatch(/single interactive recording/);
@@ -61,7 +61,7 @@ describe.skipIf(!can)("record live-decider flag validation", () => {
 
   it("--on-unanswered prompt is rejected by the enum (determinism) → exit 2", () => {
     const d = mkdtempSync(join(tmpdir(), "rd-"));
-    writeFileSync(join(d, "s.yaml"), "prompt: hi\n");
+    writeFileSync(join(d, "s.yaml"), "fidelity: container\nprompt: hi\n");
     const r = run(["record", "s.yaml", "--on-unanswered", "prompt"], d);
     expect(r.code).toBe(2);
   });

@@ -55,7 +55,7 @@ describe.skipIf(!can)("CLI structural guard — every command rejects an unknown
   for (const [cmd, base] of CASES) {
     it(`${cmd} rejects an unknown flag (exit non-zero)`, () => {
       const d = mkdtempSync(join(tmpdir(), "sg-"));
-      writeFileSync(join(d, "s.yaml"), "prompt: hi\n"); // a plausible scenario for record/run
+      writeFileSync(join(d, "s.yaml"), "fidelity: container\nprompt: hi\n"); // a plausible scenario for record/run
       const r = run([cmd, ...base, BOGUS], d);
       expect(r.code, `${cmd} silently accepted ${BOGUS} (out: ${r.out.slice(0, 200)})`).not.toBe(0);
     });

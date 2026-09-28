@@ -156,6 +156,7 @@ describe("question_context is wired into the gate-key surface", () => {
     const s = ScenarioObject.parse({
       name: "x",
       prompt: "p",
+      fidelity: "container",
       assert: [{ questions_count_max: 0 }, { question_context: { matches: "anything" } }],
     });
     expect(assertContradiction(s)).toMatch(/question_context/);

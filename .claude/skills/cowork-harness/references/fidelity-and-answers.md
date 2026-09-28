@@ -14,12 +14,15 @@ Self-contained reference. Tracks `cowork-harness 3.10.0` (baseline `desktop-2.99
 | Tier | What runs | Use it for |
 |---|---|---|
 | `protocol` | L0 — agent on the host, no sandbox, no egress enforcement | Fastest control-loop / answer-shape checks. **Rejected** if the scenario asserts egress / `expect_denied` (would false-pass). |
-| `container` (default) | L1 — agent in a Docker container with a per-run default-deny egress proxy | The everyday tier: real sandbox, real egress allowlist. |
+| `container` | L1 — agent in a Docker container with a per-run default-deny egress proxy | The everyday tier: real sandbox, real egress allowlist. |
 | `microvm` | L2 — agent in an Apple-VZ Lima microVM with a guest firewall | VM-grade escape **isolation** of untrusted code. macOS arm64 only; needs `cowork-harness vm init`. Network transport **equals `container`** (same allowlist proxy) — *not* better network fidelity. |
 | `hostloop` | Host-loop split-exec: the agent loop is a **native process on the host** (no container around the file tools — matching production); shell/web routed host-side via the workspace SDK-MCP server (`mcp__workspace__bash`) into a Docker VM sidecar | Reproduce Cowork's **production** split-execution model. |
 | `cowork` | Auto-picks `hostloop` vs `container` the way Cowork itself does for the synced release | "Do what real Cowork does for this release." |
 
-- `hostloop` / `cowork` are the production-faithful path; `container` is the practical default.
+- `hostloop` / `cowork` are the production-faithful path; `container` is the practical everyday tier.
+  A scenario must name its tier: `fidelity:` is required (4.0.0+). `container` keeps the pre-4.0
+  behaviour; on a scenario with a cassette, add the tier the cassette recorded — another tier needs a
+  re-record. (The ad-hoc `skill` lane still defaults `--fidelity` to `container`.)
 - Boundary assertions (`egress_*`, `expect_denied`) are enforced at `container`, `microvm`, `hostloop`,
   and `cowork` (`cowork` auto-resolves to a sandboxed tier; `container`'s and `hostloop`'s `bash` share
   the same Docker sandbox + egress proxy — `hostloop`'s native file tools run with no container at all,

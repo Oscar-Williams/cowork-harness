@@ -92,10 +92,10 @@ export function noModelProvenance(): ModelProvenance {
 
 /** The unpinned-model warning, shared by every lane so the wording cannot drift between them.
  *
- *  **Why a warning and not an error.** `Scenario.fidelity` documents a default with a LARGER blast radius
- *  than this one — an omitted `fidelity:` measures the scenario against a lane most users are not on — and
- *  the repo's answer there is "deprecated, becomes REQUIRED in the next major", not an immediate hard
- *  fail. A harder gate for a lesser field would be incoherent with that. The next major makes this one
+ *  **Why a warning and not an error.** `Scenario.fidelity` had a default with a LARGER blast radius than
+ *  this one — an omitted `fidelity:` measured the scenario against a lane most users are not on — and the
+ *  repo's answer there was a deprecation window (a warning from 2.4.0, REQUIRED in 4.0.0), not an immediate
+ *  hard fail. A harder gate for a lesser field would be incoherent with that. The next major makes this one
  *  required too.
  *
  *  The text names the KEY and the FLAG, never "the file to edit": the `skill` lane builds its session

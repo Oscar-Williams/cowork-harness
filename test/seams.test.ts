@@ -2194,7 +2194,7 @@ describe("execute.ts — COWORK_HARNESS_DIALOG_TIMEOUT_MS configuration guard", 
         close: () => {},
         snapshot: () => undefined,
       };
-      const scenario = Scenario.parse({ prompt: "hi" });
+      const scenario = Scenario.parse({ prompt: "hi", fidelity: "container" });
       await expect(executeScenario(scenario, { externalChannel: stubChannel })).rejects.toThrow(
         "COWORK_HARNESS_DIALOG_TIMEOUT_MS: cannot use a finite timeout",
       );
@@ -2229,19 +2229,19 @@ describe("toDecisionRequest — replay lane surfaces the SDK deny-reason fields 
 // an Assertion-level refinement can never see.
 describe("no_delete_in_outputs / allow_outputs_delete mutual exclusion", () => {
   it("accepts either key alone", () => {
-    expect(() => Scenario.parse({ prompt: "x", assert: [{ no_delete_in_outputs: true }] })).not.toThrow();
-    expect(() => Scenario.parse({ prompt: "x", assert: [{ allow_outputs_delete: true }] })).not.toThrow();
+    expect(() => Scenario.parse({ prompt: "x", fidelity: "container", assert: [{ no_delete_in_outputs: true }] })).not.toThrow();
+    expect(() => Scenario.parse({ prompt: "x", fidelity: "container", assert: [{ allow_outputs_delete: true }] })).not.toThrow();
   });
 
   it("rejects both in ONE assertion entry", () => {
-    expect(() => Scenario.parse({ prompt: "x", assert: [{ no_delete_in_outputs: true, allow_outputs_delete: true }] })).toThrow(
-      /mutually exclusive/,
-    );
+    expect(() =>
+      Scenario.parse({ prompt: "x", fidelity: "container", assert: [{ no_delete_in_outputs: true, allow_outputs_delete: true }] }),
+    ).toThrow(/mutually exclusive/);
   });
 
   it("rejects both across SEPARATE assertion entries", () => {
-    expect(() => Scenario.parse({ prompt: "x", assert: [{ no_delete_in_outputs: true }, { allow_outputs_delete: true }] })).toThrow(
-      /mutually exclusive/,
-    );
+    expect(() =>
+      Scenario.parse({ prompt: "x", fidelity: "container", assert: [{ no_delete_in_outputs: true }, { allow_outputs_delete: true }] }),
+    ).toThrow(/mutually exclusive/);
   });
 });

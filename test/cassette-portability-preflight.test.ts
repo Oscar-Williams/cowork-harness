@@ -22,7 +22,7 @@ function repo(): { root: string; session: string; scenario: string } {
   const session = join(root, "sessions", "default.yaml");
   const scenario = join(root, "scenarios", "s.yaml");
   writeFileSync(session, "model: opus\n");
-  writeFileSync(scenario, "name: s\nprompt: p\n");
+  writeFileSync(scenario, "name: s\nfidelity: container\nprompt: p\n");
   spawnSync("git", ["-C", root, "init", "-q"], { encoding: "utf8" });
   return { root, session, scenario };
 }
@@ -114,7 +114,7 @@ describe("cassettePortabilityPreflight — climb-out, in both directions", () =>
   it("names the scenarioSource too when that is the reference that strays", () => {
     const { root, session } = repo();
     const strayScenario = join(mkdtempSync(join(tmpdir(), "cwh-scn-")), "s.yaml");
-    writeFileSync(strayScenario, "name: s\nprompt: p\n");
+    writeFileSync(strayScenario, "name: s\nfidelity: container\nprompt: p\n");
     // Anchor the root on the STRAY scenario: its own tmp dir is not a repo, so the root falls back to
     // cwd (this repo), which contains neither the session nor the cassette — both stray.
     const v = cassettePortabilityPreflight(scn(session), join(root, "cassettes", "s.cassette.json"), strayScenario);

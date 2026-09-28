@@ -17,8 +17,8 @@ All notable changes to this project are documented here. The format is based on
     already passes `--strict --min-severity WARN` behaves exactly as before.
   - *To keep the old behaviour:* add `--min-severity INFO` (for the Action, `extra-args: --min-severity
     INFO`).
-  - *Action users:* a workflow that leaves `version:` at its `latest` default picks up 4.0.0, and both
-    changes here, as soon as it is promoted. Pin `version: "^3"` to defer it.
+  - *Action users:* a workflow that leaves `version:` at its `latest` default picks up 4.0.0, and every
+    change here, as soon as it is promoted. Pin `version: "^3"` to defer it.
 - **`record` exits 1, not 2, when `--max-budget-usd` refuses**, on `--dry-run` and the real command, on
   every `record` path (a single file, a directory, `--rerecord-stale`). A refusal of a scenario that loaded now always exits 1, so 2 no longer
   means "over budget"; it means the scenario did not load, or a usage or setup error. On a directory,
@@ -28,6 +28,39 @@ All notable changes to this project are documented here. The format is based on
   - *To keep the old behaviour:* none; the exit code's meaning changed and no flag restores it. Treat
     exit 1 as the refusal. To tell a budget refusal from the other refusals, match `refused before
     spending` in the error message (`error.message` in the JSON envelope).
+- **`fidelity:` is required in every scenario.** It defaulted to `container`, with a warning since 2.4.0.
+  A scenario without the key no longer loads: `run` (a file or a directory) and `record <file>` exit 2 (usage) before anything runs,
+  `record <dir/> --dry-run` lists the file as broken, and `lint` reports ERROR `scenario-invalid` (and
+  ERROR `fidelity-missing`, which replaces the `fidelity-defaulted` WARN) without `--strict`. The error
+  names the fix. The published `schema/scenario.schema.json` now lists `fidelity` as required, with no
+  default.
+  - *Who is affected:* any scenario file without a top-level `fidelity:` key. List them with
+    `grep -l '^prompt:' scenarios/*.yaml | xargs grep -L '^fidelity:'` (the first `grep` keeps session
+    and matrix files out). The pattern misses a quoted key (`"fidelity":`); `lint` does not.
+  - *A green `replay` gate does not mean the corpus is migrated:* replay reads the tier frozen in each
+    cassette, so it stays green over tierless scenario files. Run `lint` to find them.
+  - *To keep the old behaviour:* add `fidelity: container`. That was the default, so nothing else changes.
+    To match production instead, use `fidelity: hostloop`. But on a scenario that already has a cassette,
+    add the tier the cassette recorded: a different tier is a recording-shaping change, so
+    `verify-cassettes` fails and `replay --assert-from` refuses until you re-record.
+  - *Replay:* existing cassettes replay unchanged; each carries the tier it recorded. When a cassette's
+    scenario file lacks the key, `replay` prints a notice naming `fidelity: <the recorded tier>`, and
+    `replay --assert-from` errors with the same fix.
+  - *`verify-cassettes` can newly exit 3.* When a cassette's recorded scenario file does not load (for
+    example, it has no `fidelity:`), the prompt-drift check cannot run. That is now an `unverifiable[]`
+    entry (exit 3, `ok: false`) naming the fix, not a non-failing note. A YAML syntax error in that file
+    is still a note.
+  - *Scenario files inside a mounted plugin:* if your scenario YAMLs live under a directory the session
+    mounts (for example `skills/<name>/tests/`), they are part of the skill hash. Adding the key changes
+    the hash, so `replay` and `verify-cassettes` report a `skill` staleness finding for those cassettes
+    until you re-record them once. Listing the scenarios directory in `.cowork-hashignore` also changes
+    the hash, so do both in the same change: then this one re-record is the last one a scenario edit
+    causes.
+  - *Action users:* `command: lint` fails on a tierless scenario, and `command: verify-cassettes` exits 3
+    on a cassette whose recorded scenario file lacks the key; `command: replay` stays green (see above).
+    Pin `version: "^3"` to defer the change.
+  - The ad-hoc lanes keep their defaults: `skill --fidelity` (and `$COWORK_HARNESS_FIDELITY`) still
+    default to `container`, and `probe-dispatch` to `hostloop`.
 
 ### Upgrade notes
 

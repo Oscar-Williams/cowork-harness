@@ -32,7 +32,7 @@ describe("discoverScenarios — positive prompt: signal (N1)", () => {
   });
 
   it("only *.yaml/*.yml are considered (non-recursive)", () => {
-    const d = dir({ "a.yaml": "prompt: hi\n", "notes.md": "prompt: hi", "b.txt": "prompt: hi" });
+    const d = dir({ "a.yaml": "prompt: hi\nfidelity: container\n", "notes.md": "prompt: hi", "b.txt": "prompt: hi" });
     const r = discoverScenarios(d);
     expect(r.scenarios.map((f) => basename(f))).toEqual(["a.yaml"]);
   });

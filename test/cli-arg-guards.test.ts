@@ -34,7 +34,7 @@ const cassette = () =>
 describe.skipIf(!can)("CLI arg guards — migrated commands fail loud", () => {
   it("record: unknown flag → exit 2", () => {
     const d = mkdtempSync(join(tmpdir(), "g-"));
-    writeFileSync(join(d, "s.yaml"), "prompt: hi\n");
+    writeFileSync(join(d, "s.yaml"), "fidelity: container\nprompt: hi\n");
     expect(run(["record", "s.yaml", "--typo"], d).code).toBe(2);
   });
 
@@ -46,7 +46,7 @@ describe.skipIf(!can)("CLI arg guards — migrated commands fail loud", () => {
 
   it("record: --out with a flag-looking value → exit 2", () => {
     const d = mkdtempSync(join(tmpdir(), "g-"));
-    writeFileSync(join(d, "s.yaml"), "prompt: hi\n");
+    writeFileSync(join(d, "s.yaml"), "fidelity: container\nprompt: hi\n");
     expect(run(["record", "s.yaml", "--out", "--no-redact"], d).code).toBe(2);
   });
 
@@ -209,7 +209,7 @@ describe.skipIf(!can)("skill/common flags accept --flag=value identically to --f
 
   it("record: --decider-model without --decider-llm → exit 2", () => {
     const d = mkdtempSync(join(tmpdir(), "g6-"));
-    writeFileSync(join(d, "s.yaml"), "prompt: hi\n");
+    writeFileSync(join(d, "s.yaml"), "fidelity: container\nprompt: hi\n");
     const r = run(["record", "s.yaml", "--decider-model", "m"], d);
     expect(r.code).toBe(2);
     expect(r.out).toMatch(/--decider-model requires --decider-llm/);
@@ -226,7 +226,7 @@ describe.skipIf(!can)("skill/common flags accept --flag=value identically to --f
   // must NOT be rejected as an "unexpected argument", and a missing value fails loud.
   it("run: --decider-model with a missing value → exit 2 (requires a value)", () => {
     const d = mkdtempSync(join(tmpdir(), "g6-"));
-    writeFileSync(join(d, "s.yaml"), "prompt: hi\n");
+    writeFileSync(join(d, "s.yaml"), "fidelity: container\nprompt: hi\n");
     const r = run(["run", "s.yaml", "--decider-model"], d);
     expect(r.code).toBe(2);
     expect(r.out).toMatch(/--decider-model requires a value/);
@@ -248,7 +248,7 @@ describe.skipIf(!can)("skill/common flags accept --flag=value identically to --f
   // early-return in the `skill` handler bypasses, so a --dry-run invocation would exit 0 and prove nothing.
   it("run: --on-unanswered llm → redirects to the scenario YAML, not --decider-llm", () => {
     const d = mkdtempSync(join(tmpdir(), "g6-"));
-    writeFileSync(join(d, "s.yaml"), "prompt: hi\n");
+    writeFileSync(join(d, "s.yaml"), "fidelity: container\nprompt: hi\n");
     const r = run(["run", "s.yaml", "--on-unanswered", "llm"], d);
     expect(r.code).toBe(2);
     expect(r.out).toMatch(/on_unanswered: llm/);
@@ -335,7 +335,7 @@ describe.skipIf(!can)("--on-unanswered conflicts with an external decider channe
   // load error, which is also what proves the guard runs BEFORE the scenario is read.
   it("run: --decider-cmd + --on-unanswered → usage error, before the scenario is read", () => {
     const d = mkdtempSync(join(tmpdir(), "cf-"));
-    writeFileSync(join(d, "s.yaml"), "prompt: hi\nexecution: cloud-describe\n");
+    writeFileSync(join(d, "s.yaml"), "fidelity: container\nprompt: hi\nexecution: cloud-describe\n");
     const r = run(["run", "s.yaml", "--decider-cmd", "true", "--on-unanswered", "first"], d);
     expect(r.code).toBe(2);
     expect(r.out).toMatch(/--on-unanswered/);
@@ -369,7 +369,7 @@ describe.skipIf(!can)("probe-dispatch names itself in its own usage errors", () 
 describe.skipIf(!can)("record rejects on_unanswered: prompt in the scenario, as run does", () => {
   it("record: scenario on_unanswered: prompt → usage error", () => {
     const d = mkdtempSync(join(tmpdir(), "rp-"));
-    writeFileSync(join(d, "s.yaml"), "prompt: hi\non_unanswered: prompt\n");
+    writeFileSync(join(d, "s.yaml"), "fidelity: container\nprompt: hi\non_unanswered: prompt\n");
     const r = run(["record", "s.yaml", "--dry-run"], d);
     // 1, not 2: this is a PRE-SPEND REFUSAL, and the preview gives the code the real `record` gives it
     // (SPEC.md §11's per-command convention). Exit 2 on this arm is reserved for a scenario the LOADER
@@ -383,7 +383,7 @@ describe.skipIf(!can)("record rejects on_unanswered: prompt in the scenario, as 
   // parser accepted a channel and a policy together, where the channel silently wins.
   it("record: --decider-dir + --on-unanswered → usage error", () => {
     const d = mkdtempSync(join(tmpdir(), "rp-"));
-    writeFileSync(join(d, "s.yaml"), "prompt: hi\n");
+    writeFileSync(join(d, "s.yaml"), "fidelity: container\nprompt: hi\n");
     mkdirSync(join(d, "dd"), { recursive: true });
     const r = run(["record", "s.yaml", "--decider-dir", "dd", "--on-unanswered", "first", "--dry-run"], d);
     expect(r.code).toBe(2);
@@ -463,7 +463,7 @@ describe.skipIf(!can)("--dotenv / --run-dir after the subcommand", () => {
   ] as const) {
     it(`run: ${label} is taken as the flag, and never blames the path`, () => {
       const d = mkdtempSync(join(tmpdir(), "gf-"));
-      writeFileSync(join(d, "s.yaml"), "prompt: hi\n");
+      writeFileSync(join(d, "s.yaml"), "fidelity: container\nprompt: hi\n");
       const r = run([...args], d);
       expect(r.code).toBe(2);
       expect(r.out).toMatch(expected);
@@ -475,7 +475,7 @@ describe.skipIf(!can)("--dotenv / --run-dir after the subcommand", () => {
   // A filename that merely STARTS with the flag name is not the flag.
   it("a typo'd filename beginning with the flag name gets NO misplaced-flag hint", () => {
     const d = mkdtempSync(join(tmpdir(), "gf-"));
-    writeFileSync(join(d, "s.yaml"), "prompt: hi\n");
+    writeFileSync(join(d, "s.yaml"), "fidelity: container\nprompt: hi\n");
     const r = run(["run", "s.yaml", "--dotenv.yaml"], d);
     expect(r.code).toBe(2);
     expect(r.out).not.toMatch(/GLOBAL flag and must come BEFORE the subcommand/);
@@ -485,7 +485,7 @@ describe.skipIf(!can)("--dotenv / --run-dir after the subcommand", () => {
   // argument, reported as itself.
   it("run: a comma-suffixed near-miss is an unexpected argument, not the flag", () => {
     const d = mkdtempSync(join(tmpdir(), "gf-"));
-    writeFileSync(join(d, "s.yaml"), "prompt: hi\n");
+    writeFileSync(join(d, "s.yaml"), "fidelity: container\nprompt: hi\n");
     const r = run(["run", "s.yaml", "--dotenv,foo"], d);
     expect(r.code).toBe(2);
     expect(r.out).toMatch(/unexpected argument\(s\): --dotenv,foo/);
@@ -554,7 +554,7 @@ describe.skipIf(!can)("--dotenv / --run-dir after the subcommand", () => {
 describe.skipIf(!can)("CLI arg guards — run --repeat (E1)", () => {
   it("rejects --repeat below the minimum (1)", () => {
     const d = mkdtempSync(join(tmpdir(), "g-repeat-"));
-    writeFileSync(join(d, "s.yaml"), "prompt: hi\n");
+    writeFileSync(join(d, "s.yaml"), "fidelity: container\nprompt: hi\n");
     const r = run(["run", "s.yaml", "--repeat", "1"], d);
     expect(r.code).toBe(2);
     expect(r.out).toMatch(/--repeat requires an integer between 2 and 100/);
@@ -562,13 +562,13 @@ describe.skipIf(!can)("CLI arg guards — run --repeat (E1)", () => {
 
   it("rejects --repeat above the maximum (101)", () => {
     const d = mkdtempSync(join(tmpdir(), "g-repeat-"));
-    writeFileSync(join(d, "s.yaml"), "prompt: hi\n");
+    writeFileSync(join(d, "s.yaml"), "fidelity: container\nprompt: hi\n");
     expect(run(["run", "s.yaml", "--repeat", "101"], d).code).toBe(2);
   });
 
   it("rejects a non-numeric --repeat value", () => {
     const d = mkdtempSync(join(tmpdir(), "g-repeat-"));
-    writeFileSync(join(d, "s.yaml"), "prompt: hi\n");
+    writeFileSync(join(d, "s.yaml"), "fidelity: container\nprompt: hi\n");
     const r = run(["run", "s.yaml", "--repeat", "nope"], d);
     expect(r.code).toBe(2);
     expect(r.out).toMatch(/--repeat requires an integer/);
@@ -586,7 +586,7 @@ describe.skipIf(!can)("CLI arg guards — run --repeat (E1)", () => {
 
   it("rejects --repeat combined with --decider-dir (interactive driver × N is not a measurement)", () => {
     const d = mkdtempSync(join(tmpdir(), "g-repeat-"));
-    writeFileSync(join(d, "s.yaml"), "prompt: hi\n");
+    writeFileSync(join(d, "s.yaml"), "fidelity: container\nprompt: hi\n");
     const r = run(["run", "s.yaml", "--repeat", "3", "--decider-dir", d], d);
     expect(r.code).toBe(2);
     expect(r.out).toMatch(/--repeat cannot be combined with --decider-dir/);
@@ -598,7 +598,7 @@ describe.skipIf(!can)("CLI arg guards — run --repeat (E1)", () => {
   // composing --matrix + --repeat.
   it("rejects --repeat combined with --decider-cmd too (same live-decider reasoning, previously ungated)", () => {
     const d = mkdtempSync(join(tmpdir(), "g-repeat-"));
-    writeFileSync(join(d, "s.yaml"), "prompt: hi\n");
+    writeFileSync(join(d, "s.yaml"), "fidelity: container\nprompt: hi\n");
     const r = run(["run", "s.yaml", "--repeat", "3", "--decider-cmd", "cat"], d);
     expect(r.code).toBe(2);
     expect(r.out).toMatch(/--repeat cannot be combined with --decider-dir\/--decider-cmd/);
@@ -626,7 +626,7 @@ describe.skipIf(!can)("CLI arg guards — run --repeat (E1)", () => {
         outDir: join(runsDir, "pricey", "local_1"),
       }),
     );
-    writeFileSync(join(d, "pricey.yaml"), "name: pricey\nprompt: hi\n");
+    writeFileSync(join(d, "pricey.yaml"), "name: pricey\nfidelity: container\nprompt: hi\n");
     const withRuns = (args: string[]) => {
       const r = spawnSync("node", [CLI, ...args], {
         encoding: "utf8",
@@ -644,25 +644,25 @@ describe.skipIf(!can)("CLI arg guards — run --repeat (E1)", () => {
 
   it("--stop-on-diverge without --repeat is a usage error", () => {
     const d = mkdtempSync(join(tmpdir(), "g-repeat-"));
-    writeFileSync(join(d, "s.yaml"), "prompt: hi\n");
+    writeFileSync(join(d, "s.yaml"), "fidelity: container\nprompt: hi\n");
     expect(run(["run", "s.yaml", "--stop-on-diverge"], d).code).toBe(2);
   });
 
   it("--min-pass-rate without --repeat is a usage error", () => {
     const d = mkdtempSync(join(tmpdir(), "g-repeat-"));
-    writeFileSync(join(d, "s.yaml"), "prompt: hi\n");
+    writeFileSync(join(d, "s.yaml"), "fidelity: container\nprompt: hi\n");
     expect(run(["run", "s.yaml", "--min-pass-rate", "0.8"], d).code).toBe(2);
   });
 
   it("rejects --min-pass-rate outside [0,1]", () => {
     const d = mkdtempSync(join(tmpdir(), "g-repeat-"));
-    writeFileSync(join(d, "s.yaml"), "prompt: hi\n");
+    writeFileSync(join(d, "s.yaml"), "fidelity: container\nprompt: hi\n");
     expect(run(["run", "s.yaml", "--repeat", "2", "--min-pass-rate", "1.5"], d).code).toBe(2);
   });
 
   it("rejects a non-positive --max-budget-usd", () => {
     const d = mkdtempSync(join(tmpdir(), "g-repeat-"));
-    writeFileSync(join(d, "s.yaml"), "prompt: hi\n");
+    writeFileSync(join(d, "s.yaml"), "fidelity: container\nprompt: hi\n");
     expect(run(["run", "s.yaml", "--repeat", "2", "--max-budget-usd", "0"], d).code).toBe(2);
   });
 });
@@ -670,7 +670,7 @@ describe.skipIf(!can)("CLI arg guards — run --repeat (E1)", () => {
 describe.skipIf(!can)("CLI arg guards — run --matrix (E3)", () => {
   it("--matrix composes with --repeat (each cell is its own repeat batch) — no usage rejection", () => {
     const d = mkdtempSync(join(tmpdir(), "g-matrix-"));
-    writeFileSync(join(d, "s.yaml"), "prompt: hi\n");
+    writeFileSync(join(d, "s.yaml"), "fidelity: container\nprompt: hi\n");
     writeFileSync(join(d, "m.yaml"), "baselines: [a, b]\n");
     const r = run(["run", "s.yaml", "--matrix", "m.yaml", "--repeat", "2"], d);
     // The combination passes ARG validation (the former v1 rejection is gone). The fake baselines then
@@ -681,33 +681,33 @@ describe.skipIf(!can)("CLI arg guards — run --matrix (E3)", () => {
 
   it("--max-cells without --matrix is a usage error", () => {
     const d = mkdtempSync(join(tmpdir(), "g-matrix-"));
-    writeFileSync(join(d, "s.yaml"), "prompt: hi\n");
+    writeFileSync(join(d, "s.yaml"), "fidelity: container\nprompt: hi\n");
     expect(run(["run", "s.yaml", "--max-cells", "4"], d).code).toBe(2);
   });
 
   it("--concurrency without --matrix is a usage error", () => {
     const d = mkdtempSync(join(tmpdir(), "g-matrix-"));
-    writeFileSync(join(d, "s.yaml"), "prompt: hi\n");
+    writeFileSync(join(d, "s.yaml"), "fidelity: container\nprompt: hi\n");
     expect(run(["run", "s.yaml", "--concurrency", "2"], d).code).toBe(2);
   });
 
   it("rejects --concurrency outside 1..8", () => {
     const d = mkdtempSync(join(tmpdir(), "g-matrix-"));
-    writeFileSync(join(d, "s.yaml"), "prompt: hi\n");
+    writeFileSync(join(d, "s.yaml"), "fidelity: container\nprompt: hi\n");
     writeFileSync(join(d, "m.yaml"), "baselines: [a]\n");
     expect(run(["run", "s.yaml", "--matrix", "m.yaml", "--concurrency", "9"], d).code).toBe(2);
   });
 
   it("rejects a non-positive --max-cells", () => {
     const d = mkdtempSync(join(tmpdir(), "g-matrix-"));
-    writeFileSync(join(d, "s.yaml"), "prompt: hi\n");
+    writeFileSync(join(d, "s.yaml"), "fidelity: container\nprompt: hi\n");
     writeFileSync(join(d, "m.yaml"), "baselines: [a]\n");
     expect(run(["run", "s.yaml", "--matrix", "m.yaml", "--max-cells", "0"], d).code).toBe(2);
   });
 
   it("rejects a nonexistent --matrix file", () => {
     const d = mkdtempSync(join(tmpdir(), "g-matrix-"));
-    writeFileSync(join(d, "s.yaml"), "prompt: hi\n");
+    writeFileSync(join(d, "s.yaml"), "fidelity: container\nprompt: hi\n");
     const r = run(["run", "s.yaml", "--matrix", "does-not-exist.yaml"], d);
     expect(r.code).toBe(2);
     expect(r.out).toMatch(/matrix file not found/);
@@ -715,7 +715,7 @@ describe.skipIf(!can)("CLI arg guards — run --matrix (E3)", () => {
 
   it("rejects a matrix file with an unknown top-level key (schema validation, not silently ignored)", () => {
     const d = mkdtempSync(join(tmpdir(), "g-matrix-"));
-    writeFileSync(join(d, "s.yaml"), "prompt: hi\n");
+    writeFileSync(join(d, "s.yaml"), "fidelity: container\nprompt: hi\n");
     writeFileSync(join(d, "m.yaml"), "baseline: [a]\n"); // typo: singular
     const r = run(["run", "s.yaml", "--matrix", "m.yaml"], d);
     expect(r.code).toBe(2);
@@ -724,8 +724,8 @@ describe.skipIf(!can)("CLI arg guards — run --matrix (E3)", () => {
 
   it("rejects --matrix against a directory target (requires exactly one scenario file)", () => {
     const d = mkdtempSync(join(tmpdir(), "g-matrix-"));
-    writeFileSync(join(d, "a.yaml"), "prompt: hi\n");
-    writeFileSync(join(d, "b.yaml"), "prompt: hi\n");
+    writeFileSync(join(d, "a.yaml"), "fidelity: container\nprompt: hi\n");
+    writeFileSync(join(d, "b.yaml"), "fidelity: container\nprompt: hi\n");
     writeFileSync(join(d, "m.yaml"), "baselines: [a]\n");
     const r = run(["run", ".", "--matrix", "m.yaml"], d);
     expect(r.code).toBe(2);
@@ -734,7 +734,7 @@ describe.skipIf(!can)("CLI arg guards — run --matrix (E3)", () => {
 
   it("accepts the --matrix=<file> equals form (parses cleanly, fails fast on session loading instead — never on --matrix parsing)", () => {
     const d = mkdtempSync(join(tmpdir(), "g-matrix-"));
-    writeFileSync(join(d, "s.yaml"), "prompt: hi\nsession: does-not-exist.yaml\n");
+    writeFileSync(join(d, "s.yaml"), "fidelity: container\nprompt: hi\nsession: does-not-exist.yaml\n");
     writeFileSync(join(d, "m.yaml"), "baselines: [a]\n");
     const r = run(["run", "s.yaml", "--matrix=m.yaml"], d);
     expect(r.out).not.toMatch(/--matrix requires/);
@@ -742,7 +742,7 @@ describe.skipIf(!can)("CLI arg guards — run --matrix (E3)", () => {
 
   it("a bad session ref reads as a clean usage error, not a raw ENOENT stack trace", () => {
     const d = mkdtempSync(join(tmpdir(), "g-matrix-"));
-    writeFileSync(join(d, "s.yaml"), "prompt: hi\nsession: does-not-exist.yaml\n");
+    writeFileSync(join(d, "s.yaml"), "fidelity: container\nprompt: hi\nsession: does-not-exist.yaml\n");
     writeFileSync(join(d, "m.yaml"), "baselines: [a]\n");
     const r = run(["run", "s.yaml", "--matrix", "m.yaml"], d);
     expect(r.code).toBe(2);
@@ -758,7 +758,7 @@ describe.skipIf(!can)("CLI arg guards — run --matrix (E3)", () => {
   // genuinely serial and safe; only the combination with an external channel at concurrency > 1 is unsafe.
   it("rejects --matrix --concurrency > 1 combined with --decider-dir (shared channel, not concurrency-safe)", () => {
     const d = mkdtempSync(join(tmpdir(), "g-matrix-"));
-    writeFileSync(join(d, "s.yaml"), "prompt: hi\n");
+    writeFileSync(join(d, "s.yaml"), "fidelity: container\nprompt: hi\n");
     writeFileSync(join(d, "m.yaml"), "baselines: [a, b]\n");
     const r = run(["run", "s.yaml", "--matrix", "m.yaml", "--concurrency", "2", "--decider-dir", d], d);
     expect(r.code).toBe(2);
@@ -767,7 +767,7 @@ describe.skipIf(!can)("CLI arg guards — run --matrix (E3)", () => {
 
   it("rejects --matrix --concurrency > 1 combined with --decider-cmd too (same shared-channel risk)", () => {
     const d = mkdtempSync(join(tmpdir(), "g-matrix-"));
-    writeFileSync(join(d, "s.yaml"), "prompt: hi\n");
+    writeFileSync(join(d, "s.yaml"), "fidelity: container\nprompt: hi\n");
     writeFileSync(join(d, "m.yaml"), "baselines: [a, b]\n");
     const r = run(["run", "s.yaml", "--matrix", "m.yaml", "--concurrency", "2", "--decider-cmd", "cat"], d);
     expect(r.code).toBe(2);
@@ -776,7 +776,7 @@ describe.skipIf(!can)("CLI arg guards — run --matrix (E3)", () => {
 
   it("allows --matrix --concurrency 1 (the default) combined with --decider-dir — genuinely serial, no race", () => {
     const d = mkdtempSync(join(tmpdir(), "g-matrix-"));
-    writeFileSync(join(d, "s.yaml"), "prompt: hi\nsession: does-not-exist.yaml\n"); // fails fast, past the guard
+    writeFileSync(join(d, "s.yaml"), "fidelity: container\nprompt: hi\nsession: does-not-exist.yaml\n"); // fails fast, past the guard
     writeFileSync(join(d, "m.yaml"), "baselines: [a]\n");
     const r = run(["run", "s.yaml", "--matrix", "m.yaml", "--decider-dir", d], d);
     expect(r.out).not.toMatch(/cannot be combined with --decider-dir/);

@@ -43,19 +43,23 @@ describe("requiredVersionFor — value-aware, not key-presence", () => {
   // P8's value-aware differential is NOT gone — it still applies ABOVE the floor. These cases pin that:
   // every scenario now floors at the epoch, and a key needing MORE than the floor would still lift it.
   it("floors at the hash-format epoch regardless of scenario keys", () => {
-    expect(requiredVersionFor(ScenarioObject.parse({ prompt: "x", lane: "remote" }))).toBe(HASH_FORMAT_EPOCH_FOR_TEST);
-    expect(requiredVersionFor(ScenarioObject.parse({ prompt: "x", lane: "local" }))).toBe(HASH_FORMAT_EPOCH_FOR_TEST);
+    expect(requiredVersionFor(ScenarioObject.parse({ prompt: "x", fidelity: "container", lane: "remote" }))).toBe(
+      HASH_FORMAT_EPOCH_FOR_TEST,
+    );
+    expect(requiredVersionFor(ScenarioObject.parse({ prompt: "x", fidelity: "container", lane: "local" }))).toBe(
+      HASH_FORMAT_EPOCH_FOR_TEST,
+    );
   });
 
   it(
     "the value-aware predicate still works — `lane` defaults to 'local' via Zod, so the parsed scenario " +
       "carries the key regardless, and a key-PRESENCE predicate would have treated local and remote alike",
     () => {
-      const s = ScenarioObject.parse({ prompt: "x" });
+      const s = ScenarioObject.parse({ prompt: "x", fidelity: "container" });
       expect(s.lane).toBe("local"); // sanity: the default really is present on every parsed scenario
       // Both floor at the epoch today; what this pins is that the function reads the VALUE, so when a
       // future key requires more than the floor, only the scenarios that actually use it are lifted.
-      expect(requiredVersionFor(s)).toBe(requiredVersionFor(ScenarioObject.parse({ prompt: "x", lane: "local" })));
+      expect(requiredVersionFor(s)).toBe(requiredVersionFor(ScenarioObject.parse({ prompt: "x", fidelity: "container", lane: "local" })));
     },
   );
 

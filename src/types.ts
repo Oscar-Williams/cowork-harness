@@ -1067,11 +1067,13 @@ export const ScenarioObject = z.strictObject({
     .describe("hand-authored session setup file (pre-prompt: model, mounts, discovery); defaults to an all-defaults inline session"),
   // cowork = auto-pick host-loop vs container via Cowork's own decision logic (the gate);
   // hostloop = force host-loop; container/microvm = force VM-loop; protocol = L0.
+  // REQUIRED (since 4.0.0; it defaulted to `container` before). The loader turns a missing key into an
+  // actionable refusal (execute.ts, loadScenarioPure) — Zod's own text for an absent enum never says
+  // "missing".
   fidelity: z
     .enum(FIDELITY_TIERS)
-    .default("container")
     .describe(
-      "isolation tier: protocol (L0, no sandbox) | container/microvm (force a VM-loop tier) | hostloop (force host-loop) | cowork (auto-pick host-loop vs. container via Cowork's own gate logic). DEPRECATION: omitting this key is deprecated and the field becomes REQUIRED in the next major. The `container` default models the VM loop, while production runs the host loop by default (gate 1143815894), so an omitted key likely measures the scenario against a lane your users are not on — a bare relative path lands elsewhere, the shell starts elsewhere, and the offered tool set differs. Name a tier: hostloop to match production, cowork to auto-pick the way Cowork does, or container to keep the current behaviour deliberately.",
+      "isolation tier (REQUIRED): protocol (L0, no sandbox) | container/microvm (force a VM-loop tier) | hostloop (force host-loop) | cowork (auto-pick host-loop vs. container via Cowork's own gate logic). `container` models the VM loop, while production runs the host loop by default (gate 1143815894) — a bare relative path lands elsewhere, the shell starts elsewhere, and the offered tool set differs. Name hostloop to match production, cowork to auto-pick the way Cowork does, or container to model the VM loop deliberately.",
     ),
   // execution LOCATION, orthogonal to `fidelity` (a local privilege tier) — do NOT collapse the two.
   // `cloud-describe` is RESERVED: no runner exists yet, so authoring it is a load-time error (see

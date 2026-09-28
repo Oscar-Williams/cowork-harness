@@ -346,11 +346,13 @@ const CONTRADICTION_GROUPS: {
  *  this check had not run it.
  *
  *  WHY HERE AND NOT IN THE SCHEMA. Its sibling contradiction (`no_delete_in_outputs` +
- *  `allow_outputs_delete`) lives in `Scenario.superRefine`, which is the more consistent home. It is not
- *  available: `schema/scenario.schema.json` is a covered surface and SPEC.md §12 makes tightening
- *  validation on a previously-valid document a MAJOR bump. This follows `promptPolicyRejection`
- *  (cassette.ts) instead — a command-level refusal of something the schema still accepts. Move it into
- *  `superRefine` at the next major.
+ *  `allow_outputs_delete`) lives in `Scenario.superRefine`. This one stays a command-level refusal of
+ *  something the schema accepts, following `promptPolicyRejection` (cassette.ts), and that is deliberate,
+ *  not a deferral. As a loader rejection it would change what the refusal means: SPEC.md §11 splits
+ *  `record`'s exits into "did not load" (2) and "loaded, but this record is refused" (1), and a
+ *  contradictory scenario is the second kind. It would also be reported twice by `lint` (the loader's
+ *  `scenario-invalid` plus python's `assert-contradiction`), and the published JSON schema would need an
+ *  encoding of the cross-key rule.
  *
  *  DELIBERATELY EXCLUDES `tool_called` + `tool_not_called` on the same glob. That pair IS unsatisfiable
  *  on one channel, but it is a different feature with its own glob-overlap semantics (two globs can
@@ -430,6 +432,14 @@ export async function executeScenario(scenario: Scenario, opts: ExecuteOptions =
   // A signal is being handled (a multi-scenario loop reached its next scenario during the grace period):
   // start nothing new. The termination handler owns the exit and fires within that period.
   await parkIfTerminating();
+  // `fidelity` is required (since 4.0.0). The loader already refuses a FILE without it with the full remedy;
+  // this is the backstop for callers that build the object themselves — a library caller, or
+  // `record --rerecord-stale --from-embedded` replaying a hand-built cassette's frozen snapshot — so none of
+  // them can run at a tier nobody chose. Before anything else, so no run dir or spawn happens.
+  if (!scenario.fidelity)
+    throw new UsageError(
+      `scenario ${scenario.name ?? "(unnamed)"} has no \`fidelity\` — it is required (since 4.0.0); ${FIDELITY_REQUIRED_REMEDY}`,
+    );
   // Refuse a scenario no run can satisfy BEFORE the spawn — the whole point is not to pay for it.
   // Sited here rather than in each command because every lane funnels through executeScenario
   // (`run`/`skill` via cli.ts, `record` via cassette.ts), and a library caller gets it too.
@@ -1901,60 +1911,65 @@ export function parseSessionFile(path: string): unknown {
 
 const isFileRelative = (p: string) => p !== "(inline)" && !isAbsolute(p) && !p.startsWith("~");
 
-/**
- * Parse a scenario file and resolve its `session:` reference relative to the SCENARIO
- * file's directory (not the cwd), so a scenario+session bundle is self-contained and
- * relocatable. Use this everywhere a scenario is read from disk (`run`, `record`).
- */
-/** True when the YAML did not name a tier, so `fidelity` came from the schema default.
- *
- *  Must be read from the RAW document: Zod's `.default("container")` makes the parsed object
- *  indistinguishable from one that said `fidelity: container` on purpose, and those two cases deserve
- *  different treatment — an author who chose the tier has made the choice, one who omitted it has not.
- *
- *  Why anyone cares: the default models the VM-LOOP lane, and production runs HOST-LOOP (gate 1143815894
- *  is force-ON in every shipped baseline). So a scenario that omits the key is measured against the lane
- *  real users are not on — silently. Measured 2026-08-27; see docs/fidelity-gaps.md, "Path resolution". */
-/** Scenario names already warned about a defaulted `fidelity:` in THIS process — see the emission site
- *  below for why de-duplication is needed at all (one command parses a file up to three times). */
-const FIDELITY_NOTICE_SEEN = new Set<string>();
-
-export function fidelityWasDefaulted(raw: unknown): boolean {
+/** True when a scenario document omits the `fidelity:` key. Read from the RAW document: after a failed parse
+ *  there is no typed object to ask, and a key that is present with a bad value is a different mistake (Zod's
+ *  enum message covers it). */
+export function fidelityOmitted(raw: unknown): boolean {
   return typeof raw === "object" && raw !== null && !("fidelity" in (raw as Record<string, unknown>));
 }
 
-/** The deprecation notice for a defaulted tier. `fidelity` becomes REQUIRED in the next major; until
- *  then this warns rather than failing, so consumers get told before they get an error. */
-export function defaultedFidelityNotice(name: string): string {
-  return (
-    `::warning:: [scenario] ${name}: no \`fidelity:\` — defaulting to \`container\`, which models the ` +
-    `VM-LOOP lane. Production runs HOST-LOOP by default (gate 1143815894), so this scenario is likely ` +
-    `measured against a lane your users are not on: the file tools resolve a bare relative path ` +
-    `differently, the shell starts somewhere else, and the offered tool set differs. Name a tier ` +
-    `explicitly — \`fidelity: hostloop\` to match production, \`fidelity: cowork\` to auto-pick the way ` +
-    `Cowork does, or \`fidelity: container\` to keep today's behaviour deliberately. Switching tiers can ` +
-    `COST you assertions: \`no_scratchpad_leak\` is container-only (a lint error elsewhere) and ` +
-    `\`transcript_no_host_path\` fails by design at hostloop/protocol. ` +
-    `DEPRECATION: the default is being removed — \`fidelity:\` becomes REQUIRED in the next major.`
-  );
+/** The one-line remedy for a scenario without `fidelity:`. `container` was the default before 4.0.0, so it
+ *  keeps a scenario's behaviour identical; `hostloop` is what production runs. */
+export const FIDELITY_REQUIRED_REMEDY =
+  "add `fidelity: container` to keep the pre-4.0 behaviour (it was the default), or `fidelity: hostloop` to match production";
+
+/** The long form of the remedy: which lane each tier models, what switching can cost, and the one case where
+ *  the answer is fixed (a scenario that already has a cassette). Carried on the fidelity issue in `hint`, where
+ *  `lint` reads it as the finding's `fix`. */
+export const FIDELITY_REQUIRED_FIX =
+  "Add `fidelity:` naming a tier. `fidelity: container` keeps the pre-4.0 behaviour (it was the default) and models " +
+  "the VM loop; production runs the host loop by default (gate 1143815894), so `fidelity: hostloop` matches it and " +
+  "`fidelity: cowork` auto-picks the way Cowork does. Switching tiers can cost you assertions: `no_scratchpad_leak` " +
+  "is container-only and `transcript_no_host_path` fails by design at hostloop/protocol. If this scenario already " +
+  "has a cassette, add the tier it recorded — a different tier is a recording-shaping change and needs a re-record.";
+
+/** A scenario file the loader refused because it omits `fidelity:` (the key is required since 4.0.0). A
+ *  `UsageError`, so every entry point maps it to the `usage` category exactly as before; the subclass exists so
+ *  the replay paths that read an on-disk sibling can name the tier the CASSETTE recorded instead of the
+ *  generic remedy. `otherIssues` is the compact form of any further schema issues in the same file, or "". */
+export class FidelityMissingError extends UsageError {
+  readonly path: string;
+  readonly otherIssues: string;
+  constructor(path: string, otherIssues: string, hint: string) {
+    super(
+      `invalid scenario ${path}: \`fidelity:\` is required (since 4.0.0) — ${FIDELITY_REQUIRED_REMEDY}` +
+        (otherIssues ? `. Also: ${otherIssues}` : ""),
+      hint,
+    );
+    this.path = path;
+    this.otherIssues = otherIssues;
+  }
 }
 
-/** Load a scenario file the way `run`/`record` do. Thin wrapper over {@link loadScenarioPure} that adds the
- *  one side effect the loader has: the defaulted-fidelity deprecation notice on stderr. */
+/** Build the refusal for a scenario that omits `fidelity:`. Zod has already run, so every OTHER issue in the
+ *  file is reported in the same pass — a file with a typo'd key and no tier costs one round trip, not two. The
+ *  hint keeps the full issue array (the contracted long form every schema refusal carries), with the fidelity
+ *  issue's message replaced — Zod's own text for an absent enum ("Invalid option: expected one of …") never
+ *  says "missing" — and a `fix` field carrying the long remedy. */
+function fidelityMissingError(path: string, e: ZodError): FidelityMissingError {
+  const isFidelityIssue = (i: ZodError["issues"][number]) => i.path.length === 1 && i.path[0] === "fidelity";
+  const others = e.issues.filter((i) => !isFidelityIssue(i));
+  const issues = e.issues.map((i) =>
+    isFidelityIssue(i) ? { ...i, message: "`fidelity:` is required (since 4.0.0)", fix: FIDELITY_REQUIRED_FIX } : i,
+  );
+  return new FidelityMissingError(path, others.length ? compactSchemaError(others) : "", JSON.stringify(issues, null, 2));
+}
+
+/** Load a scenario file the way `run`/`record` do. The name predates {@link loadScenarioPure} and every
+ *  command still calls it; the two are the same function since the loader lost its one side effect (the
+ *  defaulted-fidelity notice, retired when `fidelity:` became required). */
 export function parseScenarioFile(path: string): Scenario {
-  return loadScenarioPure(path, {
-    // Warn, do not fail: this is the deprecation window before `fidelity` becomes required.
-    // ONCE PER SCENARIO NAME, not once per parse. `record <dir> --dry-run` parses each file THREE times
-    // (discovery, the duplicate-target scan, the preview loop), so a 35-file corpus with no `fidelity:` —
-    // the deprecation-window default, i.e. most corpora — emitted 105 copies of an 812-char notice, and
-    // `--quiet` suppresses none of it. That was larger than the broken-file dump it sat next to, and it
-    // fires when NOTHING is wrong. The set is process-lifetime: one warning per scenario per invocation.
-    onFidelityDefaulted: (name) => {
-      if (FIDELITY_NOTICE_SEEN.has(name)) return;
-      FIDELITY_NOTICE_SEEN.add(name);
-      process.stderr.write(defaultedFidelityNotice(name) + "\n");
-    },
-  });
+  return loadScenarioPure(path);
 }
 
 /** Everything the loader checks about a scenario FILE, with no side effects: reads `path` and nothing else —
@@ -1964,11 +1979,12 @@ export function parseScenarioFile(path: string): Scenario {
  *
  *  `cowork-harness lint` calls this directly, so "lint reports no loader finding" and "`run`/`record` load
  *  the file" are the same function and cannot drift. Throws `UsageError` for a schema violation (the full
- *  Zod issue list in `hint`) and a plain `Error` for the regex/reserved refusals or a YAML syntax error.
+ *  Zod issue list in `hint`) — a {@link FidelityMissingError} when the file is a scenario without `fidelity:` —
+ *  and a plain `Error` for the regex/reserved refusals or a YAML syntax error.
  *
- *  `onFidelityDefaulted` runs at the point the notice always ran — after the name default, before the
- *  session and regex steps — so `parseScenarioFile`'s output order is unchanged. */
-export function loadScenarioPure(path: string, hooks: { onFidelityDefaulted?: (name: string) => void } = {}): Scenario {
+ *  Resolves the `session:` reference relative to the SCENARIO file's directory (not the cwd), so a
+ *  scenario+session bundle is self-contained and relocatable. */
+export function loadScenarioPure(path: string): Scenario {
   let scenario: Scenario;
   let rawDoc: unknown;
   try {
@@ -1984,12 +2000,23 @@ export function loadScenarioPure(path: string, hooks: { onFidelityDefaulted?: (n
     // string. Nothing is lost: `hint` is a contracted envelope field, so the issues stay machine-
     // reachable. SPEC.md explicitly disclaims grep-stability of error prose, so the compact form is
     // free to be the message.
-    if (e instanceof ZodError) throw new UsageError(`invalid scenario ${path}: ${compactSchemaError(e.issues)}`, e.message);
+    if (e instanceof ZodError) {
+      // A missing `fidelity:` gets its own remedy — but only on a document that is positively a scenario
+      // (it has `prompt:`, the same signal `discoverScenarios` classifies on). A session or matrix YAML in a
+      // linted set must fall through to the generic refusal and lint's "not a scenario" remedy, not be told
+      // to add a tier.
+      const isScenarioDoc = typeof rawDoc === "object" && rawDoc !== null && "prompt" in (rawDoc as Record<string, unknown>);
+      if (isScenarioDoc && fidelityOmitted(rawDoc)) throw fidelityMissingError(path, e);
+      // Not a scenario (no `prompt:`): it is refused for that already, so drop the "fidelity" issue rather
+      // than tell a session/matrix file to add a tier. Only when something else remains to report.
+      const issues = isScenarioDoc ? e.issues : e.issues.filter((i) => !(i.path.length === 1 && i.path[0] === "fidelity"));
+      const shown = issues.length ? issues : e.issues;
+      throw new UsageError(`invalid scenario ${path}: ${compactSchemaError(shown)}`, JSON.stringify(shown, null, 2));
+    }
     throw e;
   }
   // `name` defaults to the filename (sans extension) — the file is the identity.
   if (!scenario.name) scenario.name = basename(path).replace(/\.ya?ml$/i, "");
-  if (fidelityWasDefaulted(rawDoc)) hooks.onFidelityDefaulted?.(scenario.name);
   if (isFileRelative(scenario.session)) scenario.session = resolve(dirname(path), scenario.session);
   // Load-time regex validation: fail fast with a clear message rather than letting a malformed pattern
   // crash the run at evaluate() time. NOTE: CLI-supplied rules (--answer/--answer-policy) do NOT

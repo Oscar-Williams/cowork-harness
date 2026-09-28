@@ -54,8 +54,8 @@ Three ways to use this project. Each row is the whole hook — follow the link f
 | **Gate my skill in CI** | **[docs/ci.md](./docs/ci.md)**<br><br>`- uses: yaniv-golan/cowork-harness@v3`<br>`  with: { command: replay, path: cassettes/ }` | Nothing for the token-free gate; the live lane needs a self-hosted runner with Docker + an agent binary |
 
 **In short:** three ways in (the table above). Five `fidelity:` tiers — `protocol`, `container`, `microvm`, `hostloop`,
-`cowork` ([Fidelity tiers](#fidelity-tiers-pick-per-scenario--per-ci-job)); a scenario that omits the key runs at
-`container`, but omitting it is deprecated, so name one. Every run executes locally: `lane: remote` changes only the
+`cowork` ([Fidelity tiers](#fidelity-tiers-pick-per-scenario--per-ci-job)); a scenario must name one (`fidelity:` is
+required since 4.0.0; `container` was the default before). Every run executes locally: `lane: remote` changes only the
 delivery contract a run is graded against, never where it runs.
 
 Not sure a harness is what you need? The next two sections are the argument.
@@ -181,7 +181,7 @@ run, under the constraints it will meet in production".
 > - **Live tiers** need three things:
 >   - **Claude Desktop, opened once** — stages the agent; nothing is bundled.
 >   - **A Claude token** — real per-run cost, runs take minutes; mint one with `claude setup-token` (needs the **`claude` CLI**: `npm i -g @anthropic-ai/claude-code`).
->   - **A runtime** — **Docker (arm64)** for `container` (default) / `hostloop`, or **Lima (Apple-VZ)** for `microvm`.
+>   - **A runtime** — **Docker (arm64)** for `container` / `hostloop`, or **Lima (Apple-VZ)** for `microvm`.
 >   - The `protocol` tier skips the runtime + the staged agent but still calls a real model, so it still needs the token. Run `cowork-harness doctor --tier <t>` to check exactly what a given tier needs.
 > - **Platform:** best on **macOS Apple Silicon**; **Windows is not supported** for the live tiers (use the token-free `replay`); `sync` and `microvm` are **macOS-arm64 only**. Full detail in [Prerequisites](./docs/cli.md#prerequisites-for-anything-above-protocol-fidelity) on the CLI page.
 
@@ -262,7 +262,7 @@ tool does not model.
 | Question | Choose |
 |---|---|
 | Is the skill logic / gate flow even alive? | `protocol` |
-| Does it behave under Cowork's mounts + egress? | `container` (default) |
+| Does it behave under Cowork's mounts + egress? | `container` |
 | Need VM-grade escape isolation for untrusted code? | `microvm` — not for CI, macOS arm64 only |
 | Bug only shows in the production host/VM split? | `hostloop` — live-only, macOS only, needs the native binary |
 | Want it auto-picked the way Cowork itself picks, this release? | `cowork` — resolves to `hostloop` or `container`, never `protocol`/`microvm` |

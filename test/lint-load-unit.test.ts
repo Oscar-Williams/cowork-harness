@@ -22,8 +22,8 @@ afterEach(() => vi.restoreAllMocks());
 describe("loaderFindings turns every load outcome into the right finding (a table over parseScenarioFile)", () => {
   // What this can catch: the error-to-finding mapping — a load failure that maps to NO ERROR (a silent
   // drop), or a successful load that still yields one. What it cannot catch: a regression inside the
-  // loader itself. Both sides call the same `loadScenarioPure` (`parseScenarioFile` is a thin wrapper that
-  // only adds the stderr notice), so a loader bug moves both together. That sharing is the design — lint
+  // loader itself. Both sides call the same `loadScenarioPure` (`parseScenarioFile` is the same function
+  // under its older name), so a loader bug moves both together. That sharing is the design — lint
   // and `run`/`record` cannot drift — and the loader's own behaviour is exercised end to end by the CLI
   // tests in lint-loads-scenario.test.ts.
   const d = mkdtempSync(join(tmpdir(), "cwh-lint-unit-"));
@@ -57,9 +57,20 @@ describe("loaderFindings turns every load outcome into the right finding (a tabl
 });
 
 describe("loaderFindings output", () => {
-  it("never writes to stdout or stderr (the defaulted-fidelity notice belongs to run/record)", () => {
+  it("a non-scenario doc (no `prompt:`) is not also told its tier is missing", () => {
+    // It is already refused (no prompt, unknown keys) with the "not a scenario" remedy; a third finding
+    // about `fidelity` would be noise about a file that should not carry a tier at all.
     const d = mkdtempSync(join(tmpdir(), "cwh-lint-unit-"));
-    const p = file(d, "s.yaml", ["baseline: latest", "prompt: hello"]);
+    const p = file(d, "session.yaml", ["model: claude-sonnet-5"]);
+    const fs = loaderFindings([p]);
+    expect(fs.length).toBeGreaterThan(0);
+    expect(fs.map((f) => f.message).join("\n")).not.toMatch(/fidelity/);
+    expect(fs.map((f) => f.message).join("\n")).toMatch(/prompt/);
+  });
+
+  it("never writes to stdout or stderr", () => {
+    const d = mkdtempSync(join(tmpdir(), "cwh-lint-unit-"));
+    const p = file(d, "s.yaml", HEAD);
     const o = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
     const e = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
     expect(loaderFindings([p])).toEqual([]);
