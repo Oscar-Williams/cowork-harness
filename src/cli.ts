@@ -1691,10 +1691,6 @@ async function cmdRun(rawArgs: string[]) {
     const { cells, totalBeforeCap, truncated } = expandMatrix(matrixDoc!, maxCells);
     if (truncated)
       log(`::warning:: matrix: ${totalBeforeCap} cells before capping — only the first ${maxCells} ran (raise with --max-cells)`);
-    // The matrix branch exits before the per-file loop below, so without this the cap would be SILENTLY
-    // ignored on the single most expensive invocation shape the flag exists to bound (N paid cells of one
-    // scenario). With --repeat the cumulative cap in runRepeatBatch already applies per cell.
-    if (maxBudgetUsd !== undefined && repeatN === undefined) preflightBudget("run", scenario.name, maxBudgetUsd, o.json);
     let baseSession: ReturnType<typeof loadSessionFromFile>;
     try {
       baseSession = loadSessionFromFile(scenario.session);
@@ -1739,6 +1735,11 @@ async function cmdRun(rawArgs: string[]) {
         undefined,
         o.json,
       );
+    // After the model check, as on every other arm. The matrix branch exits before the per-file loop below, so
+    // without this the cap would be SILENTLY ignored on the single most expensive invocation shape the flag
+    // exists to bound (N paid cells of one scenario). With --repeat the cumulative cap in runRepeatBatch
+    // already applies per cell.
+    if (maxBudgetUsd !== undefined && repeatN === undefined) preflightBudget("run", scenario.name, maxBudgetUsd, o.json);
     const results: RunResult[] = [];
     // Every cell resolves its own overridden scenario/session first (shared by both branches below) —
     // an error here (a bad skill_dirs substitution, an unresolvable overridden baseline) is a

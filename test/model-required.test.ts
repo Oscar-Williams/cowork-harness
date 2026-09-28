@@ -181,6 +181,61 @@ describe.skipIf(!can)("run", () => {
   });
 });
 
+describe.skipIf(!can)("the model check comes before the budget pre-flight on every run arm", () => {
+  // Priced history over the cap, so the budget gate WOULD refuse; the model refusal must answer first, as it
+  // does on `run <file>`, `run <dir/>` and `record`.
+  function pricedWork(): string {
+    const d = work();
+    const dir = join(d, ".runs", "s", "local_1");
+    mkdirSync(join(dir, "turns", "1"), { recursive: true });
+    writeFileSync(
+      join(dir, "turns", "1", "result.json"),
+      JSON.stringify({
+        scenario: "s",
+        fidelity: "protocol",
+        baseline: "desktop-1.18286.0",
+        result: "success",
+        decisions: [],
+        egress: [],
+        assertions: [],
+        outDir: dir,
+        cost: { usd: 9.5 },
+      }),
+    );
+    cli(["stats", "--reindex"], d);
+    writeFileSync(join(d, "s.yaml"), UNPINNED("s"));
+    writeFileSync(join(d, "no-models.yaml"), "baselines: [latest]\n");
+    return d;
+  }
+
+  for (const extra of [[], ["--matrix", "no-models.yaml"]]) {
+    it(`run s.yaml ${extra.join(" ")} --max-budget-usd: the model refusal answers`, () => {
+      const d = pricedWork();
+      const r = cli(["run", "s.yaml", ...extra, "--max-budget-usd", "1.0", "--output-format", "json"], d);
+      expect(r.code, r.all).toBe(2);
+      const env = envelope(r.stdout);
+      expect(env.error?.message).not.toMatch(/refused before spending/);
+      expectNamesChannels(env.error?.message ?? "");
+      // ...and the budget gate is armed: with a model, it is what refuses.
+      const pinned = cli(["run", "s.yaml", ...extra, "--max-budget-usd", "1.0", "--model", "claude-sonnet-5"], d);
+      expect(pinned.all).toMatch(/refused before spending/);
+    });
+  }
+});
+
+describe.skipIf(!can)("lanes that run no agent need no model", () => {
+  it("replay and verify-cassettes of the committed examples succeed with COWORK_HARNESS_MODEL unset", () => {
+    const d = work();
+    const replays = resolve("examples/replays");
+    const replay = cli(["replay", replays], d);
+    expect(replay.all).not.toMatch(/no model is pinned/);
+    expect(replay.code, replay.all).toBe(0);
+    const verify = cli(["verify-cassettes", replays], d);
+    expect(verify.all).not.toMatch(/no model is pinned/);
+    expect(verify.code, verify.all).toBe(0);
+  });
+});
+
 describe.skipIf(!can)("skill and probe-dispatch", () => {
   const plugin = (d: string) => {
     mkdirSync(join(d, "plugin"));
