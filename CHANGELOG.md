@@ -154,6 +154,11 @@ All notable changes to this project are documented here. The format is based on
 - **`COWORK_HARNESS_JUDGE_MODEL` and `COWORK_HARNESS_EVALUATOR_MODEL` can now be set from a `.env`**
   (`./.env`, the install `.env` or `--dotenv`). Both were read before any `.env` loaded, so only an
   exported variable took effect.
+- **`critique … --dotenv <file>` now reaches critique's own process,** where the evaluator runs, as well
+  as the two spawned turns it was already forwarded to. Before, the file's `COWORK_HARNESS_EVALUATOR_MODEL`
+  (or credentials) never applied to the evaluator, and the turns inherited `./.env` values that outranked
+  the file. Like every command, `critique` now refuses `--dotenv` given both before and after the
+  subcommand.
 
 ## [3.10.0] — 2026-09-27
 

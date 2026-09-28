@@ -2137,6 +2137,22 @@ export function computeSkillInvocationVerdict(args: {
   );
 }
 
+/** critique's argument phase, exactly as `main` runs it: parse, then apply the per-command globals to THIS
+ *  process before anything reads the environment. Exported so a test drives the real path rather than
+ *  fabricating the apply. */
+export function prepareCritique(argv: string[]): ParsedArgs {
+  const opts = parseArgs(argv);
+  const json = opts.outputFormat === "json";
+  // --dotenv is ALSO forwarded to both spawned turns (as a leading --dotenv), but the evaluator runs HERE, so
+  // the file has to reach this process too. Applying it here also fixes the children's precedence: they
+  // inherit this env, where the file's keys now win over the ./.env this process auto-loaded, instead of
+  // inheriting ./.env's values as "exported" ones that their own --dotenv could not override. The child's
+  // own load of the same file then finds the same values: no double-apply conflict.
+  if (opts.dotenv !== undefined) applyCommandGlobal("critique", "--dotenv", opts.dotenv, json);
+  if (opts.runDir !== undefined) applyCommandGlobal("critique", "--run-dir", opts.runDir, json);
+  return opts;
+}
+
 async function main(argv: string[] = process.argv.slice(2)): Promise<void> {
   if (argv.includes("--help") || argv.includes("-h")) {
     writeAllSync(1, usage() + "\n");
@@ -2144,7 +2160,7 @@ async function main(argv: string[] = process.argv.slice(2)): Promise<void> {
   }
   let opts: ParsedArgs;
   try {
-    opts = parseArgs(argv);
+    opts = prepareCritique(argv);
   } catch (e) {
     process.stderr.write(`${(e as Error).message}\n`);
     // Exit taxonomy: FINDINGS never gate (always 0), but a usage error or an infra/protocol failure is
@@ -2152,7 +2168,6 @@ async function main(argv: string[] = process.argv.slice(2)): Promise<void> {
     process.exit(2);
     return;
   }
-  if (opts.runDir !== undefined) applyCommandGlobal("critique", "--run-dir", opts.runDir, opts.outputFormat === "json");
   // Announce a resolved `cowork` the same way `executeScenario` does, in the same shape and to the same
   // stream, so an operator reading a critique's stderr sees the tier decision in the form they already
   // know from a plain run — and so the resolution is on the record when the report is read later.
