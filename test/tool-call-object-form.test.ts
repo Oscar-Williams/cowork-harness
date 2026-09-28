@@ -396,3 +396,25 @@ describe("count: {min: 0} evidence", () => {
     expect((r as { evidence?: string }).evidence).toMatch(/0 .*count\.min 0.*1 name-matching call/);
   });
 });
+
+describe("negative pass evidence separates what was checked from what was not", () => {
+  it("reports in-scope and out-of-scope counts, and how to include the rest", () => {
+    const c = ctx({
+      toolCalls: [call("m1", "Bash", { command: "ls" }), call("s1", "Bash", { command: "rm -rf x" }, "subagent", "A")],
+      toolResults: [],
+    });
+    const r = one({ tool_not_called: { tool: "Bash", input: { command: "rm\\s+-rf" } } }, c);
+    expect(r.pass).toBe(true);
+    const ev = (r as { evidence?: string }).evidence ?? "";
+    expect(ev).toMatch(/1 in scope main/);
+    expect(ev).toMatch(/1 sub-?agent call not checked/);
+    expect(ev).toMatch(/scope: any/);
+  });
+});
+
+describe("count: min > max is refused at load", () => {
+  it("rejects min > max, accepts min == max", () => {
+    expect(AssertionSchema.safeParse({ tool_called: { tool: "Bash", count: { min: 3, max: 1 } } }).success).toBe(false);
+    expect(AssertionSchema.safeParse({ tool_called: { tool: "Bash", count: { min: 2, max: 2 } } }).success).toBe(true);
+  });
+});

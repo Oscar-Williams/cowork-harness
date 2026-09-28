@@ -1661,3 +1661,9 @@ def test_negative_regex_naming_a_scrub_key_value_warns(tmp_path, monkeypatch):
     monkeypatch.setenv("COWORK_HARNESS_SCRUB_KEYS", "MY_PROXY_TOKEN")
     body = "assert:\n  - tool_not_called: { tool: Bash, input: { command: 'tok-9f8e7d' } }\n"
     assert RED_RULE in _rules(body, tmp_path)
+
+
+def test_count_min_zero_without_max_is_flagged_as_always_passing(tmp_path):
+    body = "assert:\n  - tool_called: { tool: Bash, count: { min: 0 } }\n"
+    assert "tool-called-always-passes" in _rules(body, tmp_path)
+    assert "tool-called-always-passes" not in _rules("assert:\n  - tool_called: { tool: Bash, count: { min: 0, max: 2 } }\n", tmp_path)
