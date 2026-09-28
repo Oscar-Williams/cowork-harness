@@ -34,7 +34,7 @@ references a session for setup.
 name: my-test                       # OPTIONAL — defaults to the filename; keys runs/<name>/
 baseline: latest                    # platform baseline: "latest" or "desktop-<ver>" (NOT "profile:")
 session: ../sessions/my-session.yaml # pre-prompt setup (resolved relative to THIS file)
-fidelity: container                 # protocol | container | microvm | hostloop | cowork
+fidelity: container                 # REQUIRED (4.0.0+) — protocol | container | microvm | hostloop | cowork
 execution: local                    # OPTIONAL — orthogonal to fidelity (a privilege/sandbox tier, all
                                     # local): local (default) | cloud-describe (RESERVED — no runner
                                     # exists yet; authoring it is a load-time error, not a silent no-op)

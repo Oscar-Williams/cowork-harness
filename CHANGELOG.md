@@ -28,6 +28,33 @@ All notable changes to this project are documented here. The format is based on
   - *To keep the old behaviour:* none; the exit code's meaning changed and no flag restores it. Treat
     exit 1 as the refusal. To tell a budget refusal from the other refusals, match `refused before
     spending` in the error message (`error.message` in the JSON envelope).
+- **`fidelity:` is required in every scenario.** It defaulted to `container`, with a warning since 2.4.0.
+  A scenario without the key no longer loads: `run` and `record <file>` exit 2 (usage) before anything runs,
+  `record <dir/> --dry-run` lists the file as broken, and `lint` reports ERROR `scenario-invalid` (and
+  ERROR `fidelity-missing`, which replaces the `fidelity-defaulted` WARN) without `--strict`. The error
+  names the fix. The published `schema/scenario.schema.json` now lists `fidelity` as required, with no
+  default.
+  - *Who is affected:* any scenario file without a top-level `fidelity:` key. List them with
+    `grep -L '^fidelity:' scenarios/*.yaml`.
+  - *To keep the old behaviour:* add `fidelity: container`. That was the default, so nothing else changes.
+    To match production instead, use `fidelity: hostloop`. But on a scenario that already has a cassette,
+    add the tier the cassette recorded: a different tier is a recording-shaping change, so
+    `verify-cassettes` fails and `replay --assert-from` refuses until you re-record.
+  - *Replay:* existing cassettes replay unchanged; each carries the tier it recorded. When a cassette's
+    scenario file lacks the key, `replay` prints a notice naming `fidelity: <the recorded tier>`, and
+    `replay --assert-from` errors with the same fix.
+  - *`verify-cassettes` can newly exit 3.* When a cassette's recorded scenario file does not load (for
+    example, it has no `fidelity:`), the prompt-drift check cannot run. That is now an `unverifiable[]`
+    entry (exit 3, `ok: false`) naming the fix, not a non-failing note. A YAML syntax error in that file
+    is still a note.
+  - *Scenario files inside a mounted plugin:* if your scenario YAMLs live under a directory the session
+    mounts (for example `skills/<name>/tests/`), they are part of the skill hash. Adding the key changes
+    the hash, so `replay` and `verify-cassettes` report a `skill` staleness finding for those cassettes
+    until you re-record them once. Listing the scenarios directory in `.cowork-hashignore` also changes
+    the hash, so do both in the same change: then this one re-record is the last one a scenario edit
+    causes.
+  - The ad-hoc lanes keep their defaults: `skill --fidelity` (and `$COWORK_HARNESS_FIDELITY`) still
+    default to `container`, and `probe-dispatch` to `hostloop`.
 
 ### Upgrade notes
 

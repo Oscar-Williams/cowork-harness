@@ -1205,8 +1205,11 @@ counts). Uploads and `mode:r` connected folders are hash-only, and a file over t
   A third, always-on check compares a committed scenario's `prompt` against the cassette's frozen
   prompt: a resolvable, drifted prompt is a hard fail in its own `scenarioDrift` bucket (so
   `--skip-staleness` can't mask it) — the frozen events no longer correspond to the scenario; opt out
-  with `--skip-scenario-drift`. `replay` surfaces the same drift as a non-failing notice rather than a
-  hard fail (it can't tell whether the drift changed the outcome without re-recording).
+  with `--skip-scenario-drift`. If that recorded scenario file does not LOAD (a schema error — e.g. no
+  `fidelity:`, required since 4.0.0), the check cannot run, so it is reported as `unverifiable` (exit 3)
+  with the fix; a YAML syntax break stays a non-failing note. `replay` surfaces the same drift as a
+  non-failing notice rather than a hard fail (it can't tell whether the drift changed the outcome without
+  re-recording).
   The `skillHash` hard-excludes only what is UNIVERSALLY non-runtime — recorded cassettes (`*.cassette.json`,
   by extension, so writing a cassette under the hashed tree doesn't self-invalidate the fingerprint it just
   recorded), VCS/cache dirs (`.git`, `node_modules`, `__pycache__`, …), and the `version` field of a

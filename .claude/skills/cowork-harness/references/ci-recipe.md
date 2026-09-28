@@ -276,8 +276,9 @@ dollar figures). In a skill repo these cassettes get **committed**. So:
   machine-inventory matches it finds in the committed cassettes and **exits non-zero**, so "no leak" is
   a gate, not discipline. Non-zero is not one thing, though: exit `1` means verification RAN and found a
   real finding (a PII match, a genuine staleness drift, or scenario-prompt drift); exit `3` means
-  verification could NOT complete (an `unverifiable-*`-class staleness finding, a cassette written by a
-  newer harness than this one understands, or a malformed/unreadable cassette). A plain `|| true` or `[
+  verification could NOT complete (an `unverifiable-*`-class staleness finding, a recorded scenario file
+  the loader rejects — e.g. one without `fidelity:` — a cassette written by a newer harness than this one
+  understands, or a malformed/unreadable cassette). A plain `|| true` or `[
   $? -ne 0 ]` tripwire treats both the same — if you need to tell "the gate caught something" apart from
   "the gate couldn't run", branch on the exit code (or parse `--output-format json`'s per-file
   `findings`/`staleness` vs `unverifiable`/`version`/`error` buckets).
@@ -326,10 +327,9 @@ A typical skill repo runs four stages, fastest/cheapest first:
 
    This is the shape a CI step wants: **silent on success (no output, exit 0), loud and specific on
    failure** — `--quiet` suppresses the readiness preview but never the `✗ broken:` lines, which name the
-   offending file *and* the rejected key, one line per file, and the step still exits 1. (Silent is
-   literal only when your scenarios name a `fidelity:`; one still in the deprecation window prints one
-   defaulted-fidelity notice per scenario.) Point `lint` at scenarios only: a session or matrix YAML in
-   the linted set is reported as a file that does not load.
+   offending file *and* the rejected key, one line per file, and the step still exits 1. Point `lint`
+   at scenarios only: a session or matrix YAML in the linted set is reported as a file that does not
+   load.
 
    **If the repo pays for `critique`, gate the evidence corpus here first, for free:**
 

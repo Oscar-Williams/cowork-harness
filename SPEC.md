@@ -865,12 +865,8 @@ Covered-surface changes follow semver as of `1.0.0` — see [RELEASING.md](./REL
 - **CLI surface** — command names, their accepted flags, and the **per-command** exit codes (§11).
   Exit codes are per-command, not global: `run`/`skill` use `0` pass / `1` assertion-or-agent fail /
   `2` usage / `3` boundary-integrity, with `4` reserved (§11). Removing a command or flag, or changing
-  an exit-code meaning, is breaking. A flag's default is part of its meaning. Two 4.0.0 changes were
-  major for these reasons: under `lint --strict` the default `--min-severity` became WARN, so INFO no
-  longer fails or prints unless `--min-severity INFO` is passed; and `record`'s `--max-budget-usd`
-  refusal now exits `1` like its other pre-spend refusals, instead of `2` (§11). `skill`/`run` still
-  exit `2` on that refusal: on `run`/`skill`, a `runtime`-category pre-spend refusal also exits `2`,
-  alongside usage errors.
+  an exit-code meaning, is breaking. A flag's default is part of its meaning. (4.0.0's changes under
+  this clause are listed after this section.)
 - **Scenario & session schemas** — `schema/scenario.schema.json`, `schema/session.schema.json` (the
   authored-input contract). Tightening validation on a previously-valid document is breaking.
 - **Baseline JSON shape** — the `baselines/desktop-*.json` field structure (CI's committed source of
@@ -936,6 +932,20 @@ Covered-surface changes follow semver as of `1.0.0` — see [RELEASING.md](./REL
 - **Packaged GitHub Action** — `action.yml` inputs (`command`, `path`, `version`, `strict`,
   `fail-on-skill-drift`, `extra-args`, `summary`, `anthropic-api-key`) and outputs (`ok`,
   `envelope-path`, `summary-md`).
+
+**4.0.0's major changes.** Three changes made 4.0.0 a major release, each under the clause named:
+
+- *CLI surface (a flag's default).* Under `lint --strict` the default `--min-severity` is WARN, so INFO
+  neither fails nor prints unless `--min-severity INFO` is passed.
+- *CLI surface (an exit-code meaning).* `record`'s `--max-budget-usd` refusal exits `1` like its other
+  pre-spend refusals (§11); it exited `2` before 4.0.0. `skill`/`run` still exit `2` on that refusal: on `run`/`skill`,
+  a `runtime`-category pre-spend refusal also exits `2`, alongside usage errors.
+- *Scenario schema (tightened validation).* `fidelity:` is required; before 4.0.0 it defaulted to
+  `container`. No exit code changes meaning: a scenario without the key is a loader rejection, so
+  `run`/`record` exit `2` as for any file that does not load (§11). Its knock-on in the
+  *`verify-cassettes` envelope*: a cassette's recorded scenario source that the loader rejects is an
+  `unverifiable[]` entry (exit `3`), where before 4.0.0 it was a non-failing note, so a gate that is
+  green on 3.x can fail on 4.0.0.
 
 **NOT covered (may change in any release — do NOT depend on):**
 

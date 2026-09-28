@@ -201,7 +201,7 @@ Recognize these before "fixing" a non-bug:
   filename or `outputs/x.md` alike — is **refused** ("File is in a directory that is denied by your
   permission settings."); only a pathless or relative `Grep`/`Glob` is redirected to outputs. (Before
   2.7032.0 the file tools were rooted at `outputs/`, so a bare filename landed there and `outputs/x.md`
-  doubled to `outputs/outputs/x.md`.) At `fidelity: container`/`microvm` (VM-loop, the harness default) the
+  doubled to `outputs/outputs/x.md`.) At `fidelity: container`/`microvm` (VM-loop) the
   base is the session root, so a bare name lands in the scratchpad and you want `{{workspaceFolder}}` or an
   explicit delivery. Addressing
   a connected folder by name (`<folder>/x.md`) never reaches it on either lane — it builds a same-named
