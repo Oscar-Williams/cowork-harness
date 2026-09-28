@@ -18,3 +18,7 @@ describe("regexNamesRedactableLiteral", () => {
     expect(regexNamesRedactableLiteral(src)).toBe(false),
   );
 });
+
+describe("the operator-secret scrubber's shape", () => {
+  it("flags an Anthropic key prefix", () => expect(regexNamesRedactableLiteral("sk-ant-")).toBe(true));
+});

@@ -1642,3 +1642,22 @@ def test_generated_enum_map_reaches_union_arms():
     enums = json.loads(KEYS_JSON.read_text(encoding="utf-8"))["enums"]
     assert enums["assert.tool_called.scope"] == ["main", "subagent", "any"]
     assert enums["assert.tool_not_called.scope"] == ["main", "subagent", "any"]
+
+
+def test_negative_regex_naming_an_anthropic_key_prefix_warns(tmp_path):
+    # The operator-secret scrubber rewrites the whole key to [REDACTED], so `sk-ant-` is never visible offline.
+    body = "assert:\n  - tool_not_called: { tool: Bash, input: { command: 'sk-ant-' } }\n"
+    assert RED_RULE in _rules(body, tmp_path)
+
+
+def test_negative_regex_naming_a_scrub_value_warns(tmp_path, monkeypatch):
+    monkeypatch.setenv("COWORK_HARNESS_SCRUB_VALUES", "hunter2-proxy-pass")
+    body = "assert:\n  - tool_not_called: { tool: Bash, input: { command: 'hunter2-proxy' } }\n"
+    assert RED_RULE in _rules(body, tmp_path)
+
+
+def test_negative_regex_naming_a_scrub_key_value_warns(tmp_path, monkeypatch):
+    monkeypatch.setenv("MY_PROXY_TOKEN", "tok-9f8e7d6c5b")
+    monkeypatch.setenv("COWORK_HARNESS_SCRUB_KEYS", "MY_PROXY_TOKEN")
+    body = "assert:\n  - tool_not_called: { tool: Bash, input: { command: 'tok-9f8e7d' } }\n"
+    assert RED_RULE in _rules(body, tmp_path)
