@@ -1,8 +1,8 @@
 # Assertions guide
 
 Tracks `cowork-harness 3.10.0` (baseline `desktop-2.9939.2`). Read it when choosing assertion keys: the two orthogonal axes and the goal → key map. The full catalog is `scenario-schema.md`.
-Everything below was moved verbatim from SKILL.md. A cross-reference to another section by name, to
-"Part I/II/III", or to a bare "gotcha N" points at the file SKILL.md's routing table assigns it.
+Moved from SKILL.md unchanged except for relative links. A section named in the text lives in the file
+SKILL.md's routing table assigns it; "Part I/II/III" are authoring.md, run-record-replay.md and debugging.md.
 
 ### Assertions: two orthogonal axes
 

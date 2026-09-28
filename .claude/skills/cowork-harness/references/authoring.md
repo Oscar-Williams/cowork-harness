@@ -1,8 +1,8 @@
 # Authoring a scenario
 
 Tracks `cowork-harness 3.10.0` (baseline `desktop-2.9939.2`). Read it when composing a `scenarios/*.yaml`: session vs scenario, discovery, the fidelity tier, the answer path, `web_fetch`, and scaffold + lint.
-Everything below was moved verbatim from SKILL.md. A cross-reference to another section by name, to
-"Part I/II/III", or to a bare "gotcha N" points at the file SKILL.md's routing table assigns it.
+Moved from SKILL.md unchanged except for relative links. A section named in the text lives in the file
+SKILL.md's routing table assigns it; "Part I/II/III" are authoring.md, run-record-replay.md and debugging.md.
 
 ## Part I — AUTHOR a scenario
 
