@@ -335,7 +335,7 @@ A typical skill repo runs four stages, fastest/cheapest first:
    offending file *and* the rejected key, one line per file, and the step still exits 1. It exits 0,
    though, on an input the real record would refuse (a missing path, an unknown baseline name, a
    tier-vacuous `tool_not_called`): that prints a `⚠ input error:` line and lands in `inputErrors[]`. To
-   gate on those too, use the JSON form:
+   gate on those too, use the JSON form (4.1.0 and later):
 
    ```bash
    cowork-harness record scenarios/ --dry-run --output-format json | jq -e '.ok and (.inputErrors == [])'

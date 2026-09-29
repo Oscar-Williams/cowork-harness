@@ -769,13 +769,16 @@ refusal names every offender (a single file keeps the unprefixed message and hin
 ablation drops the plugin from the run but the path is still the caller's input; an unresolved model is not
 an input error and the preview reports it as `model: null`. `record <file> --dry-run` makes the same check
 over its scenario's session, so both previews surface a bad input path; there it is a refusal of a scenario
-that loaded, so it exits `1`. `record <dir/> --dry-run` makes the same check per scenario and lists each
-input the real record would refuse (an input path, effort or baseline name, a baseline file that does not
-load, or a tier-vacuous negative tool assertion) under `inputErrors[]` (`{file, message, hint?}`) in its payload, with a `⚠ input error:` stderr
-line that survives `--quiet`; `record <file> --dry-run` reports a tier-vacuous assertion the same way. It is
-additive, so `ok` and the exit code do not change (such a scenario is a `failed` item on the real
-`record <dir/>`); a gate that wants it checks `.ok and (.inputErrors == [])`. The previews check existence and kind, not the git tracked-set filter, which only a
-real run applies. Under `COWORK_HARNESS_SOFT_MISSING` a missing source is excluded instead, and the preview
+that loaded, so it exits `1` (and when the scenario also has a tier-vacuous assertion, the refusal names
+the vacuity, as the real `record` does). `record <dir/> --dry-run` makes the same check per scenario and
+lists each input the real record would refuse (an input path, effort or baseline name, a baseline file
+that does not load, or a tier-vacuous negative tool assertion) under `inputErrors[]` (`{file, message,
+hint?}`) in its payload, with a `⚠ input error:` stderr line that survives `--quiet`; `record <file>
+--dry-run` reports a tier-vacuous assertion alone the same way. It is additive, so `ok` and the exit code
+do not change (such a scenario is a `failed` item on the real `record <dir/>`); a gate that wants it
+checks `.ok and (.inputErrors == [])`. The previews check existence and kind, not the git tracked-set
+filter, which only a real run applies. Under `COWORK_HARNESS_SOFT_MISSING` a missing source is
+excluded instead, and the preview
 prints the same exclusion warning the run prints. `verify-run` follows the same rule: a run dir that does
 not exist or is a file, or a scenario file that does not load, is `usage`; a directory holding no completed
 run stays `runtime`. `answer` splits the same way: a directory or gate that is not there is `usage`; a gate
@@ -818,7 +821,8 @@ assert contradiction, duplicate cassette target, a scenario that resolves no mod
 batch-wide, so this arm knows it exactly) join `broken[]` in exiting `1`; the path-DEPENDENT ones
 (host-inventory destination, cassette portability) are advisory `notes[]` that do not affect the exit
 code, because a dir target takes no `--out` and the preview would be guessing the destination. Inputs the
-real record would refuse (an input path, effort or baseline name, a tier-vacuous assertion) are listed
+real record would refuse (an input path, effort or baseline name, a baseline file that does not load, a
+tier-vacuous assertion) are listed
 under `inputErrors[]`, which also leaves the exit code at `0` (see the input-path rule above).
 **`verify-cassettes` uses its OWN three-way split, not the `run`/`skill` meanings above:** `0` clean ·
 `1` verification RAN and found a real problem (any PII finding, any staleness finding whose
