@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, mkdirSync, writeFileSync, chmodSync } from "node:fs";
+import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from "vitest";
+import { mkdtempSync, mkdirSync, writeFileSync, chmodSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -69,6 +69,7 @@ beforeEach(() => {
   instantClock();
   vi.spyOn(process.stderr, "write").mockReturnValue(true);
 });
+afterAll(() => rmSync(FAKE_HOME, { recursive: true, force: true }));
 afterEach(() => {
   delete process.env.COWORK_LIMA_INSTANCE;
   delete process.env.COWORK_VM_PROVISION_TIMEOUT_S;

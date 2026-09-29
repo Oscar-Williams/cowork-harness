@@ -2639,7 +2639,7 @@ export function scrubRawRunLogs(outDir: string, secrets: string[]): void {
  * `file:///Users/alice` the char before `/Users/` is the path's own `/`, which is NOT in the class,
  * so the bare anchor would miss it. `file:\/\/[^\s\/]*` consumes the optional authority (empty or a
  * host like `localhost`) and lets the path root match. URL-encoded (`%2FUsers`) and backslash
- * (`file:\\host\Users`) forms ARE now covered (see the decode+normalize pass in the body); the Windows
+ * (`file:\\host\Users`) forms ARE now covered (the decode+normalize pass in host-path-tokens.ts); the Windows
  * `file:///C:/Users/` form is caught incidentally via the drive-letter `:` boundary.
  */
 export function hostPathLeaked(text: string): boolean {
