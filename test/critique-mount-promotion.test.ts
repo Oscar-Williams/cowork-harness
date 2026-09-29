@@ -14,8 +14,12 @@ import { gitCpFilter } from "../src/run/skill-files.js";
 const TSX = resolve("node_modules/.bin/tsx");
 const CLI_SRC = resolve("src/cli.ts");
 
-function critique(args: string[], cwd = tmpdir()): { code: number | null; stdout: string; stderr: string; json: any } {
-  const r = spawnSync(TSX, [CLI_SRC, "critique", ...args, "--corpus-only", "--output-format", "json"], {
+function critique(
+  args: string[],
+  cwd = tmpdir(),
+  format: "json" | "text" = "json",
+): { code: number | null; stdout: string; stderr: string; json: any; refusal: string | undefined } {
+  const r = spawnSync(TSX, [CLI_SRC, "critique", ...args, "--corpus-only", "--output-format", format], {
     encoding: "utf8",
     cwd,
   });
@@ -25,11 +29,25 @@ function critique(args: string[], cwd = tmpdir()): { code: number | null; stdout
   } catch {
     /* no document on stdout */
   }
-  // Under --output-format json a refusal is an error envelope on stdout, not a line on stderr. Its message
-  // is folded into `stderr` here so an assertion reads every diagnostic in one place — the notices critique
-  // prints on stderr and the refusal text alike.
-  const refusal: unknown = json?.error?.message;
-  return { code: r.status, stdout: r.stdout ?? "", stderr: (r.stderr ?? "") + (typeof refusal === "string" ? refusal + "\n" : ""), json };
+  // Under json a refusal is the error envelope on stdout; `refusal` is its message, kept apart from stderr
+  // (critique's notices) so a test can say which channel a diagnostic arrived on.
+  const refusal = typeof json?.error?.message === "string" ? (json.error.message as string) : undefined;
+  return { code: r.status, stdout: r.stdout ?? "", stderr: r.stderr ?? "", json, refusal };
+}
+
+/** A refusal arrives on the right channel in both modes: the envelope on stdout under json (and not also on
+ *  stderr), the text on stderr with stdout empty otherwise. Returns the json-mode run for further checks. */
+function expectRefusal(args: string[], text: string) {
+  const j = critique(args);
+  expect(j.code).toBe(2);
+  expect(j.json?.error?.category).toBe("usage");
+  expect(j.refusal).toContain(text);
+  expect(j.stderr).not.toContain(text);
+  const t = critique(args, tmpdir(), "text");
+  expect(t.code).toBe(2);
+  expect(t.stdout).toBe("");
+  expect(t.stderr).toContain(text);
+  return j;
 }
 
 function git(dir: string, ...a: string[]): void {
@@ -213,9 +231,7 @@ describe("when promotion is not admissible, critique mounts the skill folder alo
     git(root, "commit", "-qm", "add submodule");
 
     // `--skill x` stays refused: the plugin's mount would carry an empty skills/x/.
-    const viaSkill = critique([root, "--skill", "x"]);
-    expect(viaSkill.code).toBe(2);
-    expect(viaSkill.stderr).toContain("skills/x/ has 0 git-tracked files under");
+    expectRefusal([root, "--skill", "x"], "skills/x/ has 0 git-tracked files under");
 
     const a = critique([join(root, "skills", "x")]);
     expect(a.code).toBe(0);
@@ -257,11 +273,9 @@ describe("a skill folder that is its own plugin, and --skill on a skill folder",
 
   it("--skill on a positional that is itself a skill folder says to drop --skill or pass the plugin root", () => {
     const p = contributingPlugin();
-    const a = critique([join(p, "skills", "x"), "--skill", "x"]);
-    expect(a.code).toBe(2);
-    expect(a.stderr).toContain("is itself a skill folder");
-    expect(a.stderr).toContain(`--skill x`);
-    expect(a.stderr).not.toContain("found at all");
+    const a = expectRefusal([join(p, "skills", "x"), "--skill", "x"], "is itself a skill folder");
+    expect(a.refusal).toContain(`--skill x`);
+    expect(a.refusal).not.toContain("found at all");
   });
 });
 
