@@ -193,6 +193,10 @@ tagging `1.0.0`, deliberately review and freeze the surfaces with no machine-rea
 - [ ] **CHANGELOG.md** — move everything under `## [Unreleased]` into a new
       `## [X.Y.Z] — YYYY-MM-DD` section; leave an empty `## [Unreleased]` on top. Include any
       **upgrade notes** (e.g. "re-record cassettes after the staleness-hash change").
+      Section headings follow Keep a Changelog, each type **once** per release: `### Breaking changes`
+      first (a major only; every covered-surface break, mirroring SPEC §12's list for that major), then
+      `### Upgrade notes`, `### Added`, `### Changed`, `### Fixed`, `### Documentation`. A breaking change
+      goes under `### Breaking changes`, never under a second `### Changed`.
 - [ ] **State the cassette re-record verdict in the upgrade notes — positively, every release.** Either
       `Cassettes: no re-record needed` (name the evidence: nothing under `src/runtime`, `src/hostloop`,
       `src/staging`, `src/session.ts`, the spawn path, `baselines/`, or the cassette constants moved) or

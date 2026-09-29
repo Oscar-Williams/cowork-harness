@@ -8,7 +8,7 @@ All notable changes to this project are documented here. The format is based on
 
 ## [4.0.0] — 2026-09-29
 
-### Changed — BREAKING (requires a major bump; see [SPEC.md §12](./SPEC.md#12-versioning--the-10-compatibility-contract))
+### Breaking changes (requires a major bump; see [SPEC.md §12](./SPEC.md#12-versioning--the-10-compatibility-contract))
 
 - **`lint --strict` now fails only on ERROR and WARN, and hides INFO.** Under `--strict` the default
   `--min-severity` is WARN, so an INFO finding is neither printed nor failing. Without `--strict` the
@@ -2449,7 +2449,7 @@ live inference**. The evidence above is one machine and one account, which is no
 
 ## [3.0.0] — 2026-08-29
 
-### Breaking
+### Breaking changes
 
 - **`l0_plugin_divergence` is renamed `l0_host_config_contamination`**, and its modifier
   `allow_l0_plugin_divergence` is renamed `allow_l0_host_config_contamination`. The `RunResult` field
@@ -3842,7 +3842,7 @@ what it always documented — so they ship in a minor:
 
 ## [2.0.0] — 2026-08-21
 
-### Changed — BREAKING (requires a major bump; see [SPEC.md §12](./SPEC.md#12-versioning--the-10-compatibility-contract))
+### Breaking changes (requires a major bump; see [SPEC.md §12](./SPEC.md#12-versioning--the-10-compatibility-contract))
 
 - **HASH-FORMAT EPOCH — `cassetteVersion` 12. Every cassette carrying a `skillHash` fails a bare `replay`
   until it is migrated.** Read that sentence literally: this is not a warning you can defer.
