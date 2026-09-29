@@ -1,6 +1,6 @@
 # Run, record and lock
 
-Tracks `cowork-harness 3.10.0` (baseline `desktop-2.9939.4`). Read it when running a scenario, recording or placing a cassette, reading verdict signals, checking a background run, or choosing CI lanes.
+Tracks `cowork-harness 4.0.0` (baseline `desktop-2.9939.4`). Read it when running a scenario, recording or placing a cassette, reading verdict signals, checking a background run, or choosing CI lanes.
 
 ## Part II — RUN, RECORD & LOCK
 
@@ -320,6 +320,6 @@ than a stuck `"running"`.)
 ### Place assertions in the right CI lane
 
 CI placement: a **token-free `replay` PR gate** (content/structure only) + a **nightly live `run`**
-(filesystem/egress). Fastest setup: `uses: yaniv-golan/cowork-harness@v3` (a packaged GitHub Action with a
+(filesystem/egress). Fastest setup: `uses: yaniv-golan/cowork-harness@v4` (a packaged GitHub Action with a
 PR job-summary reporter). See `references/ci-recipe.md` for the Action, the manual step-by-step form, and
 the four-stage pipeline.

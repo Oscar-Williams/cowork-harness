@@ -53,15 +53,17 @@ describe("replay's unknown-frozen-key contract is stated as the stamp mechanism,
 // v10, and a pre-`lane` CLI ignores the key there. Every sentence that credits the stamp with the refusal
 // has to carry that qualifier, or it overclaims in the other direction.
 describe("the lane: remote stamp claim carries its recorded-on-1.16.0 qualifier", () => {
-  const unreleased = (() => {
+  // The 4.0.0 release section, where this claim shipped (it was `[Unreleased]` until the release cut).
+  const release = (() => {
     const c = readFileSync("CHANGELOG.md", "utf8");
-    return c.slice(c.indexOf("## [Unreleased]"), c.indexOf("\n## [", c.indexOf("## [Unreleased]") + 1));
+    const at = c.indexOf("## [4.0.0]");
+    return at < 0 ? "" : c.slice(at, c.indexOf("\n## [", at + 1));
   })();
   const SITES: Array<[string, string]> = [
     ["references/authoring.md", readFileSync(join(REFS, "authoring.md"), "utf8")],
     ["references/scenario-schema.md", readFileSync(join(REFS, "scenario-schema.md"), "utf8")],
     ["docs/scenario.md", readFileSync("docs/scenario.md", "utf8")],
-    ["CHANGELOG [Unreleased]", unreleased],
+    ["CHANGELOG [4.0.0]", release],
   ];
   for (const [name, text] of SITES)
     it(`${name}: every "lane: remote raises the stamp" claim names 1.16.0`, () => {
