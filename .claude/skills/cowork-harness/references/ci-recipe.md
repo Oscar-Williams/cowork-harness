@@ -332,7 +332,16 @@ A typical skill repo runs four stages, fastest/cheapest first:
 
    This is the shape a CI step wants: **silent on success (no output, exit 0), loud and specific on
    failure** — `--quiet` suppresses the readiness preview but never the `✗ broken:` lines, which name the
-   offending file *and* the rejected key, one line per file, and the step still exits 1. Point `lint`
+   offending file *and* the rejected key, one line per file, and the step still exits 1. It exits 0,
+   though, on an input the real record would refuse (a missing path, an unknown baseline name, a
+   tier-vacuous `tool_not_called`): that prints a `⚠ input error:` line and lands in `inputErrors[]`. To
+   gate on those too, use the JSON form:
+
+   ```bash
+   cowork-harness record scenarios/ --dry-run --output-format json | jq -e '.ok and (.inputErrors == [])'
+   ```
+
+   Point `lint`
    at scenarios only: a session or matrix YAML in the linted set is reported as a file that does not
    load.
 
