@@ -1,0 +1,265 @@
+// A declared input path that does not exist is an authoring error, and every lane must refuse it before it
+// creates a run dir or spends on an earlier item:
+//  - `chat` resolves its inputs before it creates its run dir, so a missing skill folder, `--upload` or
+//    `--folder` leaves nothing behind;
+//  - `run <dir/>` checks every scenario's input paths before the first scenario runs, and one refusal
+//    names every offender;
+//  - a `tool_not_called` the scenario's tier can never violate is refused before the run dir exists too,
+//    and on a directory before the first scenario runs;
+//  - `record <dir/> --dry-run` reports a scenario whose input path is missing under `inputErrors[]`
+//    (advisory: the exit code and `ok` are unchanged until the next major).
+//
+// Token-free throughout. COWORK_HARNESS_FORBID_SPAWN is set, so a check that is missing ends at the spawn
+// guard (after the run dir exists), never at a real agent. Every call runs from a temp cwd with a temp runs
+// root, so a leftover run dir is observable and the shell cannot supply a model the test did not choose.
+import { describe, it, expect } from "vitest";
+import { spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+
+const CLI = resolve("dist/cli.js");
+const can = existsSync(CLI);
+
+const SPAWN_GUARD = /COWORK_HARNESS_FORBID_SPAWN is set/;
+const MISSING_MOUNT = /mount source\(s\) not found/;
+
+function work(): string {
+  return mkdtempSync(join(tmpdir(), "cwh-src-preflight-"));
+}
+
+function cli(args: string[], cwd: string, env: Record<string, string> = {}) {
+  const runs = join(cwd, ".runs");
+  const r = spawnSync("node", [CLI, ...args], {
+    encoding: "utf8",
+    cwd,
+    timeout: 120_000,
+    env: {
+      ...process.env,
+      COWORK_HARNESS_FORBID_SPAWN: "1",
+      COWORK_HARNESS_RUNS_DIR: runs,
+      COWORK_HARNESS_MODEL: "",
+      COWORK_HARNESS_SOFT_MISSING: "",
+      CLAUDE_CODE_OAUTH_TOKEN: "",
+      ANTHROPIC_API_KEY: "",
+      ANTHROPIC_AUTH_TOKEN: "",
+      ...env,
+    },
+  });
+  return { code: r.status, stdout: r.stdout || "", stderr: r.stderr || "", all: (r.stdout || "") + (r.stderr || ""), runs };
+}
+
+/** Did anything land under the runs root? A refusal that fires before the run starts leaves it empty. */
+function runDirsUnder(runs: string): string[] {
+  if (!existsSync(runs)) return [];
+  return readdirSync(runs).filter((n) => !n.startsWith("."));
+}
+
+function envelope(stdout: string): { ok?: boolean; results?: unknown[]; error?: { category?: string; message?: string } } {
+  return JSON.parse(stdout);
+}
+
+const SCENARIO = (name: string, session: string, extra = "") =>
+  `name: ${name}\nprompt: hi\nfidelity: protocol\nsession: ${session}\nassert:\n  - result: success\n${extra}`;
+const MODEL = "model: claude-sonnet-5\n";
+
+/** A workspace with a good session, sessions naming a missing folder / upload / plugin / skill, and an
+ *  empty `sc/` directory for the scenarios. */
+function fixture(): string {
+  const d = work();
+  mkdirSync(join(d, "sc"));
+  writeFileSync(join(d, "ok.yaml"), MODEL);
+  writeFileSync(join(d, "no-folder.yaml"), `${MODEL}folders:\n  - from: ./nope\n`);
+  writeFileSync(join(d, "no-upload.yaml"), `${MODEL}uploads:\n  - ./nope.csv\n`);
+  writeFileSync(join(d, "no-plugin.yaml"), `${MODEL}plugins:\n  local_plugins:\n    - ./nope-plugin\n`);
+  writeFileSync(join(d, "no-skill.yaml"), `${MODEL}skills:\n  local:\n    - ./nope-skill\n`);
+  return d;
+}
+
+describe.skipIf(!can)("chat resolves its inputs before it creates a run dir", () => {
+  const CHAT_ENV = { COWORK_HARNESS_MODEL: "claude-sonnet-5" };
+
+  it("a missing --folder is refused (exit 2) with no run dir left behind", () => {
+    const d = work();
+    mkdirSync(join(d, "skill")); // an empty directory passes the positional's kind check
+    const r = cli(["chat", "./skill", "--folder", "./nope"], d, CHAT_ENV);
+    expect(r.code, r.all).toBe(2);
+    expect(r.stderr).toMatch(MISSING_MOUNT);
+    expect(runDirsUnder(r.runs)).toEqual([]);
+  });
+
+  it("a missing skill folder is refused with no run dir left behind", () => {
+    const d = work();
+    const r = cli(["chat", "./missing-skill"], d, CHAT_ENV);
+    expect(r.code, r.all).toBe(2);
+    expect(r.all).not.toMatch(SPAWN_GUARD);
+    expect(runDirsUnder(r.runs)).toEqual([]);
+  });
+
+  it("a missing --upload is refused with no run dir left behind", () => {
+    const d = work();
+    mkdirSync(join(d, "skill"));
+    const r = cli(["chat", "./skill", "--upload", "./nope.csv"], d, CHAT_ENV);
+    expect(r.code, r.all).toBe(2);
+    expect(r.all).not.toMatch(SPAWN_GUARD);
+    expect(runDirsUnder(r.runs)).toEqual([]);
+  });
+
+  it("positive control: valid inputs reach the spawn guard and DO leave a chat run dir", () => {
+    // Proves the three refusals above are not vacuous: this instrument can observe a run dir.
+    const d = work();
+    mkdirSync(join(d, "skill"));
+    const r = cli(["chat", "./skill"], d, CHAT_ENV);
+    expect(r.all).toMatch(SPAWN_GUARD);
+    expect(runDirsUnder(r.runs)).toEqual(["chat"]);
+  });
+});
+
+describe.skipIf(!can)("run <dir/> checks every scenario's input paths before the first one runs", () => {
+  it("a missing folder in the second scenario refuses the batch before the first runs", () => {
+    const d = fixture();
+    writeFileSync(join(d, "sc", "a.yaml"), SCENARIO("a", "../ok.yaml"));
+    writeFileSync(join(d, "sc", "b.yaml"), SCENARIO("b", "../no-folder.yaml"));
+    const r = cli(["run", "sc/", "--output-format", "json"], d);
+    expect(r.all).not.toMatch(SPAWN_GUARD);
+    expect(r.code, r.all).toBe(2);
+    const env = envelope(r.stdout);
+    expect(env.error?.category).toBe("usage");
+    expect(env.error?.message).toMatch(/b\.yaml/);
+    expect(env.error?.message).toMatch(MISSING_MOUNT);
+    expect(env.error?.message).not.toMatch(/a\.yaml/);
+    expect(env.results).toEqual([]);
+    expect(runDirsUnder(r.runs)).toEqual([]);
+  });
+
+  it("one refusal names every scenario with a missing path", () => {
+    const d = fixture();
+    writeFileSync(join(d, "sc", "a.yaml"), SCENARIO("a", "../ok.yaml"));
+    writeFileSync(join(d, "sc", "b.yaml"), SCENARIO("b", "../no-folder.yaml"));
+    writeFileSync(join(d, "sc", "c.yaml"), SCENARIO("c", "../no-upload.yaml"));
+    const r = cli(["run", "sc/", "--output-format", "json"], d);
+    expect(r.code, r.all).toBe(2);
+    const msg = envelope(r.stdout).error?.message ?? "";
+    expect(msg).toMatch(/b\.yaml: /);
+    expect(msg).toMatch(/c\.yaml: /);
+    expect(msg).not.toMatch(/a\.yaml/);
+    expect(runDirsUnder(r.runs)).toEqual([]);
+  });
+
+  it("a single file keeps the unprefixed message it has always had", () => {
+    // Regression pin: green before and after. The pre-check must not add a file prefix for one file.
+    const d = fixture();
+    writeFileSync(join(d, "sc", "b.yaml"), SCENARIO("b", "../no-folder.yaml"));
+    const r = cli(["run", "sc/b.yaml", "--output-format", "json"], d);
+    expect(r.code, r.all).toBe(2);
+    const msg = envelope(r.stdout).error?.message ?? "";
+    expect(msg).toMatch(/^mount source\(s\) not found/);
+    expect(runDirsUnder(r.runs)).toEqual([]);
+  });
+
+  it("under COWORK_HARNESS_SOFT_MISSING the exclusion warning prints once, not once per resolution", () => {
+    // Regression guard, not a red: the count is 1 before this pre-check existed, and the pre-check resolves
+    // the same sources a second time. Printing its warnings too would make it 2; the pre-check is quiet, so
+    // it stays 1.
+    const d = fixture();
+    writeFileSync(join(d, "sc", "s.yaml"), SCENARIO("s", "../no-skill.yaml"));
+    const r = cli(["run", "sc/s.yaml"], d, { COWORK_HARNESS_SOFT_MISSING: "1" });
+    expect(r.all).toMatch(SPAWN_GUARD);
+    const upToGuard = r.stderr.slice(0, r.stderr.search(SPAWN_GUARD));
+    expect(upToGuard.match(/missing source excluded/g) ?? []).toHaveLength(1);
+  });
+
+  it("--ablate-skill drops a missing plugin before the pre-check, as the run does", () => {
+    // Green before and after: ablation removes the plugin from the session the run resolves, so its path is
+    // never checked. The pre-check must ablate the same way, or it refuses a run that would have proceeded.
+    const d = fixture();
+    writeFileSync(join(d, "sc", "p.yaml"), SCENARIO("p", "../no-plugin.yaml"));
+    const r = cli(["run", "sc/", "--ablate-skill"], d);
+    expect(r.all).toMatch(SPAWN_GUARD);
+  });
+
+  it("--ablate-skill still refuses a missing folder (ablation removes skill discovery only)", () => {
+    const d = fixture();
+    writeFileSync(join(d, "sc", "b.yaml"), SCENARIO("b", "../no-folder.yaml"));
+    const r = cli(["run", "sc/", "--ablate-skill", "--output-format", "json"], d);
+    expect(r.code, r.all).toBe(2);
+    expect(envelope(r.stdout).error?.message).toMatch(MISSING_MOUNT);
+    expect(runDirsUnder(r.runs)).toEqual([]);
+  });
+});
+
+describe.skipIf(!can)("a tier-vacuous tool_not_called is refused before the run dir exists", () => {
+  const VACUOUS = (name: string) =>
+    `name: ${name}\nprompt: hi\nfidelity: hostloop\nsession: ../ok.yaml\nassert:\n  - tool_not_called: NotebookEdit\n`;
+
+  it("a single file: usage, no run dir", () => {
+    const d = fixture();
+    writeFileSync(join(d, "sc", "v.yaml"), VACUOUS("v"));
+    const r = cli(["run", "sc/v.yaml", "--output-format", "json"], d);
+    expect(r.code, r.all).toBe(2);
+    const env = envelope(r.stdout);
+    expect(env.error?.category).toBe("usage");
+    expect(env.error?.message).toMatch(/can never be violated at fidelity `hostloop`/);
+    expect(runDirsUnder(r.runs)).toEqual([]);
+  });
+
+  it("a directory: refused before the first scenario runs", () => {
+    const d = fixture();
+    writeFileSync(join(d, "sc", "a.yaml"), SCENARIO("a", "../ok.yaml"));
+    writeFileSync(join(d, "sc", "v.yaml"), VACUOUS("v"));
+    const r = cli(["run", "sc/", "--output-format", "json"], d);
+    expect(r.all).not.toMatch(SPAWN_GUARD);
+    expect(r.code, r.all).toBe(2);
+    expect(envelope(r.stdout).error?.message).toMatch(/v\.yaml: .*can never be violated/);
+    expect(runDirsUnder(r.runs)).toEqual([]);
+  });
+});
+
+describe.skipIf(!can)("record <dir/> --dry-run reports missing input paths under inputErrors[]", () => {
+  type Doc = { ok: boolean; refusals: { file: string; message: string }[]; inputErrors?: { file: string; message: string }[] };
+
+  function twoFiles(): string {
+    const d = fixture();
+    writeFileSync(join(d, "sc", "a.yaml"), SCENARIO("a", "../ok.yaml"));
+    writeFileSync(join(d, "sc", "b.yaml"), SCENARIO("b", "../no-folder.yaml"));
+    return d;
+  }
+
+  it("JSON: the missing path is listed under inputErrors[]; exit code and ok are unchanged", () => {
+    const d = twoFiles();
+    const r = cli(["record", "sc/", "--dry-run", "--output-format", "json"], d);
+    expect(r.code, r.all).toBe(0);
+    const doc = JSON.parse(r.stdout) as Doc;
+    expect(doc.ok).toBe(true);
+    expect(doc.refusals).toEqual([]);
+    expect(doc.inputErrors).toHaveLength(1);
+    expect(doc.inputErrors![0].file).toMatch(/b\.yaml$/);
+    expect(doc.inputErrors![0].message).toMatch(MISSING_MOUNT);
+  });
+
+  it("text: a warning line names the file and the missing path", () => {
+    const d = twoFiles();
+    const r = cli(["record", "sc/", "--dry-run"], d);
+    expect(r.code, r.all).toBe(0);
+    expect(r.stderr).toMatch(/⚠ input error: .*b\.yaml: mount source\(s\) not found/);
+    expect(r.stderr).toMatch(/will fail on the real record/);
+  });
+
+  it("--quiet still prints the warning line", () => {
+    const d = twoFiles();
+    const r = cli(["record", "sc/", "--dry-run", "--quiet"], d);
+    expect(r.stderr).toMatch(/⚠ input error: .*b\.yaml: mount source\(s\) not found/);
+  });
+
+  it("a file that is both unpinned and names a missing path reports the model refusal only", () => {
+    // The real record stops at the model refusal first, so the preview reports one reason per file.
+    const d = fixture();
+    writeFileSync(join(d, "unpinned-no-folder.yaml"), `folders:\n  - from: ./nope\n`);
+    writeFileSync(join(d, "sc", "b.yaml"), SCENARIO("b", "../unpinned-no-folder.yaml"));
+    const r = cli(["record", "sc/", "--dry-run", "--output-format", "json"], d);
+    const doc = JSON.parse(r.stdout) as Doc;
+    expect(doc.refusals).toHaveLength(1);
+    expect(doc.refusals[0].message).toMatch(/no model is pinned/);
+    expect(doc.inputErrors ?? []).toEqual([]);
+  });
+});

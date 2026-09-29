@@ -4023,6 +4023,11 @@ export async function cmdRecord(args: string[]) {
       // must not gate. A preview that refuses what the real path allows is worse than one that stays quiet:
       // it teaches operators to stop trusting the preview.
       const notes: { file: string; message: string; kind: "refuse" | "warn" }[] = [];
+      // An input path the session declares that does not exist, or is the wrong kind. Path-INDEPENDENT (it
+      // resolves against the session file, not `--out`), and the real record fails that scenario — but this
+      // arm exited 0 on it through 4.0.0, and the dry-run exit code is a covered meaning, so it is reported
+      // under its own key, beside `ok` and the exit code, rather than as a refusal.
+      const inputErrors: { file: string; message: string }[] = [];
       for (const f of disc.scenarios) {
         let sc;
         try {
@@ -4039,6 +4044,16 @@ export async function cmdRecord(args: string[]) {
         // the session is new I/O on this arm; a session that does not load is skipped, not refused.
         const noModel = unresolvedModelPreflight(sc, modelOverride);
         if (noModel) refusals.push({ file: f, message: noModel });
+        // The input paths, checked as `record <file> --dry-run` checks them — but only once a model
+        // resolves: the real record stops at the model refusal first, and without a model the effort check
+        // would report a confusing second reason for the same file.
+        else
+          try {
+            launchSourcesPreflight(sc, modelOverride);
+          } catch (e) {
+            if (!(e instanceof UsageError)) throw e;
+            inputErrors.push({ file: f, message: e.message });
+          }
         // Path-dependent: reported, never gating. `preSpendVerdicts` re-runs promptPolicyRejection, which is
         // already covered above — drop that one here rather than reporting it twice.
         for (const v of preSpendVerdicts(sc, defaultCassettePath(sc.name), {
@@ -4076,6 +4091,8 @@ export async function cmdRecord(args: string[]) {
             skipped: disc.skipped,
             broken: disc.broken,
             refusals,
+            // Would fail on the real record; not (yet) a refusal — see where it is collected.
+            inputErrors,
             // Advisory; deliberately a separate key from `refusals` so automation cannot mistake a guess
             // for a verdict, and does not gate on it.
             notes,
@@ -4097,6 +4114,9 @@ export async function cmdRecord(args: string[]) {
       const logFindings = () => {
         for (const b of disc.broken) log(`✗ broken: ${b.file}: ${stripScenarioPrefix(b.error, b.file)}`);
         for (const r of refusals) log(`✗ refused: ${r.file}: ${r.message}`);
+        // Survives --quiet like a refusal: it is a failure of the real record, not part of the preview.
+        for (const e of inputErrors)
+          log(`⚠ input error: ${e.file}: ${e.message} — will fail on the real record; the exit code stays unchanged until the next major`);
       };
       if (!asJson) {
         for (const s of disc.skipped) log(`· skipped: ${s}`);

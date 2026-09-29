@@ -22,6 +22,8 @@ import {
   parseScenarioFile,
   loadSessionFromFile,
   unresolvedModelPreflight,
+  launchSourcesPreflight,
+  tierVacuityRefusal,
   UnansweredError,
   BoundaryError,
   UsageError,
@@ -1896,6 +1898,35 @@ async function cmdRun(rawArgs: string[]) {
       "run",
       "usage",
       files.length === 1 ? unresolvedModelPreflight(loaded[0], modelFlag)! : unresolvedModelRefusal(unpinned.join(", ")),
+      undefined,
+      o.json,
+    );
+  // Every scenario's inputs, before any runs: a `tool_not_called` its tier can never violate, then every
+  // declared input path (plugins, skills, uploads, folders, marketplaces). executeScenario checks the same,
+  // in the same order, but on a directory only when that file's turn came — after the earlier ones had been
+  // paid for, and with their results lost to the refusal. After the model refusal, which this resolution
+  // needs (an `effort:` is checked against the model). The pre-check is quiet: the run resolves again and
+  // prints any warning (a COWORK_HARNESS_SOFT_MISSING exclusion) itself.
+  const badInputs: { file: string; message: string }[] = [];
+  for (let i = 0; i < files.length; i++) {
+    const vacuous = tierVacuityRefusal(loaded[i], loadBaseline(loaded[i].baseline));
+    if (vacuous) {
+      badInputs.push({ file: files[i], message: vacuous });
+      continue;
+    }
+    try {
+      launchSourcesPreflight(loaded[i], modelFlag, { quiet: true, ablateSkill: flags.ablateSkill });
+    } catch (e) {
+      if (!(e instanceof UsageError)) throw e;
+      badInputs.push({ file: files[i], message: e.message });
+    }
+  }
+  // One file keeps the message executeScenario would have thrown, unprefixed; a batch names every offender.
+  if (badInputs.length)
+    fail(
+      "run",
+      "usage",
+      files.length === 1 ? badInputs[0].message : badInputs.map((b) => `${b.file}: ${b.message}`).join("\n"),
       undefined,
       o.json,
     );
