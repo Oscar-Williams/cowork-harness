@@ -4080,7 +4080,7 @@ function cmdAnswer(args: string[]) {
     const category = e instanceof UsageError ? "usage" : "runtime";
     return void fail("answer", category, `cannot answer gate ${seq} in ${dir}: ${String((e as Error).message)}`, undefined, json);
   }
-  if (json) out(JSON.stringify({ tool: "cowork-harness", command: "answer", ok: true, gate: seq, answers }));
+  if (json) out(jsonPayloadEnvelope("answer", true, { gate: seq, answers }));
   else log(`✓ answered gate ${seq}: ${JSON.stringify(answers)}`);
 }
 
