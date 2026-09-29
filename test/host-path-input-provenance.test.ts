@@ -24,6 +24,10 @@ const readCorpus = (outDir: string): Set<string> => (provenance as any).readInpu
 let dir: string;
 let mnt: string;
 let outDir: string;
+// A host-SHAPED run dir for the own-root tests. The scratch dirs above come from os.tmpdir(), which is bare
+// `/tmp` on Linux — deliberately not a host-path shape, so a path under it is never a token at all and an
+// own-root test built on it would pass vacuously on macOS only. ownHostRoots needs no real directory.
+const HOST_OUT = "/Users/alice/.cowork-harness/runs/scen/local_sid";
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "input-host-paths-"));
   mnt = join(dir, "session", "mnt");
@@ -170,9 +174,9 @@ describe("scanEvents — a host path the user supplied is not a leak", () => {
   });
 
   it("(c) a path under a root the harness created for THIS run is never exempt, even if an input names it", () => {
-    const own = join(outDir, "work", "session", "mnt", "outputs", "r.md");
+    const own = join(HOST_OUT, "work", "session", "mnt", "outputs", "r.md");
     const f = events(say(`saved to ${own}`));
-    const scan = scanEvents(f, ["outputs"], corpusOf([own], [outDir]) as any) as any;
+    const scan = scanEvents(f, ["outputs"], corpusOf([own], [HOST_OUT]) as any) as any;
     expect(scan.hostPathLeaked).toBe(true);
     expect(scan.hostPathsFromInputs ?? 0).toBe(0);
   });
@@ -305,8 +309,8 @@ describe("exact own roots: the vm-work root and the runs dir", () => {
   for (const which of ["vm-work root", "runs dir"])
     it(`the ${which} itself leaks even when an input names it`, async () => {
       const { VM_WORK_HOST } = await import("../src/runtime/lima.js");
-      const root = which === "runs dir" ? join(outDir, "..") : VM_WORK_HOST;
-      const { subtree, exact } = (execute as any).ownHostRoots(outDir, "local_sid", {});
+      const root = which === "runs dir" ? join(HOST_OUT, "..") : VM_WORK_HOST;
+      const { subtree, exact } = (execute as any).ownHostRoots(HOST_OUT, "local_sid", {});
       const corpus = { tokens: new Set([root]), neverExemptRoots: subtree, neverExemptExact: exact };
       expect(scanEvents(events(say(`ls ${root}`)), ["outputs"], corpus as any).hostPathLeaked).toBe(true);
     });
@@ -322,16 +326,18 @@ describe("exact own roots: the vm-work root and the runs dir", () => {
 // What executeScenario hands scanEvents: the persisted corpus plus this turn's prompt, with the real
 // own-roots — at the sandboxed tiers only.
 describe("inputProvenanceCorpus — the corpus executeScenario scans with", () => {
-  const corpusFor = (prompt: string, fidelity = "container") =>
-    (execute as any).inputProvenanceCorpus(outDir, "local_sid", {}, prompt, fidelity);
+  const corpusFor = (prompt: string, fidelity = "container", out = outDir) =>
+    (execute as any).inputProvenanceCorpus(out, "local_sid", {}, prompt, fidelity);
 
   it("a path that appears only in the prompt is exempt", () => {
     const f = events(say("reading /Users/alice/brief.md as asked"));
     expect(scanEvents(f, ["outputs"], corpusFor("please summarise /Users/alice/brief.md")).hostPathLeaked).toBe(false);
   });
   it("a prompt path under a root the harness created still leaks", () => {
-    const own = join(outDir, "work", "session", "mnt", "outputs", "r.md");
-    expect(scanEvents(events(say(`saved ${own}`)), ["outputs"], corpusFor(`check ${own}`)).hostPathLeaked).toBe(true);
+    const own = join(HOST_OUT, "work", "session", "mnt", "outputs", "r.md");
+    expect(scanEvents(events(say(`saved ${own}`)), ["outputs"], corpusFor(`check ${own}`, "container", HOST_OUT)).hostPathLeaked).toBe(
+      true,
+    );
   });
   it("includes the corpus the first turn persisted", () => {
     put("proj/a.txt", "/Users/alice/a");
@@ -392,12 +398,12 @@ describe("continuation: a following new path or URL is not a continuation", () =
 // must not let an own root slip past the root checks either.
 describe("own roots with trailing punctuation, and the runs root itself", () => {
   const withRoots = async (tokens: string[]) => {
-    const { subtree, exact } = (execute as any).ownHostRoots(outDir, "local_sid", {});
+    const { subtree, exact } = (execute as any).ownHostRoots(HOST_OUT, "local_sid", {});
     return { tokens: new Set(tokens), neverExemptRoots: subtree, neverExemptExact: exact };
   };
   for (const suffix of [".", ":", "?", "!"])
     it(`the run dir followed by ${JSON.stringify(suffix)} leaks`, async () => {
-      const tok = `${outDir}${suffix}`;
+      const tok = `${HOST_OUT}${suffix}`;
       expect(scanEvents(events(say(`saved under ${tok}`)), ["outputs"], (await withRoots([tok])) as any).hostPathLeaked).toBe(true);
     });
   it("the vm-work root followed by `.` leaks", async () => {
@@ -406,10 +412,10 @@ describe("own roots with trailing punctuation, and the runs root itself", () => 
     expect(scanEvents(events(say(`in ${tok}`)), ["outputs"], (await withRoots([tok])) as any).hostPathLeaked).toBe(true);
   });
   it("the runs root (COWORK_HARNESS_RUNS_DIR) itself leaks", async () => {
-    const runs = join(dir, "runs-root");
+    const runs = "/Users/alice/custom-runs";
     process.env.COWORK_HARNESS_RUNS_DIR = runs;
     try {
-      const { exact } = (execute as any).ownHostRoots(outDir, "local_sid", {});
+      const { exact } = (execute as any).ownHostRoots(HOST_OUT, "local_sid", {});
       expect(exact).toContain(runs);
       expect(scanEvents(events(say(`ls ${runs}`)), ["outputs"], (await withRoots([runs])) as any).hostPathLeaked).toBe(true);
     } finally {
@@ -422,15 +428,15 @@ describe("own roots with trailing punctuation, and the runs root itself", () => 
 // or with an invisible format character inside — still names the same place, so it is still never exempt.
 describe("own roots respelled", () => {
   const spellings = (): [string, string][] => [
-    ["via ..", `${join(outDir, "..")}/../${outDir.split("/").slice(-2).join("/")}/work/x`],
+    ["via ..", `${join(HOST_OUT, "..")}/../${HOST_OUT.split("/").slice(-2).join("/")}/work/x`],
     // Only the part below the host root changes case: the root prefix itself is matched case-sensitively.
-    ["another case", `${join(outDir, "..")}/${outDir.split("/").slice(-1)[0].toUpperCase()}/work/x`],
-    ["a zero-width character inside", `${outDir.slice(0, -2)}\u200b${outDir.slice(-2)}/work/x`],
-    ["a soft hyphen inside", `${outDir.slice(0, -2)}\u00ad${outDir.slice(-2)}/work/x`],
+    ["another case", `${join(HOST_OUT, "..")}/${HOST_OUT.split("/").slice(-1)[0].toUpperCase()}/work/x`],
+    ["a zero-width character inside", `${HOST_OUT.slice(0, -2)}\u200b${HOST_OUT.slice(-2)}/work/x`],
+    ["a soft hyphen inside", `${HOST_OUT.slice(0, -2)}\u00ad${HOST_OUT.slice(-2)}/work/x`],
   ];
   for (const i of [0, 1, 2, 3])
     it(`spelling ${i} (${["via ..", "another case", "a zero-width character inside", "a soft hyphen inside"][i]}) leaks`, () => {
-      const { subtree, exact } = (execute as any).ownHostRoots(outDir, "local_sid", {});
+      const { subtree, exact } = (execute as any).ownHostRoots(HOST_OUT, "local_sid", {});
       const [, tok] = spellings()[i];
       const corpus = { tokens: new Set([tok]), neverExemptRoots: subtree, neverExemptExact: exact };
       expect(scanEvents(events(say(`see ${tok}`)), ["outputs"], corpus as any).hostPathLeaked).toBe(true);
