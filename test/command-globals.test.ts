@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -112,6 +112,7 @@ describe.skipIf(!can)("per-command --dotenv keeps the documented precedence", ()
     const d = mkdtempSync(join(tmpdir(), "cmd-globals-prec-"));
     writeFileSync(join(d, ".env"), "COWORK_HARNESS_FIDELITY=protocol\n");
     writeFileSync(join(d, "explicit.env"), "COWORK_HARNESS_FIDELITY=hostloop\n");
+    mkdirSync(join(d, "plugin")); // a dry run refuses a plugin folder that does not exist
     return d;
   }
   const fidelity = (r: { stdout: string }) => JSON.parse(r.stdout).fidelity;
@@ -173,6 +174,7 @@ describe.skipIf(!can)("per-command --dotenv keeps the documented precedence", ()
 describe.skipIf(!can)("a --dotenv-shaped token that is another flag's VALUE is never taken as the flag", () => {
   it("skill --answer=--dotenv=x=foo keeps the literal answer (the equals form is the escape for a dash value)", () => {
     const d = mkdtempSync(join(tmpdir(), "cmd-globals-hijack-"));
+    mkdirSync(join(d, "plugin"));
     const r = cli(["skill", "./plugin", "hi", "--dry-run", "--answer=--dotenv=x=foo"], { cwd: d });
     expect(r.code, r.out).toBe(0);
     expect(JSON.parse(r.stdout).answers).toEqual([{ when_question: "--dotenv", choose: "x=foo" }]);
@@ -184,6 +186,7 @@ describe.skipIf(!can)("a --dotenv-shaped token that is another flag's VALUE is n
     // label that reached the run is observable, and the runs root it landed in shows --run-dir was not applied
     // from inside the label.
     const d = mkdtempSync(join(tmpdir(), "cmd-globals-hijack-"));
+    mkdirSync(join(d, "plugin"));
     writeFileSync(
       join(d, "s.yaml"),
       "baseline: latest\nfidelity: container\non_unanswered: fail\nprompt: hello\nassert:\n  - result: success\n",

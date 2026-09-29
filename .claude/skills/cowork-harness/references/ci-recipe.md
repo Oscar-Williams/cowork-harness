@@ -470,7 +470,9 @@ human rendering — warnings, verdict, `status`'s summary line — to **stderr**
 A wrapper that captures only stdout gets an empty log and, if it greps that for a state, a silent false
 negative. Capture stderr for the human trail (`2> run.stderr.log`), or ask for JSON and parse stdout.
 (Commands whose whole job is to print a value — `--version`, `assertions --list`, `scaffold`, `gates`,
-`skill --dry-run` — write it to stdout by design, with or without the flag.)
+`skill --dry-run` — write it to stdout by design. Under `--output-format json` the value rides inside the
+envelope: `scaffold`'s YAML is `.scenario`, `skill --dry-run`'s preview is the envelope's own fields;
+`gates` stays an NDJSON stream. `--help` always prints to stderr.)
 
 `verify-cassettes` emits its **own** envelope (`{command, ok, coverage, results[]}` with per-file
 `findings`/`staleness`/`unverifiable`/`notes`/`version`/`error`), published as

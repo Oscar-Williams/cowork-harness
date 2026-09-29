@@ -534,6 +534,16 @@ synthesized and evaluated automatically on every replay (see the O7 guard above)
 else hits stdout in that mode — the renderer/footer/`[env]`/`[input]` all go to stderr). The
 `run`/`skill`/`replay` shape:
 
+**Which commands, and what stdout carries.** `COWORK_HARNESS_OUTPUT_FORMAT` is the default for the flag on
+**every** command that takes `--output-format`, on its success path and its error path alike; an explicit
+`--output-format text|json` overrides it. (Before 4.0.0 several commands — `doctor`, `status`,
+`verify-run`, `vm`, `analyze-skill`, `replay`, `verify-cassettes`, `critique` — honoured the variable only
+on their error path.) Under json, stdout carries exactly one document — in the shared `{tool, version,
+command, ok, …, error}` frame, or in a command's Dedicated shape (below) — or nothing: help (`--help`)
+always goes to **stderr** with stdout empty, and a command's payload — `scaffold`'s scenario YAML, `skill
+--dry-run`'s preview — rides inside the envelope. (`gates` is the one stream: NDJSON, one line per
+gate.) An error on any command is the shared error envelope.
+
 ```jsonc
 {
   "tool": "cowork-harness",
@@ -560,8 +570,8 @@ Other commands intentionally do NOT share this exact shape. By mechanism (`src/r
 there are three families:
 
 - **`results[]`-bearing (internally `jsonEnvelope`)** — the stable `{tool, version, command, ok,
-  results[], error}` shape described above. Emitted by **`run`, `skill`, `record`, `replay`,
-  `verify-run`**. (`chat` writes the same `RunResult`-shaped `result.json` to disk, but has no
+  results[], error}` shape described above. Emitted by **`run`, `skill`, `record` (a single file;
+  its `ok` follows its own rule, below), `replay`, `verify-run`**. (`chat` writes the same `RunResult`-shaped `result.json` to disk, but has no
   `--output-format json`/`isJsonOutput` support at all — it never emits a stdout envelope of any
   shape.)
   - **`verify-run` is a hybrid, deliberately.** It emits `results[]` (always exactly one entry — it
@@ -577,12 +587,43 @@ there are three families:
   though a caller may compute `ok` however it likes — e.g. `probe-dispatch` sets it from its
   projection's `verdict.pass`). Callers include **`assertions`, `probe-dispatch`,
   `diff`, `trace`, `analyze-skill`, `lint`/`lint-skill`**, plus `record --dry-run`'s discovery
-  payload, `critique --corpus-only`'s corpus payload, `verify-cassettes` (§11.1), `doctor` (§11.2), and
-  `rehash`.
+  payload, the `record <dir/>` / `record --rerecord-stale` batch payload (below), `scaffold <run>`
+  (`scenario`: the YAML, `out`: the file written or `null`), `skill --dry-run` (`dryRun: true` plus the
+  preview's fields), `critique --corpus-only`'s corpus payload, `verify-cassettes` (§11.1), `doctor`
+  (§11.2), and `rehash`.
 - **Dedicated (hand-shaped, no shared helper)** — its own bespoke shape: **`list`** (a raw JSON
   array, no wrapper object), **`boundary-check`**, **`init-redact`**, **`decide`**, **`answer`**,
-  **`gates --follow`** (an NDJSON stream, not a single object), **`stats`**, **`status`**,
-  **`inspect`**, and **`vm`**.
+  **`gates`** (an NDJSON stream, not a single object — one line per pending gate; a terminal
+  `{"done":true}` only once the run has written `done.json`, so one pass over a run still in progress
+  ends on its last gate line with no terminal line; when the channel fails, the standard error envelope
+  is the last line, after any gate lines already streamed), **`stats`**, **`status`**, **`inspect`**, and **`vm`**.
+
+**`record`'s `ok` is the exit code's verdict, in every arm** (a single file, `<dir/>`,
+`--rerecord-stale`, and `--dry-run`): `ok` ⇔ exit `0`. A recording's own verdict is published beside it —
+`results[0].verdict.pass` for a single file, `items[].verdict.pass` for a batch — and the two differ exactly
+when `--allow-failing` records a failing run on purpose (exit `0`, `ok: true`, `verdict.pass: false`).
+Before 4.0.0 single-file `record` set `ok` from the verdict, so that case printed `ok: false` beside exit
+`0`; and `record <empty dir/> --dry-run` printed `ok: true` beside exit `2`.
+The batch arms (`record <dir/>`, `record --rerecord-stale <dir/>`) print one payload-shaped document, last,
+right before the exit:
+
+```jsonc
+{ "tool": "cowork-harness", "version": "...", "command": "record", "ok": true,
+  "target": "<dir>", "rerecordStale?": true,
+  "items": [ { "file?": "<scenario>", "cassette?": "<cassette>",
+               "status": "recorded" | "failed" | "skipped-budget",
+               "error?": "string",                 // failed only
+               "verdict?": { "pass": bool, ... }, // recorded only: the run's verdict
+               "result?": { /* RunResult + verdict/provenance/outcome, as single-file record publishes it */ } } ],
+  "skipped?": ["<non-scenario file>"],             // <dir/> only: files without a `prompt:`
+  "error": null }
+```
+
+A scenario file that did not load is a `failed` item. A batch stopped by `--max-budget-usd` exits `0`, so
+`ok: true` can accompany `skipped-budget` items — unlike `run --repeat`, whose budget-stopped batch fails
+unless `--allow-budget-stop`. `--rerecord-stale` with nothing stale prints `ok: true` and `items: []`.
+A refusal before the first recording (no credentials, an unresolved model, the budget pre-flight, a slug
+collision) prints the error envelope instead, as before.
 
 The command lists above are illustrative, not a frozen contract — this is not a single universal
 envelope across every command, so check a given command's own section (or grep its
@@ -689,6 +730,29 @@ unused — reserving it now keeps a later addition additive rather than a renumb
 with its own meanings); this reservation applies only to the `run`/`skill` family. `rehash` does use `4`,
 for partial migration success (above) — a different command, so it does not consume this reservation.
 
+**`gates <dir>`:** one pass over a directory that does not exist, or any path that is not a directory,
+is a usage error (exit `2`); `--follow` waits for a directory that does not exist yet (the run creates it)
+and says so once on stderr. A gate request that cannot be parsed is a `runtime` error (exit `2`): under
+`--follow` after bounded retries, in one pass on the first read. Before 4.0.0 one pass over a missing
+directory, or over a malformed request, exited `0` with nothing printed.
+**A declared input path that does not exist, or is the wrong kind, is a usage error.** A plugin folder,
+`--upload`, `--folder`, a session's `uploads`/`folders`/`projects`/`skills.local`/`local_plugins`/
+`local_marketplaces` (or a marketplace `entry.source`), an `enabled` plugin missing from its local
+marketplace, a file where a directory is required (or the reverse), two sources mapping to one mount
+destination, a `plugins.config_dir` that is not a directory, an unsafe mount-name segment (a `:` in an
+upload's file name), a session `effort:` the schema rejects or the model does not offer, and a
+`--session-id` with characters outside `[A-Za-z0-9_-]` are refused as category `usage` (exit `2` on `run`/`skill`; `record` keeps its `1` for a
+refused recording), before the run directory is created, so a refused run leaves no run dir. `skill
+--dry-run` makes the same check, so its preview of such a path exits `2` — `--ablate-skill` included, since
+ablation drops the plugin from the run but the path is still the caller's input; an unresolved model is not
+an input error and the preview reports it as `model: null`. `record <file> --dry-run` makes the same check
+over its scenario's session, so both previews surface a bad input path; there it is a refusal of a scenario
+that loaded, so it exits `1`. Both check existence and kind, not the git tracked-set filter, which only a
+real run applies. Under `COWORK_HARNESS_SOFT_MISSING` a missing source is excluded instead, and the preview
+prints the same exclusion warning the run prints. `verify-run` follows the same rule: a run dir that does
+not exist or is a file, or a scenario file that does not load, is `usage`; a directory holding no completed
+run stays `runtime`. `answer` splits the same way: a directory or gate that is not there is `usage`; a gate
+request that exists but cannot be read or parsed, or an answer that cannot be written, is `runtime`.
 **Per-command exceptions:** `critique` **never gates on findings** — it exits `0` for any finding of any classification, and even when the task run it graded ERRORED (that is a finding about the skill, not a broken instrument). It exits `2` only for a usage error or an **instrument failure**: the turn was killed, the reflection protocol broke, or the evaluator was never invoked *or threw* — i.e. no critique was produced. Do not gate CI on `critique`; that inverts its design. `lint` exits `127` when `python3` is missing (spawn error), and `1` — never `0` — when the scenario loader rejected a file but its findings could not be handed to the linter (an unwritable temp directory); `replay` exits
 `2` on a **whole-cassette operational failure** — anything `readCassette` rejects (unreadable, invalid
 shape, unsupported version, unrecognized assertion key) or any per-file throw, plus the batch loop's
@@ -941,7 +1005,7 @@ Covered-surface changes follow semver as of `1.0.0` — see [RELEASING.md](./REL
   `fail-on-skill-drift`, `extra-args`, `summary`, `anthropic-api-key`, `model`) and outputs (`ok`,
   `envelope-path`, `summary-md`).
 
-**4.0.0's major changes.** Four changes made 4.0.0 a major release, each under the clause named:
+**4.0.0's major changes.** These changes made 4.0.0 a major release, each under the clause named:
 
 - *CLI surface (a flag's default).* Under `lint --strict` the default `--min-severity` is WARN, so INFO
   neither fails nor prints unless `--min-severity INFO` is passed.
@@ -960,6 +1024,24 @@ Covered-surface changes follow semver as of `1.0.0` — see [RELEASING.md](./REL
   meaning: it is a usage error on `run`/`skill`/`probe-dispatch`/`chat`/`critique` (`2`), and on `record`
   a pre-spend refusal of a scenario that loaded (`1`, `--dry-run` included, §11). `skill --dry-run` does
   not refuse; it reports `model: null`. The packaged Action gains an optional `model` input (additive).
+- *Environment variables (a documented var's meaning).* `COWORK_HARNESS_OUTPUT_FORMAT=json` selects json
+  on every command's success path, not only its error path (§11): `doctor`, `status`, `verify-run`, `vm`,
+  `analyze-skill`, `replay`, `verify-cassettes` and `critique` printed human text with the variable set.
+- *RunResult envelope (what `ok` means) — `record`.* `record`'s `ok` is "exited 0" in every arm (§11): a
+  single-file `--allow-failing` recording of a failing run now says `ok: true` (it said `false`), and
+  `record <empty dir/> --dry-run` says `ok: false` (it said `true`, beside exit `2`).
+- *CLI surface (an exit-code meaning).* `gates <dir>` without `--follow` exits `2` (usage) on a directory
+  that does not exist, and `2` (runtime) on a malformed gate request; both exited `0`. A path that is not
+  a directory is a usage error with or without `--follow`.
+- *CLI surface (an exit-code meaning).* `skill <plugin-folder> … --dry-run` (with or without
+  `--ablate-skill`) exits `2` when a declared path does not exist or is the wrong kind; it exited `0` with
+  a preview. `record <file> --dry-run` refuses the same paths in its scenario's session, with record's `1`;
+  it exited `0`.
+- *stdout content under `--output-format json`.* Not strictly a covered envelope, listed so no consumer is
+  surprised: `scaffold <run>` prints an envelope carrying the YAML (it printed bare YAML); `skill --dry-run`
+  wraps its preview in the standard frame; `lint --help`, `lint-skill --help` and `critique --help` print
+  their help on stderr with stdout empty (lint's printed a usage-error document, critique's printed help on
+  stdout).
 
 **NOT covered (may change in any release — do NOT depend on):**
 

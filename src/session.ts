@@ -1,4 +1,4 @@
-import { warn } from "./io.js";
+import { warn as warnToStderr } from "./io.js";
 import { z } from "zod";
 import { mkdirSync, writeFileSync, readFileSync, readdirSync, cpSync, existsSync, statSync, realpathSync } from "node:fs";
 import { createHash } from "node:crypto";
@@ -10,7 +10,7 @@ import { assignFolderMountNames, RESERVED_MOUNT_NAMES, type MountTier } from "./
 import { MOUNT_BARE_NAME_MIN_VERSION, cmpVersionStrings } from "./baseline.js";
 import { containedRealPath } from "./boundary-paths.js";
 import { gitModeEnabled, gitFilterFromSet, gitStageStats, gitCpFilter } from "./run/skill-files.js";
-import { BoundaryError } from "./errors.js";
+import { BoundaryError, UsageError, compactSchemaError } from "./errors.js";
 import { readSkillDescription, type PluginSkillRoot } from "./run/skill-metadata.js";
 import { pluginRootsWithRunnableHooks } from "./run/hook-events.js";
 
@@ -611,9 +611,9 @@ function validateEffort(effort: string | undefined, model: string | undefined, b
   if (entry) {
     if (entry.effortLevels) {
       if (effort !== undefined && !entry.effortLevels.includes(effort))
-        throw new Error(`effort "${effort}" is not offered by model "${model}" — supported levels: ${entry.effortLevels.join(", ")}`);
+        throw new UsageError(`effort "${effort}" is not offered by model "${model}" — supported levels: ${entry.effortLevels.join(", ")}`);
     } else if (effort !== undefined) {
-      throw new Error(
+      throw new UsageError(
         `model "${model}" has no effort selector — omit \`effort:\` (real Cowork always runs it at the medium fallback, with no UI picker)`,
       );
     }
@@ -622,7 +622,9 @@ function validateEffort(effort: string | undefined, model: string | undefined, b
   const regexDefault = spawn?.effortRegexDefault;
   if (model !== undefined && regexDefault && new RegExp(regexDefault.pattern).test(model)) {
     if (effort !== undefined && !regexDefault.effortLevels.includes(effort))
-      throw new Error(`effort "${effort}" is not offered by model "${model}" — supported levels: ${regexDefault.effortLevels.join(", ")}`);
+      throw new UsageError(
+        `effort "${effort}" is not offered by model "${model}" — supported levels: ${regexDefault.effortLevels.join(", ")}`,
+      );
   }
   // else: class 4 (unknown model id, or no model declared) — accept any of the six tokens, no throw.
 }
@@ -642,19 +644,35 @@ export function includeHookEventsFor(mounts: ReadonlyArray<{ kind: string; hostP
  * stages skills + plugins, and computes mounts + flags. Because the agent we run
  * is the same claude-code binary Cowork stages, this reproduces Cowork's discovery.
  */
-export function buildLaunchPlan(
+/** What a session declares, resolved against the host and validated — every input check `buildLaunchPlan`
+ *  makes, with NO filesystem writes. A declared source that does not exist is refused here (a
+ *  `UsageError`), so a caller can run this BEFORE it creates a run directory and a refused run leaves
+ *  nothing behind. */
+export interface LaunchSources {
+  /** `plugins.config_dir`, `~`-expanded, when the session pins one. */
+  pinnedConfigDir: string | undefined;
+  /** Local skills to stage into CLAUDE_CONFIG_DIR/skills (each already existence- and kind-checked). */
+  skills: { src: string; dest: string; filter: ((s: string, d: string) => boolean) | null }[];
+  /** The mounts that will be staged (soft-missing sources already dropped). */
+  mounts: Mount[];
+  /** See `LaunchPlan.hostOnlyFolders`. */
+  hostOnlyFolders: Mount[];
+}
+
+export function resolveLaunchSources(
   session: SessionConfig,
   baseline: PlatformBaseline,
-  outDir: string,
   tier: MountTier = "hostloop",
   // on resume the runtimes SKIP re-staging (the persisted tree survives), so the empty-mount guard
-  // and the staged-set notices must not run — the sources may legitimately be gone. The caller threads
-  // its resume flag here (set after the plan is built today, so it must be a param, not `plan.resume`).
+  // and the staged-set notices must not run — the sources may legitimately be gone.
   resume = false,
-  /** The scenario's declared Cowork lane — see `LaunchPlan.lane`. Defaults to local so every existing
-   *  caller (and every test constructing a plan directly) is unchanged. */
-  lane: "local" | "remote" = "local",
-): LaunchPlan {
+  /** `stageFilters: false` skips the git tracked-set inspection (its notices and its empty-set refusal):
+   *  for a caller that only needs the input checks — a `--dry-run` preview — and will not stage.
+   *  `quiet: true` prints none of the resolution's warnings — for a pre-check whose run resolves again
+   *  and would otherwise print each warning twice. */
+  opts: { stageFilters?: boolean; quiet?: boolean } = {},
+): LaunchSources {
+  const warn = opts.quiet ? () => {} : warnToStderr;
   // Fail loud before any staging side effect: an `effort:` the resolved model doesn't offer (or an
   // explicit `effort:` on a no-picker model) is a load-time config error, not a silent coercion.
   validateEffort(session.effort, session.model, baseline);
@@ -670,7 +688,7 @@ export function buildLaunchPlan(
   // when some files are excluded. Returns the cpSync filter built from the SAME tracked snapshot used
   // for the counts (no second `git ls-files` ⇒ counted == delivered). Skipped on resume.
   const stageFilterFor = (src: string, label: string): ((s: string, d: string) => boolean) | null => {
-    if (resume || !gitModeEnabled()) return null; // resume re-stages nothing; gitMode off → raw copy
+    if (resume || opts.stageFilters === false || !gitModeEnabled()) return null; // resume re-stages nothing; gitMode off → raw copy
     const { tracked, untracked } = gitStageStats(src);
     if (!tracked) return null; // not a git work tree → raw copy (unchanged behavior)
     if (tracked.size === 0)
@@ -691,44 +709,14 @@ export function buildLaunchPlan(
   // Writing settings.json/cowork_settings.json into a user-supplied EXISTING dir would clobber
   // their real Claude config. Require an explicit opt-in; a fresh/non-existent pinned dir is fine.
   if (pinnedConfigDir && existsSync(pinnedConfigDir) && (process.env.COWORK_HARNESS_ALLOW_CONFIG_DIR_WRITE ?? "") === "")
-    throw new Error(
+    throw new UsageError(
       `plugins.config_dir is an existing directory (${pinnedConfigDir}); the harness would overwrite its settings.json/cowork_settings.json. ` +
         `Set COWORK_HARNESS_ALLOW_CONFIG_DIR_WRITE=1 to allow, or use a managed dir (config_dir: null).`,
     );
   // A pinned config_dir that exists but is NOT a directory (e.g. a regular file) would otherwise fail
   // cryptically at the mkdirSync below with ENOTDIR — behind the write escape-hatch above. Fail clearly.
   if (pinnedConfigDir && existsSync(pinnedConfigDir) && !statSync(pinnedConfigDir).isDirectory())
-    throw new Error(`plugins.config_dir exists but is not a directory: ${pinnedConfigDir}`);
-  const configDir = pinnedConfigDir ?? join(resolve(outDir), "claude-config");
-  mkdirSync(join(configDir, "skills"), { recursive: true });
-  mkdirSync(join(configDir, "plugins"), { recursive: true });
-
-  // 2. settings — the discovery knobs. Written to BOTH settings.json and
-  // cowork_settings.json: the agent's userSettings filename is cowork_settings.json
-  // whenever CLAUDE_CODE_USE_COWORK_PLUGINS is truthy (TSO() in the 2.1.170 ELF), and
-  // settings.json otherwise — writing both makes either state behave. (Real Cowork
-  // delivers plugins via --plugin-dir, not these knobs; kept mainly for L0.)
-  // enabledPlugins: keyed object { "name@marketplace": true } — binary enforces object shape.
-  // extraKnownMarketplaces: keyed by MARKETPLACE NAME (the @marketplace half of enabledPlugins entries),
-  //   value { source: { source: <kind>, url } }. The binary verifies the key equals the @marketplace
-  //   qualifier in enabledPlugins. Name is derived as basename(url).replace(/\.git$/, ""), so enabled[]
-  //   qualifiers must reference this derived name (e.g. "foo@m" for url "https://host/m.git").
-  const settings: Record<string, unknown> = {};
-  if (session.plugins.enabled.length) settings.enabledPlugins = Object.fromEntries(session.plugins.enabled.map((e) => [e, true]));
-  if (session.plugins.marketplaces.length)
-    settings.extraKnownMarketplaces = Object.fromEntries(
-      session.plugins.marketplaces.map((url) => {
-        const name = basename(url).replace(/\.git$/, "");
-        return [name, { source: { source: "git", url } }];
-      }),
-    );
-  if (session.mcp.enabled.length) settings.enabledMcpjsonServers = session.mcp.enabled;
-  settings.localAgentModeTrustedFolders = session.trusted_folders.map((p) => expand(p));
-  settings.autoMountFolders = session.auto_mount_folders;
-  const settingsJson = JSON.stringify(settings, null, 2);
-  writeFileSync(join(configDir, "settings.json"), settingsJson);
-  writeFileSync(join(configDir, "cowork_settings.json"), settingsJson);
-
+    throw new UsageError(`plugins.config_dir exists but is not a directory: ${pinnedConfigDir}`);
   // Fail-loud is the only path for a declared source. A missing source FAILS by default (the
   // runtimes existsSync-skip the copy, so the agent silently gets a path that does not exist — a
   // confusing late failure, or a manufactured green). COWORK_HARNESS_SOFT_MISSING=1 downgrades every
@@ -740,6 +728,7 @@ export function buildLaunchPlan(
   // SKIP entirely on resume — the persisted configDir/skills survives, the sources may be gone, and
   // re-running the missing-source resolve below would otherwise false-fail a legitimate --resume.
   const skillDests = new Set<string>();
+  const skills: LaunchSources["skills"] = [];
   if (!resume)
     for (const s of session.skills.local) {
       const src = expand(s);
@@ -755,14 +744,13 @@ export function buildLaunchPlan(
       }
       const dest = safePathSegment(basename(src), "skill basename");
       if (skillDests.has(dest))
-        throw new Error(
+        throw new UsageError(
           `duplicate skill destination "skills/${dest}" — two skills.local entries share a basename (they would overwrite). Rename or relocate one.`,
         );
       skillDests.add(dest);
       // deliver the git-tracked set (the fidelity boundary), but VISIBLY — hard-fail if it would be
       // empty, notice if files are excluded. Filter is built from the same snapshot used for those counts.
-      const skillFilter = stageFilterFor(src, `skill '${basename(src)}'`);
-      cpSync(src, join(configDir, "skills", dest), { recursive: true, ...(skillFilter ? { filter: skillFilter } : {}) });
+      skills.push({ src, dest, filter: stageFilterFor(src, `skill '${basename(src)}'`) });
     }
 
   // 4. mounts: uploads + projects + plugin roots (Cowork mount model). Every basename-derived leaf
@@ -773,7 +761,7 @@ export function buildLaunchPlan(
     const src = expand(u);
     // Uploads model attached FILES; a directory would be copied recursively, diverging from Cowork.
     if (existsSync(src) && !statSync(src).isFile())
-      throw new Error(`upload "${src}" is a directory; uploads model attached files. Use folders: for a directory mount.`);
+      throw new UsageError(`upload "${src}" is a directory; uploads model attached files. Use folders: for a directory mount.`);
     mounts.push({ hostPath: src, mountPath: `uploads/${safePathSegment(basename(src), "upload basename")}`, mode: "r", kind: "upload" });
   }
   // Work folders. Real Cowork (Desktop >= MIN) mounts each connected folder at `mnt/<name>` where
@@ -882,7 +870,7 @@ export function buildLaunchPlan(
     // resolved nothing before) — softMissing downgrades to warn-and-skip.
     if (!existsSync(manifestPath)) {
       if (!softMissing)
-        throw new Error(
+        throw new UsageError(
           `local marketplace manifest not found: ${manifestPath}. Fix the path, or set COWORK_HARNESS_SOFT_MISSING=1 to skip it.`,
         );
       warn(`::warning:: [marketplace] manifest missing, excluded (COWORK_HARNESS_SOFT_MISSING): ${manifestPath}\n`);
@@ -893,7 +881,7 @@ export function buildLaunchPlan(
       manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
     } catch (e) {
       if (!softMissing)
-        throw new Error(
+        throw new UsageError(
           `local marketplace manifest is not valid JSON: ${manifestPath} (${(e as Error).message}). ` +
             `Fix it, or set COWORK_HARNESS_SOFT_MISSING=1 to skip it.`,
         );
@@ -905,7 +893,7 @@ export function buildLaunchPlan(
     // throws when plugins is an object). The name/source/version string checks are defense-in-depth.
     if (manifest.plugins !== undefined && !Array.isArray(manifest.plugins)) {
       const msg = `local marketplace manifest has invalid shape: "plugins" must be an array (got ${typeof manifest.plugins}): ${manifestPath}`;
-      if (!softMissing) throw new Error(msg + " Fix it, or set COWORK_HARNESS_SOFT_MISSING=1 to skip it.");
+      if (!softMissing) throw new UsageError(msg + " Fix it, or set COWORK_HARNESS_SOFT_MISSING=1 to skip it.");
       warn(`::warning:: [marketplace] ${msg}, excluded (COWORK_HARNESS_SOFT_MISSING)\n`);
       continue;
     }
@@ -915,7 +903,7 @@ export function buildLaunchPlan(
       // `safeMountSegment` with a generic "unsafe marketplace name" error.
       const got = typeof manifest.name !== "string" ? typeof manifest.name : "empty string";
       const msg = `local marketplace manifest has invalid shape: "name" must be a non-empty string (got ${got}): ${manifestPath}`;
-      if (!softMissing) throw new Error(msg + " Fix it, or set COWORK_HARNESS_SOFT_MISSING=1 to skip it.");
+      if (!softMissing) throw new UsageError(msg + " Fix it, or set COWORK_HARNESS_SOFT_MISSING=1 to skip it.");
       warn(`::warning:: [marketplace] ${msg}, excluded (COWORK_HARNESS_SOFT_MISSING)\n`);
       continue;
     }
@@ -925,7 +913,7 @@ export function buildLaunchPlan(
         const val = (entry as any)[field];
         if (val !== undefined && typeof val !== "string") {
           const msg = `local marketplace manifest has invalid shape: plugin entry "${field}" must be a string (got ${typeof val}): ${manifestPath}`;
-          if (!softMissing) throw new Error(msg + " Fix it, or set COWORK_HARNESS_SOFT_MISSING=1 to skip it.");
+          if (!softMissing) throw new UsageError(msg + " Fix it, or set COWORK_HARNESS_SOFT_MISSING=1 to skip it.");
           warn(`::warning:: [marketplace] ${msg}, excluded (COWORK_HARNESS_SOFT_MISSING)\n`);
           badEntry = true;
           break;
@@ -934,7 +922,7 @@ export function buildLaunchPlan(
         // cryptic downstream `safeMountSegment` failure — reject it here with a direct diagnostic.
         if (field === "name" && typeof val === "string" && val.length === 0) {
           const msg = `local marketplace manifest has invalid shape: plugin entry "name" must be non-empty: ${manifestPath}`;
-          if (!softMissing) throw new Error(msg + " Fix it, or set COWORK_HARNESS_SOFT_MISSING=1 to skip it.");
+          if (!softMissing) throw new UsageError(msg + " Fix it, or set COWORK_HARNESS_SOFT_MISSING=1 to skip it.");
           warn(`::warning:: [marketplace] ${msg}, excluded (COWORK_HARNESS_SOFT_MISSING)\n`);
           badEntry = true;
           break;
@@ -969,9 +957,9 @@ export function buildLaunchPlan(
       if (entry.source !== undefined) {
         const rel = relative(mkRoot, pluginSrc);
         if (rel === "")
-          throw new Error(`cowork-harness: marketplace entry.source "${entry.source}" resolves to the marketplace root itself`);
+          throw new UsageError(`cowork-harness: marketplace entry.source "${entry.source}" resolves to the marketplace root itself`);
         if (rel.startsWith("..") || isAbsolute(rel))
-          throw new Error(`cowork-harness: marketplace entry.source "${entry.source}" escapes the marketplace root`);
+          throw new UsageError(`cowork-harness: marketplace entry.source "${entry.source}" escapes the marketplace root`);
       }
       if (!existsSync(pluginSrc)) {
         if (!pMkt) bareLocalSourceMissing.add(en); // bare name with missing source; post-loop decides
@@ -983,12 +971,12 @@ export function buildLaunchPlan(
       // realpath and require containment before mounting. (Runs only once the source exists, since
       // realpath requires it; the lexical guard already rejected absolute / `..` declared sources.)
       if (!containedRealPath(realpathSync(mkRoot), realpathSync(pluginSrc)))
-        throw new Error(
+        throw new UsageError(
           `cowork-harness: marketplace entry.source "${entry.source ?? `./${pName}`}" resolves outside the marketplace root (symlink escape)`,
         );
       // marketplace plugin sources must be directories (same kind-check as local_plugins / remote_plugins).
       if (!statSync(pluginSrc).isDirectory())
-        throw new Error(`cowork-harness: marketplace entry.source "${entry.source ?? `./${pName}`}" is not a directory`);
+        throw new UsageError(`cowork-harness: marketplace entry.source "${entry.source ?? `./${pName}`}" is not a directory`);
       // A bare `enabled` name (no @marketplace) matches EVERY marketplace defining it → duplicate mounts.
       // Dedupe bare names only; a qualified `foo@mkt` is already pinned to one marketplace by the guard above.
       if (!pMkt) {
@@ -1041,7 +1029,7 @@ export function buildLaunchPlan(
       // AND it is not delivered via local_plugins/remote_plugins (which mount outside this loop).
       if (bareLocalSourceMissing.has(en) && !nonMarketplacePluginNames.has(en)) {
         if (!softMissing)
-          throw new Error(
+          throw new UsageError(
             `enabled plugin "${en}" was declared in a local marketplace but failed to mount (source directory missing). ` +
               `Fix the path, or set COWORK_HARNESS_SOFT_MISSING=1 to skip it.`,
           );
@@ -1053,7 +1041,7 @@ export function buildLaunchPlan(
     const pMkt = en.slice(at + 1);
     if (!declaredLocalMktNames.has(pMkt)) continue; // names a non-local (remote/git) or undeclared marketplace
     if (!softMissing)
-      throw new Error(
+      throw new UsageError(
         `enabled plugin "${en}" names local marketplace "${pMkt}", but plugin "${pName}" was not found or its source is missing there. ` +
           `Fix the name, or set COWORK_HARNESS_SOFT_MISSING=1 to skip it.`,
       );
@@ -1064,7 +1052,7 @@ export function buildLaunchPlan(
   if (missing.length) {
     const list = missing.map((m) => `${m.hostPath} → ${m.mountPath}`).join("; ");
     if (!softMissing)
-      throw new Error(`mount source(s) not found: ${list}. Fix the path(s), or set COWORK_HARNESS_SOFT_MISSING=1 to skip them.`);
+      throw new UsageError(`mount source(s) not found: ${list}. Fix the path(s), or set COWORK_HARNESS_SOFT_MISSING=1 to skip them.`);
     warn(`::warning:: [mount] ${missing.length} missing source(s) excluded (COWORK_HARNESS_SOFT_MISSING): ${list}\n`);
   }
   const presentMounts = softMissing ? mounts.filter((mt) => existsSync(mt.hostPath)) : mounts;
@@ -1083,7 +1071,7 @@ export function buildLaunchPlan(
   for (const m of presentMounts) {
     if (seenDest.has(m.mountPath)) {
       const reserved = (FIXED_MOUNT_DIRS as string[]).includes(m.mountPath);
-      throw new Error(
+      throw new UsageError(
         reserved
           ? `mount destination "${m.mountPath}" collides with a reserved Cowork mount — a connected folder resolved to a fixed special-dir name. Rename the folder.`
           : `duplicate mount destination "${m.mountPath}" — two sources map to it (they would overwrite). Rename or qualify one.`,
@@ -1091,6 +1079,61 @@ export function buildLaunchPlan(
     }
     seenDest.add(m.mountPath);
   }
+
+  return { pinnedConfigDir, skills, mounts: presentMounts, hostOnlyFolders };
+}
+
+export function buildLaunchPlan(
+  session: SessionConfig,
+  baseline: PlatformBaseline,
+  outDir: string,
+  tier: MountTier = "hostloop",
+  // on resume the runtimes SKIP re-staging (the persisted tree survives), so the empty-mount guard
+  // and the staged-set notices must not run — the sources may legitimately be gone. The caller threads
+  // its resume flag here (set after the plan is built today, so it must be a param, not `plan.resume`).
+  resume = false,
+  /** The scenario's declared Cowork lane — see `LaunchPlan.lane`. Defaults to local so every existing
+   *  caller (and every test constructing a plan directly) is unchanged. */
+  lane: "local" | "remote" = "local",
+  /** The session's sources, already resolved — `executeScenario` resolves them before it creates the run
+   *  directory, so a missing source refuses the run with nothing left behind. Computed here when absent. */
+  sources: LaunchSources = resolveLaunchSources(session, baseline, tier, resume),
+): LaunchPlan {
+  const expand = (p: string) => p.replace(/^~(?=$|\/)/, homedir());
+  const { pinnedConfigDir, skills, mounts: presentMounts, hostOnlyFolders } = sources;
+  const configDir = pinnedConfigDir ?? join(resolve(outDir), "claude-config");
+  mkdirSync(join(configDir, "skills"), { recursive: true });
+  mkdirSync(join(configDir, "plugins"), { recursive: true });
+
+  // 2. settings — the discovery knobs. Written to BOTH settings.json and
+  // cowork_settings.json: the agent's userSettings filename is cowork_settings.json
+  // whenever CLAUDE_CODE_USE_COWORK_PLUGINS is truthy (TSO() in the 2.1.170 ELF), and
+  // settings.json otherwise — writing both makes either state behave. (Real Cowork
+  // delivers plugins via --plugin-dir, not these knobs; kept mainly for L0.)
+  // enabledPlugins: keyed object { "name@marketplace": true } — binary enforces object shape.
+  // extraKnownMarketplaces: keyed by MARKETPLACE NAME (the @marketplace half of enabledPlugins entries),
+  //   value { source: { source: <kind>, url } }. The binary verifies the key equals the @marketplace
+  //   qualifier in enabledPlugins. Name is derived as basename(url).replace(/\.git$/, ""), so enabled[]
+  //   qualifiers must reference this derived name (e.g. "foo@m" for url "https://host/m.git").
+  const settings: Record<string, unknown> = {};
+  if (session.plugins.enabled.length) settings.enabledPlugins = Object.fromEntries(session.plugins.enabled.map((e) => [e, true]));
+  if (session.plugins.marketplaces.length)
+    settings.extraKnownMarketplaces = Object.fromEntries(
+      session.plugins.marketplaces.map((url) => {
+        const name = basename(url).replace(/\.git$/, "");
+        return [name, { source: { source: "git", url } }];
+      }),
+    );
+  if (session.mcp.enabled.length) settings.enabledMcpjsonServers = session.mcp.enabled;
+  settings.localAgentModeTrustedFolders = session.trusted_folders.map((p) => expand(p));
+  settings.autoMountFolders = session.auto_mount_folders;
+  const settingsJson = JSON.stringify(settings, null, 2);
+  writeFileSync(join(configDir, "settings.json"), settingsJson);
+  writeFileSync(join(configDir, "cowork_settings.json"), settingsJson);
+
+  // 3. stage the local skills (resolved and checked above) into CLAUDE_CONFIG_DIR/skills.
+  for (const sk of skills)
+    cpSync(sk.src, join(configDir, "skills", sk.dest), { recursive: true, ...(sk.filter ? { filter: sk.filter } : {}) });
 
   // 5. base env — L0 only. effort/thinking are passed as CLI FLAGS at L1/L2 (the
   // CLAUDE_EFFORT env var is a no-op; real Cowork uses --effort/--max-thinking-tokens),
@@ -1136,13 +1179,17 @@ export function loadSession(parsed: unknown): SessionConfig {
   // an opaque generic error for a session YAML authored against an older schema. Give it a targeted,
   // actionable hint instead of letting the bare Zod error stand alone.
   if (parsed !== null && typeof parsed === "object" && !Array.isArray(parsed) && "max_thinking_tokens" in parsed) {
-    throw new Error(
+    throw new UsageError(
       "`max_thinking_tokens` removed — use `extended_thinking` (boolean; default true/ON) for the real Cowork " +
         "toggle, or the fenced `debug.max_thinking_tokens` escape hatch for a raw numeric override (not reachable " +
         "via Cowork's UI; a run authored with it does not represent a real Cowork config).",
     );
   }
-  const session = SessionConfig.parse(parsed);
+  // A session the schema rejects is the author's input: a UsageError with one readable line (the full issue
+  // list in the hint), not a raw issue array reported as a harness bug.
+  const r = SessionConfig.safeParse(parsed);
+  if (!r.success) throw new UsageError(`invalid session: ${compactSchemaError(r.error.issues)}`, JSON.stringify(r.error.issues));
+  const session = r.data;
   if ((session.effort as string | undefined) === "extra") return { ...session, effort: "xhigh" };
   return session;
 }

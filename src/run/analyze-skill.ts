@@ -1205,7 +1205,7 @@ export async function cmdAnalyzeSkill(args: string[]): Promise<void> {
     return fail("analyze-skill", "usage", String((e as Error).message), undefined, asJson);
   }
   applyParsedCommandGlobals("analyze-skill", p, asJson);
-  const json = p.options["--output-format"] === "json";
+  const json = asJson;
   const strict = p.flags["--strict"] === true;
   const runtime = p.flags["--runtime"] === true;
   if (p.positionals.length === 0) {

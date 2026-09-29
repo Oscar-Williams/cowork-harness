@@ -159,6 +159,7 @@ describe.skipIf(!can)("skill/common flags accept --flag=value identically to --f
 
   it("--fidelity=container (equals form) is honored, not rejected", () => {
     const d = mkdtempSync(join(tmpdir(), "g5-"));
+    mkdirSync(join(d, "plugin")); // a dry run refuses a plugin folder that does not exist
     const raw = spawnSync("node", [CLI, "skill", "./plugin", "hi", "--dry-run", "--fidelity=container"], { encoding: "utf8", cwd: d });
     expect(raw.status).toBe(0);
     expect(JSON.parse(raw.stdout).fidelity).toBe("container");
@@ -187,6 +188,7 @@ describe.skipIf(!can)("skill/common flags accept --flag=value identically to --f
 
   it("--timeout <ms> is parsed onto the scenario (visible in the dry-run plan)", () => {
     const d = mkdtempSync(join(tmpdir(), "g5-"));
+    mkdirSync(join(d, "plugin"));
     const raw = spawnSync("node", [CLI, "skill", "./plugin", "hi", "--dry-run", "--timeout", "5000"], { encoding: "utf8", cwd: d });
     expect(raw.status).toBe(0);
     expect(JSON.parse(raw.stdout).timeout_ms).toBe(5000);

@@ -9,6 +9,7 @@
  */
 
 import { existsSync, statSync } from "node:fs";
+import { UsageError } from "../errors.js";
 
 /** A concrete mount the runtime should create (path relative to the mnt cwd). Mirrors `Mount` in session.ts. */
 export interface ResolvedMount {
@@ -61,7 +62,7 @@ export function resolveDeclaredSource(
   if (!present) {
     if (opts.deferMissing) return { hostPath, mountPath, mode }; // post-loop batch check owns the decision
     if (opts.softMissing) return null; // immediate-copy caller: warn-and-skip is the caller's job
-    throw new Error(`${opts.what} not found: ${hostPath}. Fix the path, or set COWORK_HARNESS_SOFT_MISSING=1 to skip it.`);
+    throw new UsageError(`${opts.what} not found: ${hostPath}. Fix the path, or set COWORK_HARNESS_SOFT_MISSING=1 to skip it.`);
   }
   // Present → kind-check now (the only place a wrong-kind source can be caught before staging).
   if (kind === "file") requireFile(hostPath, opts.what);
@@ -79,21 +80,22 @@ export function safePathSegment(s: string, what: string): string {
   // Reject separators/NUL/empty/dot-dirs AND ":" + control chars: a ":" breaks a Docker `-v src:dst:ro`
   // overlay and control chars are never valid in a path component (both Docker-hostile / unsafe).
   if (!s || s === "." || s === ".." || /[/\\:\x00-\x1f]/.test(s))
-    throw new Error(`unsafe ${what} "${s}" — must be a single path segment (no "/", "\\", ":", control chars, "..", or empty)`);
+    throw new UsageError(`unsafe ${what} "${s}" — must be a single path segment (no "/", "\\", ":", control chars, "..", or empty)`);
   return s;
 }
 
-/** Require a declared source PATH to be an existing regular file (mirrors the upload `isFile` guard). */
+/** Require a declared source PATH to be an existing regular file (mirrors the upload `isFile` guard). A missing
+ *  or wrong-kind path is the user's input, so both are `UsageError`s. */
 export function requireFile(path: string, what: string): string {
-  if (!existsSync(path)) throw new Error(`${what} not found: ${path}`);
-  if (!statSync(path).isFile()) throw new Error(`${what} must be a file, not a directory: ${path}`);
+  if (!existsSync(path)) throw new UsageError(`${what} not found: ${path}`);
+  if (!statSync(path).isFile()) throw new UsageError(`${what} must be a file, not a directory: ${path}`);
   return path;
 }
 
 /** Require a declared source PATH to be an existing directory (plugins/folders/skills model directories). */
 export function requireDir(path: string, what: string): string {
-  if (!existsSync(path)) throw new Error(`${what} not found: ${path}`);
-  if (!statSync(path).isDirectory()) throw new Error(`${what} must be a directory, not a file: ${path}`);
+  if (!existsSync(path)) throw new UsageError(`${what} not found: ${path}`);
+  if (!statSync(path).isDirectory()) throw new UsageError(`${what} must be a directory, not a file: ${path}`);
   return path;
 }
 
@@ -110,7 +112,7 @@ export function noTraversal(s: string, what: string): string {
     s.startsWith("\\") ||
     s.split(/[/\\]/).some((seg) => seg === ".." || seg === "." || seg === "")
   )
-    throw new Error(`unsafe ${what} "${s}" — must not be empty, absolute, or contain "." / ".." / empty path segments`);
+    throw new UsageError(`unsafe ${what} "${s}" — must not be empty, absolute, or contain "." / ".." / empty path segments`);
   return s;
 }
 
@@ -124,7 +126,7 @@ export function noTraversal(s: string, what: string): string {
 export function safeMountSegment(s: string, what: string): string {
   noTraversal(s, what);
   if (!/^[A-Za-z0-9._@/+-]+$/.test(s))
-    throw new Error(
+    throw new UsageError(
       `unsafe ${what} "${s}" — only [A-Za-z0-9._@/+-] are allowed (no ":", spaces, or control characters; they break the Docker -v overlay)`,
     );
   return s;

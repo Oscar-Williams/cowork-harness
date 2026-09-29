@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
-import { execFileSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { resolve } from "node:path";
 import { CRITIQUE_LIMITATIONS, provenanceDetail } from "../src/critique/limitations.js";
 
@@ -119,7 +119,11 @@ describe("critique limitations ↔ docs parity", () => {
     // This repo has shipped that exact bug before (the integrity canary: field, renderer, local and
     // callback all present, never assembled into the state literal, unit tests green because they handed
     // the builder a state directly). Assert against the real binary's real output.
-    const help = execFileSync(process.execPath, [resolve("dist/cli.js"), "critique", "--help"], { encoding: "utf8" });
+    // Help is written to STDERR (like every command's help), so read that stream, and require stdout empty.
+    const r = spawnSync(process.execPath, [resolve("dist/cli.js"), "critique", "--help"], { encoding: "utf8" });
+    expect(r.status).toBe(0);
+    expect(r.stdout).toBe("");
+    const help = r.stderr;
     for (const l of CRITIQUE_LIMITATIONS) {
       expect(help, `${l.id} is in the list but absent from the SHIPPED --help`).toContain(l.summary);
       expect(help, `${l.id}'s provenance class is absent from the SHIPPED --help`).toContain(`[${l.provenance.kind}]`);

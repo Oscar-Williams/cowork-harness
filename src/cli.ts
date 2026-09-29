@@ -16,7 +16,7 @@ import {
 } from "./types.js";
 import { writeAllSync } from "./io.js";
 import { loadBaseline, BASELINES_DIR, cmpVersionStrings, sha256File, countStringInFile, newestStagedSibling } from "./baseline.js";
-import { loadSession, resolveSessionPaths, applySessionOverrides } from "./session.js";
+import { loadSession, resolveSessionPaths, applySessionOverrides, resolveLaunchSources } from "./session.js";
 import {
   executeScenario,
   parseScenarioFile,
@@ -26,6 +26,7 @@ import {
   BoundaryError,
   UsageError,
   LegacyRunDirError,
+  effectiveTier,
   type ExecuteOptions,
 } from "./run/execute.js";
 import { unresolvedModelRefusal, envModelDefault } from "./run/model-provenance.js";
@@ -141,7 +142,16 @@ import {
 import type { Cassette } from "./run/cassette.js";
 import { buildScaffold } from "./run/scaffold.js";
 import { buildInspectView } from "./run/inspect-view.js";
-import { pkgVersion, jsonEnvelope, jsonPayloadEnvelope, jsonError, parseOutputFormat, fail, isJsonOutput } from "./run/envelope.js";
+import {
+  pkgVersion,
+  jsonEnvelope,
+  jsonPayloadEnvelope,
+  jsonError,
+  parseOutputFormat,
+  fail,
+  isJsonOutput,
+  envOutputFormat,
+} from "./run/envelope.js";
 import { buildRepeatRollup, rollupPasses, armLabel, type RepeatRollup } from "./run/repeat.js";
 import { parseRepeatFlags, RepeatFlagError } from "./run/repeat-flags.js";
 import { cmdCritique } from "./critique/command.js";
@@ -161,7 +171,15 @@ import {
 import { pMapBounded } from "./async-pool.js";
 import { computeVerdict } from "./run/verdict.js";
 import { evaluate, hostMatches, budgetFields, toolResultEvidence, type AssertContext, expandExpectDenied } from "./assert.js";
-import { spawnChannel, fileChannel, streamGates, answerGate, readGate, type DecisionChannel } from "./decide/external-channel.js";
+import {
+  spawnChannel,
+  fileChannel,
+  streamGates,
+  answerGate,
+  readGate,
+  GateChannelError,
+  type DecisionChannel,
+} from "./decide/external-channel.js";
 
 // Synchronous writes (fd 1/2): `process.stdout.write` + `process.exit()` truncates on a PIPE, which
 // would lose the json envelope for any agent/CI that pipes us. writeAllSync retries EAGAIN and loops
@@ -1054,8 +1072,7 @@ function rejectUnknownFlags(command: string, args: string[], knownFlags: string[
  */
 function takeCommonFlags(args: string[], commandName: string = "skill"): { rest: string[]; flags: CommonFlags } {
   const rest: string[] = [];
-  const envOutputFormat = process.env.COWORK_HARNESS_OUTPUT_FORMAT;
-  const defaultOutput: "text" | "json" = envOutputFormat === "json" ? "json" : "text";
+  const defaultOutput: "text" | "json" = envOutputFormat();
   const flags: CommonFlags = { output: defaultOutput, quiet: false, verbose: false };
   // INVARIANT for every `fail()` inside this loop: pass `isJsonOutput(args)`, never `flags.output`.
   // `flags.output` is only populated once the loop REACHES `--output-format`, so reading it here makes
@@ -2221,43 +2238,10 @@ async function cmdSkill(rawArgs: string[]) {
       isJson,
     );
 
-  if (dryRun) {
-    out(
-      JSON.stringify(
-        {
-          fidelity,
-          // `null`, not absent, when nothing resolves: the real run refuses that (exit 2), and the preview
-          // says so in its payload rather than omitting the one input that decides it. It does not refuse:
-          // it spends nothing, and it is how a reader checks an invocation before adding the model.
-          model: model ?? null,
-          prompt,
-          localPlugins,
-          marketplaces,
-          enabled: enables,
-          answers,
-          // The preview is what a reader checks the invocation against, so it reports the gate settings
-          // too — omitting them also made the equals-vs-spaced parity test for --on-unanswered vacuous
-          // (it compared two previews that never carried the value).
-          on_unanswered: useLlm ? "llm" : resolvePolicy("skill", flags),
-          ...(flags.deciderDir != null ? { decider: "decider-dir" } : flags.deciderCmd != null ? { decider: "decider-cmd" } : {}),
-          ...(useLlm ? { decider: "decider-llm" } : {}),
-          ...(timeoutMs !== undefined ? { timeout_ms: timeoutMs } : {}),
-          ...(allowStall ? { allow_stall: true } : {}),
-        },
-        null,
-        2,
-      ),
-    );
-    return;
-  }
-
-  // The skill lane's inline session carries no `model:` of its own, so `--model` or COWORK_HARNESS_MODEL
-  // must supply it. Refused here, before staging; executeScenario is the backstop. After the --dry-run
-  // branch on purpose: the preview spends nothing, so it reports `model: null` instead of refusing.
-  if (model === undefined) fail("skill", "usage", unresolvedModelRefusal("this `skill` run"), undefined, isJson);
-
   // Resolve the inline session's relative paths against cwd (consistent with `run`'s file path, which
   // goes through resolveSessionPaths) so uploads/folders/plugins are cwd-independent for the skill path.
+  // Built before the --dry-run return so the preview checks the same sources the run would stage. `model`
+  // may be unresolved here: a preview reports that (below) rather than refusing it.
   const session = resolveSessionPaths(
     loadSession({
       model,
@@ -2268,6 +2252,60 @@ async function cmdSkill(rawArgs: string[]) {
     }),
     process.cwd(),
   );
+  // A plugin folder, marketplace, upload or folder that does not exist, or is the wrong kind, is refused
+  // HERE — before the --dry-run return, because a preview of a path that is not there previews nothing —
+  // through the same resolution the run stages from (executeScenario repeats it as the backstop for every
+  // other lane). This checks existence and kind only: `stageFilters: false` skips the git tracked-set
+  // filter, so a folder with nothing tracked is still refused only by the real run.
+  // Contrast the model: an unresolved model is a choice the preview reports as `model: null`, not a
+  // missing input, so its refusal stays after the preview.
+  try {
+    const previewBaseline = loadBaseline("latest");
+    resolveLaunchSources(session, previewBaseline, effectiveTier(fidelity, previewBaseline), resume, {
+      stageFilters: false,
+      // A real run resolves again in executeScenario and prints any warning (a soft-missing source excluded)
+      // there, once; a preview has no second pass, so it prints them here — it must not list a dropped source
+      // as though it will load.
+      quiet: !dryRun,
+    });
+  } catch (e) {
+    if (e instanceof UsageError) return void fail("skill", "usage", e.message, e.hint, isJson);
+    throw e;
+  }
+
+  if (dryRun) {
+    const preview = {
+      fidelity,
+      // `null`, not absent, when nothing resolves: the real run refuses that (exit 2), and the preview
+      // says so in its payload rather than omitting the one input that decides it. It does not refuse:
+      // it spends nothing, and it is how a reader checks an invocation before adding the model.
+      model: model ?? null,
+      prompt,
+      localPlugins,
+      marketplaces,
+      enabled: enables,
+      answers,
+      // The preview is what a reader checks the invocation against, so it reports the gate settings
+      // too — omitting them also made the equals-vs-spaced parity test for --on-unanswered vacuous
+      // (it compared two previews that never carried the value).
+      on_unanswered: useLlm ? "llm" : resolvePolicy("skill", flags),
+      ...(flags.deciderDir != null ? { decider: "decider-dir" } : flags.deciderCmd != null ? { decider: "decider-cmd" } : {}),
+      ...(useLlm ? { decider: "decider-llm" } : {}),
+      ...(timeoutMs !== undefined ? { timeout_ms: timeoutMs } : {}),
+      ...(allowStall ? { allow_stall: true } : {}),
+    };
+    // Under json the preview rides in the standard envelope (one framed document on stdout); text mode
+    // prints the bare object, as it always has.
+    if (isJson) out(jsonPayloadEnvelope("skill", true, { dryRun: true, ...preview }));
+    else out(JSON.stringify(preview, null, 2));
+    return;
+  }
+
+  // The skill lane's inline session carries no `model:` of its own, so `--model` or COWORK_HARNESS_MODEL
+  // must supply it. Refused here, before staging; executeScenario is the backstop. After the --dry-run
+  // branch on purpose: the preview spends nothing, so it reports `model: null` instead of refusing.
+  if (model === undefined) fail("skill", "usage", unresolvedModelRefusal("this `skill` run"), undefined, isJson);
+
   // Name the run after the skill folder's BASENAME (not the whole dashified path → "skill-ill-…").
   const sourceName = basename((folder ?? marketplaces[0] ?? extraPlugins[0] ?? "test").replace(/\/+$/, "")) || "test";
   const scenario = Scenario.parse({
@@ -2644,7 +2682,8 @@ function cmdVm(args: string[]) {
     return fail("vm", "usage", String((e as Error).message), undefined, isJsonOutput(args));
   }
   applyParsedCommandGlobals("vm", vmParsed, isJsonOutput(args));
-  const vmJson = vmParsed.options["--output-format"] === "json";
+  // isJsonOutput, not the flag alone: COWORK_HARNESS_OUTPUT_FORMAT=json selects json on the success path too.
+  const vmJson = isJsonOutput(args);
   if (vmParsed.positionals.length > 1) {
     return fail(
       "vm",
@@ -3724,7 +3763,7 @@ async function cmdStatus(args: string[]) {
     return fail("status", "usage", (e as Error).message, undefined, isJsonOutput(args));
   }
   applyParsedCommandGlobals("status", p, isJsonOutput(args));
-  const json = p.options["--output-format"] === "json";
+  const json = isJsonOutput(args);
   if (p.options["--latest-for"] !== undefined) {
     // A dedicated mode, not a modifier on the run-id/run-dir lookup above: it resolves a SCENARIO to its
     // newest run dir rather than reading a status.json a caller already has the path to, so it takes no
@@ -3893,15 +3932,39 @@ async function cmdGates(args: string[]) {
   ensureOutputFormat("gates", args);
   // Reject unknown flags rather than silently ignoring a typo.
   rejectUnknownFlags("gates", args, ["--follow", "--output-format", "--output-format=json", "--output-format=text"], isJsonOutput(args));
+  const json = isJsonOutput(args);
   const follow = args.includes("--follow");
   // skip the `--output-format` value so `gates --output-format json <dir>` doesn't read `json`
   // as the directory.
   const dir = positionals(args, ["--output-format"])[0];
-  if (!dir) return void fail("gates", "usage", "usage: gates <dir> [--follow]", undefined, isJsonOutput(args));
+  if (!dir) return void fail("gates", "usage", "usage: gates <dir> [--follow]", undefined, json);
   // Reject extra positionals rather than silently using the first.
-  if (positionals(args, ["--output-format"]).length > 1)
-    return void fail("gates", "usage", "gates takes one <dir>", undefined, isJsonOutput(args));
-  await streamGates(dir, (line) => out(line), { once: !follow });
+  if (positionals(args, ["--output-format"]).length > 1) return void fail("gates", "usage", "gates takes one <dir>", undefined, json);
+  // A path that exists but is not a directory can never become a gate directory: refuse it in both modes.
+  if (existsSync(dir) && !statSync(dir).isDirectory())
+    return void fail("gates", "usage", `gates: not a directory: ${dir}`, undefined, json);
+  if (!existsSync(dir)) {
+    // One pass over a directory that does not exist answered exit 0 with nothing printed — the same thing
+    // a directory with no pending gate prints, so a typo read as "nothing to answer".
+    if (!follow)
+      return void fail(
+        "gates",
+        "usage",
+        `gates: directory not found: ${dir}`,
+        "pass the run's --decider-dir, or add --follow to wait for the run to create it",
+        json,
+      );
+    // --follow stays tolerant: the watcher is usually started before the run creates the directory.
+    log(`[gates] waiting for ${dir} to be created (the run creates it)`);
+  }
+  try {
+    await streamGates(dir, (line) => out(line), { once: !follow });
+  } catch (e) {
+    // A gate request the channel cannot read is the channel failing (`runtime`), not a harness bug. Under
+    // --follow the gate lines already streamed stay on stdout; this error envelope is the terminal line.
+    if (e instanceof GateChannelError) return void fail("gates", "runtime", e.message, undefined, json);
+    throw e;
+  }
 }
 
 /** `answer <dir> --gate <N> (--choose <label> | --answer "<q>=<label>"…)` — write a gate answer
@@ -3973,7 +4036,10 @@ function cmdAnswer(args: string[]) {
     try {
       g = readGate(dir, seq);
     } catch (e) {
-      return void fail("answer", "usage", `cannot read gate ${seq} in ${dir}: ${String((e as Error).message)}`, undefined, json);
+      // A gate that is not there is the caller's input; one that exists but cannot be read or parsed is the
+      // channel failing (runtime, as `gates` reports it).
+      const category = (e as NodeJS.ErrnoException)?.code === "ENOENT" ? "usage" : "runtime";
+      return void fail("answer", category, `cannot read gate ${seq} in ${dir}: ${String((e as Error).message)}`, undefined, json);
     }
     const q0 = g.questions?.[0];
     // A multi --choose answers a multiSelect gate; on a single-select gate it's the old "only one
@@ -4005,7 +4071,15 @@ function cmdAnswer(args: string[]) {
     // multiSelect → write the ARRAY (the on-wire shape normalize expects); single-select → the scalar.
     answers[key] = q0?.multiSelect ? chooses : chooses[0];
   } else return void fail("answer", "usage", 'answer needs --choose <label> or --answer "<q>=<label>"', undefined, json);
-  answerGate(dir, seq, answers);
+  // `--answer` writes without reading the gate first, so a missing directory or gate surfaces here: the
+  // same usage error `--choose` reports when it cannot read the gate. A gate that exists but whose answer
+  // cannot be written (an unwritable directory) is the environment: runtime.
+  try {
+    answerGate(dir, seq, answers);
+  } catch (e) {
+    const category = e instanceof UsageError ? "usage" : "runtime";
+    return void fail("answer", category, `cannot answer gate ${seq} in ${dir}: ${String((e as Error).message)}`, undefined, json);
+  }
   if (json) out(JSON.stringify({ tool: "cowork-harness", command: "answer", ok: true, gate: seq, answers }));
   else log(`✓ answered gate ${seq}: ${JSON.stringify(answers)}`);
 }
@@ -4087,7 +4161,11 @@ function cmdScaffold(args: string[]) {
       return void fail("scaffold", "runtime", `failed to write ${outPath}: ${(e as Error).message}`, undefined, json);
     }
     log(`✓ scaffolded scenario → ${outPath}`);
-  } else out(yaml);
+  }
+  // Under json the scenario rides inside the envelope (stdout is always one framed document there); text
+  // mode prints the bare YAML to stdout, or nothing when --out wrote it.
+  if (json) out(jsonPayloadEnvelope("scaffold", true, { scenario: yaml, out: outPath ?? null }));
+  else if (outPath === undefined) out(yaml);
 }
 
 /** Read the persisted transcript from a kept run's `run.jsonl` (the `{t:"transcript"}` line).
@@ -4193,7 +4271,7 @@ async function cmdVerifyRun(args: string[]) {
     return fail("verify-run", "usage", (e as Error).message, undefined, isJsonOutput(args));
   }
   applyParsedCommandGlobals("verify-run", p, isJsonOutput(args));
-  const json = p.options["--output-format"] === "json";
+  const json = isJsonOutput(args);
   const [runDir, scenarioFile] = p.positionals;
   if (!runDir || !scenarioFile) {
     return fail("verify-run", "usage", "usage: verify-run <run-dir> <scenario.yaml> [--output-format json]", undefined, isJsonOutput(args));
@@ -4210,6 +4288,10 @@ async function cmdVerifyRun(args: string[]) {
   // Shape-gate FIRST, before loading anything: a legacy/mixed/pre-completion dir gets a message naming
   // what it IS (see turn-layout.ts's preLayoutMessage), not a generic "no result.json" that reads as
   // corruption when the file is sitting right there at the root.
+  // A path the caller named that does not exist is their input (usage); a directory that exists but holds
+  // no completed run is the prior run's state (runtime, below).
+  if (!existsSync(runDir)) return fail("verify-run", "usage", `verify-run: run dir not found: ${runDir}`, undefined, json);
+  if (!statSync(runDir).isDirectory()) return fail("verify-run", "usage", `verify-run: not a run dir (a file): ${runDir}`, undefined, json);
   let turns: number[];
   try {
     turns = requireTurns(runDir, "verify-run");
@@ -4320,9 +4402,10 @@ async function cmdVerifyRun(args: string[]) {
   try {
     scenario = parseScenarioFile(scenarioFile);
   } catch (e) {
+    // The scenario file is the caller's input: absent or not loadable is a usage error, as it is for `run`.
     return fail(
       "verify-run",
-      "runtime",
+      "usage",
       `verify-run: cannot load scenario ${scenarioFile}: ${(e as Error).message}`,
       undefined,
       isJsonOutput(args),
