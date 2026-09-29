@@ -22,6 +22,7 @@ import {
   parseScenarioFile,
   loadSessionFromFile,
   unresolvedModelPreflight,
+  scenarioInputRefusal,
   UnansweredError,
   BoundaryError,
   UsageError,
@@ -1900,6 +1901,35 @@ async function cmdRun(rawArgs: string[]) {
       undefined,
       o.json,
     );
+  // Every scenario's inputs, before any runs: its baseline name, a `tool_not_called` its tier can never
+  // violate, then every declared input path (plugins, skills, uploads, folders, marketplaces).
+  // executeScenario checks the same, in the same order, but on a directory only when that file's turn came
+  // — after the earlier ones had been paid for, and with their results lost to the refusal. After the model
+  // refusal, which this resolution needs (an `effort:` is checked against the model). The pre-check is
+  // quiet: the run resolves again and prints any warning (a COWORK_HARNESS_SOFT_MISSING exclusion) itself.
+  // Not under --repeat: there a scenario that throws is reported in its rollup (`stoppedEarly: "error"`),
+  // and that envelope and exit code are the invocation's contract.
+  if (repeatN === undefined) {
+    const badInputs: { file: string; message: string; hint?: string }[] = [];
+    for (let i = 0; i < files.length; i++) {
+      const refusal = scenarioInputRefusal(loaded[i], modelFlag, {
+        quiet: true,
+        ablateSkill: flags.ablateSkill,
+        unloadableBaseline: "skip",
+      });
+      if (refusal) badInputs.push({ file: files[i], message: refusal.message, hint: refusal.hint });
+    }
+    // One file keeps the message (and hint) executeScenario would have thrown, unprefixed; a batch names
+    // every offender, one per line, without hints.
+    if (badInputs.length)
+      fail(
+        "run",
+        "usage",
+        files.length === 1 ? badInputs[0].message : badInputs.map((b) => `${b.file}: ${b.message}`).join("\n"),
+        files.length === 1 ? badInputs[0].hint : undefined,
+        o.json,
+      );
+  }
   if (maxBudgetUsd !== undefined && repeatN === undefined)
     for (const scenario of loaded) preflightBudget("run", scenario.name, maxBudgetUsd, o.json);
 
@@ -4081,7 +4111,7 @@ function cmdAnswer(args: string[]) {
     const category = e instanceof UsageError ? "usage" : "runtime";
     return void fail("answer", category, `cannot answer gate ${seq} in ${dir}: ${String((e as Error).message)}`, undefined, json);
   }
-  if (json) out(JSON.stringify({ tool: "cowork-harness", command: "answer", ok: true, gate: seq, answers }));
+  if (json) out(jsonPayloadEnvelope("answer", true, { gate: seq, answers }));
   else log(`✓ answered gate ${seq}: ${JSON.stringify(answers)}`);
 }
 
