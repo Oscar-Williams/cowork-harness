@@ -1072,7 +1072,8 @@ counts). Uploads and `mode:r` connected folders are hash-only, and a file over t
   Both layers leave `/private/var/empty` alone — the host-loop agent's working directory from Desktop
   2.7032.0, a system path that identifies no one — together with any path under it that has no `..`
   segment. It is kept only as a whole path, ended by whitespace, a quote, `)`, `]`, a backtick or the end of
-  the text; `/private/var/empty.` or `/private/var/emptyish/…` is still redacted. A policy copied by an earlier `init-redact` does not have these rules:
+  the text; `/private/var/empty.`, `/private/var/emptyish/…`, a path containing `%` (which can spell `..`
+  or a host root), or one with a slugged home segment glued on after a `]` or backtick is still redacted. A policy copied by an earlier `init-redact` does not have these rules:
   re-run `init-redact --force` (after saving any tailoring) or add them by hand. That fixes **future**
   recordings only — there is no command that re-applies a policy to a cassette already committed, so one
   that now fails `verify-cassettes` must be re-recorded, or reviewed and cleared with `--allow-path`.

@@ -402,6 +402,12 @@ describe("/private/var/empty — kept by the policy exactly where the scanner ca
     // Trailing punctuation is not a delimiter in either layer, so a sentence-final path is not exempt.
     "ran in /private/var/empty.",
     "/private/var/empty,/private/var/folders/q",
+    // A slugged home segment glued on after the `]`/backtick cut is still a finding in both layers.
+    "`/private/var/empty`/-Users-alice-secretproj",
+    "[/private/var/empty]/-home-alice-x",
+    // Percent-encoding can spell a `..` or a host root the segment check cannot see.
+    "/private/var/empty/..%2f..%2fUsers%2falice",
+    "/private/var/empty/%2e%2e/%2e%2e/%2e%2e/Users/alice/x",
   ];
 
   for (const s of KEPT)
