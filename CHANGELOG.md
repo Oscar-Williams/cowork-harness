@@ -199,13 +199,10 @@ All notable changes to this project are documented here. The format is based on
   - Desktop's raw feature cache moved (378 → 384 entries); the 32 gates the harness tracks read the same
     values as in 2.9939.2.
   - A live pass ran against it on 2026-09-29, recorded in `DESIGN.md`.
-  - **The committed cassettes are re-stamped, not re-recorded.** The three in `examples/replays/` and
-    `test/fixtures/tool-call-dispatch/dispatch-shell.cassette.json` now name `2.9939.4` in
-    `fingerprint.baseline`, but the recordings are unchanged: three were made against agent 2.1.281, and the protocol-tier
-    one against the host CLI (2.1.282). The
-    re-stamp is sound only because the recorded contract (spawn env, system prompt, sub-agent append,
-    prompt assets) is byte-identical between the two releases; `verify-cassettes` is clean and all four
-    replay green under `--strict`. A real re-record is owed.
+  - **The committed cassettes are re-recorded** against it (agent 2.1.284): the three in
+    `examples/replays/` and `test/fixtures/tool-call-dispatch/dispatch-shell.cassette.json`, each on its
+    original model. Tools called, verdicts, fingerprints and the frozen scenario are unchanged;
+    `verify-cassettes` is clean and all four replay green under `--strict`.
 - **The packaged Action takes a `model` input** for the live `run` lane. It is exported as
   `COWORK_HARNESS_MODEL` when set, so it fills in where a scenario's session sets no `model:`. Left empty,
   it exports nothing, so a job-level `COWORK_HARNESS_MODEL` still applies.

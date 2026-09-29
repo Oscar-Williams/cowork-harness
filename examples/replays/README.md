@@ -4,8 +4,8 @@ This directory contains committed cassette fixtures for token-free replay testin
 
 ## example-pdf-skill.cassette.json
 
-A **synthetic** fixture — NOT a real model recording. Hand-authored to exercise the full-fidelity
-replay path end-to-end, including:
+A real `container`-tier recording, committed to exercise the full-fidelity replay path end-to-end,
+including:
 
 - Reading `report.pdf` from uploads and writing a markdown checklist to `outputs/actions.md`
 - `result`, `user_visible_artifact`, `transcript_contains`, `tool_called`, and `tool_not_called` assertions
@@ -86,5 +86,5 @@ To replace this fixture with a real recording from a live run:
 cowork-harness record examples/scenarios/your-scenario.yaml --out examples/replays/your-name.cassette.json
 ```
 
-Note: real recordings require a live CLAUDE_CODE_OAUTH_TOKEN (or ANTHROPIC_API_KEY) and Docker. The synthetic fixture in this
-directory is designed to run token-free on CI.
+Note: recording requires a live CLAUDE_CODE_OAUTH_TOKEN (or ANTHROPIC_API_KEY) and Docker. Replaying the cassettes in this
+directory needs neither, so they run token-free on CI.
