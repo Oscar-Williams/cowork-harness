@@ -50,11 +50,21 @@ lint-skill flags (skill bodies + any sibling hooks.json):
                                so a root-level file is SILENTLY ignored and nothing fires
   I  `hook-event-not-served`   a real hook event that DOES fire (plugin hooks are executed by the agent,
                                live-verified) but has no assertion key, so a scenario can't gate on it
-  W  `${CLAUDE_PLUGIN_ROOT}` in a VM bash step / host-side hook seeding (host-loop footguns)
+  W  `plugin-root-in-vm-bash`  `${CLAUDE_PLUGIN_ROOT}` in a VM bash step: in a plugin skill the agent
+                               replaces it at load with a path that, at host-loop, is on the HOST (a bare
+                               `$CLAUDE_PLUGIN_ROOT` is not replaced and is empty in the VM shell there)
+  W  `hook-host-side-write`    a hook command that exports a var or writes /tmp for the in-VM agent
   W  `skill-body-over-reattach-cap`   SKILL.md body (frontmatter excluded) over 19,000 B — after a
                                compaction the agent re-attaches only the first ~19,900 chars (INFO from 80%)
   W  `skill-reference-over-read-cap` a references/**.md over 60,000 B — a whole-file Read past 25,000 real
                                tokens returns only a partial view with a paging notice
+
+lint-skill suppression (judgement-call WARN/INFO rules only; a provable rule is refused with exit 2):
+  --ignore-rule RULE[=GLOB]    repeatable; a run-level decision, e.g. an accepted size cap
+  <!-- lint-skill: ignore-start RULE[,RULE…]: reason -->  …  <!-- lint-skill: ignore-end -->
+                               in a SKILL.md, outside any fence (wrap the whole fence); same file only
+  A suppressed finding is still printed and kept in --json with a `suppressed` record; it just stops
+  gating. W `lint-skill-ignore-invalid` / `lint-skill-ignore-unclosed`, I `lint-skill-ignore-unused`.
 
 Through the `cowork-harness lint` CLI wrapper (not when this script is run directly), lint ALSO reports
 every file the harness's own scenario loader rejects -- the check `run`/`record` apply before anything
@@ -75,6 +85,7 @@ system PyYAML is preferred when present.
 from __future__ import annotations
 
 import argparse
+import fnmatch
 import os
 import functools
 import json
@@ -439,7 +450,7 @@ HOST_LOOP_GATE_ID = "1143815894"
 
 
 class Finding:
-    __slots__ = ("severity", "rule", "message", "fix", "file", "line")
+    __slots__ = ("severity", "rule", "message", "fix", "file", "line", "suppressed")
 
     def __init__(self, severity, rule, message, fix, file, line=None):
         self.severity = severity  # "ERROR" | "WARN" | "INFO"
@@ -448,9 +459,13 @@ class Finding:
         self.fix = fix
         self.file = file
         self.line = line
+        # lint-skill only: {"by": "flag"|"marker", "marker_line": int|None, "reason": str|None} when a
+        # reviewed suppression covers this finding. The finding is still reported with its own severity;
+        # it only leaves the exit computation.
+        self.suppressed = None
 
     def as_dict(self):
-        return {
+        d = {
             "severity": self.severity,
             "rule": self.rule,
             "message": self.message,
@@ -458,6 +473,10 @@ class Finding:
             "file": self.file,
             "line": self.line,
         }
+        # Emitted only when set, so a run that uses no suppression prints exactly the six keys it always has.
+        if self.suppressed is not None:
+            d["suppressed"] = self.suppressed
+        return d
 
 
 def _assert_items(doc):
@@ -1632,20 +1651,42 @@ def lint_file(path):
 SEV_ORDER = {"ERROR": 0, "WARN": 1, "INFO": 2}
 
 
-def _print_findings(findings, n_files, kind="scenario", clean_suffix=" — no silent-false-green findings."):
+def _print_findings(
+    findings, n_files, kind="scenario", clean_suffix=" — no silent-false-green findings.", suppression=False
+):
+    """`suppression=True` is lint-skill's renderer: a suppressed finding gets the ⊘ glyph and a note, the
+    counts cover only the findings still in play, and the summary names what was suppressed. `lint` never
+    passes it, so its output is unchanged."""
     if not findings:
         print(f"✓ {n_files} {kind}(s) clean{clean_suffix}")
         return
     for x in sorted(findings, key=lambda f: (str(f.file), SEV_ORDER[f.severity])):
         loc = f"{x.file}:{x.line}" if x.line else x.file
-        glyph = {"ERROR": "✗", "WARN": "⚠", "INFO": "ℹ"}[x.severity]
-        print(f"{glyph} {x.severity} [{x.rule}] {loc}")
+        sup = x.suppressed if suppression else None
+        if sup is None:
+            glyph = {"ERROR": "✗", "WARN": "⚠", "INFO": "ℹ"}[x.severity]
+            print(f"{glyph} {x.severity} [{x.rule}] {loc}")
+        elif sup["by"] == "marker":
+            why = f" — {sup['reason']}" if sup["reason"] else ""
+            print(f"⊘ {x.severity} [{x.rule}] {loc} (suppressed by marker at :{sup['marker_line']}{why})")
+        else:
+            print(f"⊘ {x.severity} [{x.rule}] {loc} (suppressed by --ignore-rule)")
         print(f"    {x.message}")
         print(f"    fix: {x.fix}")
-    n_err = sum(1 for x in findings if x.severity == "ERROR")
-    n_warn = sum(1 for x in findings if x.severity == "WARN")
-    n_info = sum(1 for x in findings if x.severity == "INFO")
-    print(f"\n{n_err} error(s), {n_warn} warning(s), {n_info} info across {n_files} file(s).")
+    active = [x for x in findings if not (suppression and x.suppressed is not None)]
+    n_err = sum(1 for x in active if x.severity == "ERROR")
+    n_warn = sum(1 for x in active if x.severity == "WARN")
+    n_info = sum(1 for x in active if x.severity == "INFO")
+    tail = "."
+    suppressed = [x for x in findings if suppression and x.suppressed is not None]
+    if suppressed:
+        groups = {}
+        for x in suppressed:
+            key = (x.rule, "marker" if x.suppressed["by"] == "marker" else "--ignore-rule")
+            groups[key] = groups.get(key, 0) + 1
+        parts = ", ".join(f"{rule} ×{n} by {by}" for (rule, by), n in sorted(groups.items()))
+        tail = f"; {len(suppressed)} suppressed ({parts})."
+    print(f"\n{n_err} error(s), {n_warn} warning(s), {n_info} info across {n_files} file(s){tail}")
 
 
 _EXTRA_FINDINGS_ENV = "COWORK_HARNESS_LINT_EXTRA_FINDINGS"
@@ -1695,6 +1736,48 @@ def _wrapper_loader_findings():
             return bad(f"entry {i} is not a finding")
         out.append(Finding(x["severity"], x["rule"], x["message"], x["fix"], x["file"], x.get("line")))
     return out
+
+
+# Every rule id `lint` can emit, with the highest severity it is emitted at. Nothing reads this at run time
+# (`lint` has no rule suppression); it exists so a test can check that every `Finding("<SEV>", "<id>", …)`
+# in this file is claimed by exactly one of this and LINT_SKILL_RULES. The loader findings the wrapper hands
+# over (`scenario-invalid`, `baseline-unknown`) are built in TypeScript and are not listed.
+LINT_RULES = {
+    "assert-contradiction": "ERROR",
+    "assertions-key": "ERROR",
+    "authored-replay-fidelity": "ERROR",
+    "capabilities-on-protocol": "ERROR",
+    "container-only-key-off-container": "ERROR",
+    "egress-on-protocol": "ERROR",
+    "enum-value-invalid": "ERROR",
+    "fidelity-missing": "ERROR",
+    "file-absent-contradiction": "ERROR",
+    "gate-needs-controlout": "INFO",
+    "host-path-assert-cowork": "WARN",
+    "host-path-assert-tier": "ERROR",
+    "lane-remote-incompatible-key": "ERROR",
+    "linter-extra-findings-invalid": "ERROR",
+    "linter-unclassified-key": "ERROR",
+    "manifest-needs-snapshot": "INFO",
+    "mixed-assert-item": "WARN",
+    "no-scenarios": "ERROR",
+    "not-found": "ERROR",
+    "parse": "ERROR",
+    "positional-choose-order": "INFO",
+    "present-files-key-off-tier": "ERROR",
+    "prompt-slash-not-leading": "WARN",
+    "reference-access-contradiction": "ERROR",
+    "regex-double-quoted": "WARN",
+    "replay-noop": "WARN",
+    "tool-called-always-passes": "INFO",
+    "tool-input-regex-redactable": "WARN",
+    "tool-input-shell-tier": "INFO",
+    "tool-not-called-tier-vacuous": "WARN",
+    "transcript-command-shaped": "WARN",
+    "unknown-assert-key": "WARN",
+    "unknown-top-key": "WARN",
+    "vacuous-gate-assert": "WARN",
+}
 
 
 def cmd_lint(args):
@@ -1776,8 +1859,10 @@ def cmd_lint(args):
 # Telling an "in-VM bash" usage apart from a correct host-side reference in freeform
 # markdown is heuristic. v1 only treats these as in-VM bash contexts:
 #   * a fenced ```bash / ```sh / ```shell (or ```zsh) code block,
-#   * a JSON `"command": "..."` value in a hooks config (a fenced ```json block or a hooks.json file),
 #   * a `Bash(...)` tool-directive line.
+# A JSON `"command": "..."` value in a hooks config (a fenced ```json block or a hooks.json file) is checked
+# for host-side writes only: a plugin hook gets a plugin-root path valid where it runs, so the token is fine
+# there.
 # It NEVER inspects host-side prose or a `Read`/`Grep` directive — reading a reference via
 # `${CLAUDE_PLUGIN_ROOT}/references/x.md` in prose is the CORRECT, common idiom and is left alone.
 # Consequence: false negatives are expected. A `${CLAUDE_PLUGIN_ROOT}` path in an INDENTED (4-space)
@@ -1786,11 +1871,12 @@ def cmd_lint(args):
 # v1 declines to do.
 
 _PLUGIN_ROOT_TOKEN = re.compile(r"\$\{?CLAUDE_PLUGIN_ROOT\}?")
-# A runtime SELF-HEAL for a dead ${CLAUDE_PLUGIN_ROOT}: discovering the real mount under /sessions at run
-# time (the prescribed pattern — e.g. `[ -d "$X" ] || X=$(find /sessions ... -name ...)`, or an inline
-# `|| python3 "$(find /sessions ...)"`). When a bash block that uses the token ALSO contains a `find` over
-# /sessions, the token is dead but the block rescues it → downgrade the WARN to INFO (Item 4). Conservative:
-# we do NOT verify the find pattern actually matches the plugin's layout (hence the INFO's "not validated").
+# A runtime SELF-HEAL for a ${CLAUDE_PLUGIN_ROOT} path the VM does not have at host-loop: discovering the
+# real mount under /sessions at run time (the prescribed pattern — e.g.
+# `[ -d "$X" ] || X=$(find /sessions ... -name ...)`, or an inline `|| python3 "$(find /sessions ...)"`).
+# When a bash block that uses the token ALSO contains a `find` over /sessions, the block rescues that path
+# → downgrade the WARN to INFO. Conservative: we do NOT verify the find pattern actually matches the
+# plugin's layout (hence the INFO's "not validated").
 _SELF_HEAL = re.compile(r"\bfind\b[^\n]*/sessions")
 # Opening/closing fence: ``` or ~~~ (>=3), optional info string (language).
 _FENCE = re.compile(r"^\s*(`{3,}|~{3,})\s*([A-Za-z0-9_+-]*)\s*$")
@@ -1808,17 +1894,50 @@ _BASH_FENCE_LANGS = {"bash", "sh", "shell", "zsh"}
 _JSON_FENCE_LANGS = {"json", "jsonc", "json5"}
 
 
-def _finding_plugin_root(path, line, ctx_label):
-    return Finding(
-        "WARN",
-        "plugin-root-in-vm-bash",
-        f"`${{CLAUDE_PLUGIN_ROOT}}` used as a path in an in-VM bash context ({ctx_label}): "
-        "dead in host-loop VM; discover the mount at runtime instead.",
-        "In VM-executed bash, don't hardcode ${CLAUDE_PLUGIN_ROOT} — resolve the skill/plugin mount at "
-        "runtime (e.g. derive it from the script's own location) instead.",
-        path,
-        line,
-    )
+# The agent replaces only the literal BRACED token in a plugin skill's text when the skill loads; a bare
+# `$CLAUDE_PLUGIN_ROOT` (or `${CLAUDE_PLUGIN_ROOT:-…}`) is left for the shell, which reads the environment.
+_PLUGIN_ROOT_BRACED = re.compile(r"\$\{CLAUDE_PLUGIN_ROOT\}")
+# The form as written, for the message: `${CLAUDE_PLUGIN_ROOT:-…}` or a bare `$CLAUDE_PLUGIN_ROOT`.
+_PLUGIN_ROOT_WRITTEN = re.compile(r"\$\{CLAUDE_PLUGIN_ROOT[^}]*\}|\$CLAUDE_PLUGIN_ROOT\b")
+_IGNORE_MARKER_EXAMPLE = (
+    "`<!-- lint-skill: ignore-start plugin-root-in-vm-bash: <why the host path is right> -->` … "
+    "`<!-- lint-skill: ignore-end -->`"
+)
+
+
+def _finding_plugin_root(path, line, ctx_label, text):
+    """The WARN for a plugin-root token in an in-VM bash context. The message states the mechanism for the
+    form written in `text`: the braced token is replaced with a path at skill load (a HOST path at
+    host-loop), the bare form is not replaced at all. Whether the value is then opened in the VM (broken at
+    host-loop) or only forwarded to a host-side file tool (correct) is a property of the receiving program,
+    which the skill text does not show, so both stay WARN and the fix says which is which."""
+    if _PLUGIN_ROOT_BRACED.search(text):
+        message = (
+            f"`${{CLAUDE_PLUGIN_ROOT}}` in an in-VM bash context ({ctx_label}): in a plugin skill the agent "
+            "replaces it with a path when the skill loads, and at host-loop (Cowork's default) that is a HOST "
+            "path that does not exist inside the VM, so a shell step or VM-run program that opens files under "
+            "it fails. Outside a plugin nothing replaces it, and the VM shell expands it empty at host-loop."
+        )
+        fix = (
+            "If the shell or the program you pass it to opens that path, resolve the plugin's VM mount at run "
+            "time instead (see the plugin-root guide). If the value only reaches a host-side file tool (for "
+            "example, it is embedded in a sub-agent's prompt for its Read), the host path is correct: wrap the "
+            f"fence in {_IGNORE_MARKER_EXAMPLE}."
+        )
+    else:
+        m = _PLUGIN_ROOT_WRITTEN.search(text)
+        written = m.group(0) if m else "$CLAUDE_PLUGIN_ROOT"
+        message = (
+            f"`{written}` in an in-VM bash context ({ctx_label}): the agent does not replace this "
+            "form in a skill's text (only the exact braced `${CLAUDE_PLUGIN_ROOT}`), so the VM shell reads the "
+            "environment variable, which is empty at host-loop (Cowork's default); a path built from it "
+            "points nowhere."
+        )
+        fix = (
+            "Resolve the plugin's VM mount at run time instead (see the plugin-root guide), for example from "
+            "the script's own location or by finding this skill's SKILL.md under /sessions."
+        )
+    return Finding("WARN", "plugin-root-in-vm-bash", message, fix, path, line)
 
 
 def _finding_plugin_root_guarded(path, line, ctx_label):
@@ -1826,7 +1945,8 @@ def _finding_plugin_root_guarded(path, line, ctx_label):
         "INFO",
         "plugin-root-guarded",
         f"`${{CLAUDE_PLUGIN_ROOT}}` used in an in-VM bash context ({ctx_label}), but the same block "
-        "self-heals it (a runtime `find` under /sessions) — the dead token is harmless here.",
+        "self-heals it (a runtime `find` under /sessions), so the path the VM does not have at host-loop is "
+        "harmless here.",
         "Guard not validated: the linter does not check the `find` pattern actually matches the plugin's "
         "layout. Prefer resolving the mount from the script's own location over a find-fallback.",
         path,
@@ -1896,8 +2016,9 @@ def _finding_hook_host_write(path, line, what):
 
 def _check_hook_command(path, line_no, cmd, findings):
     """Apply both checks to a single hooks-config command string."""
-    if _PLUGIN_ROOT_TOKEN.search(cmd):
-        findings.append(_finding_plugin_root(path, line_no, "hooks command"))
+    # No plugin-root check here: a plugin hook is not an in-VM bash step. The agent substitutes the token
+    # when it runs the hook and also sets the variable, so the hook gets a path valid where it runs (the
+    # host at host-loop, the VM at VM-loop).
     if _HOOK_EXPORT.search(cmd):
         findings.append(_finding_hook_host_write(path, line_no, "`export`s an env var"))
     if _HOOK_TMP_REDIRECT.search(cmd) or _HOOK_TMP_TEE.search(cmd):
@@ -2039,9 +2160,9 @@ def _lint_skill_text(path, raw_lines, force_json=False):
             self_heal_line = next((bl for bl in bash_block_text if _SELF_HEAL.search(bl)), None)
             healed = self_heal_line is not None
             token = _extract_find_path_token(self_heal_line) if healed else None
-            for ln in bash_token_lines:
+            for ln, text in bash_token_lines:
                 if not healed:
-                    findings.append(_finding_plugin_root(path, ln, "```bash block"))
+                    findings.append(_finding_plugin_root(path, ln, "```bash block", text))
                 elif token is not None and token not in self_plugin_tokens:
                     findings.append(
                         _finding_guard_pattern_mismatch(
@@ -2084,7 +2205,7 @@ def _lint_skill_text(path, raw_lines, force_json=False):
         if ctx == "bash":
             bash_block_text.append(line)  # buffer the block; token hits emit on flush (self-heal aware)
             if _PLUGIN_ROOT_TOKEN.search(line):
-                bash_token_lines.append(i)
+                bash_token_lines.append((i, line))
         elif ctx == "json":
             for cm in _HOOK_CMD.finditer(line):
                 _check_hook_command(path, i, cm.group(1), findings)
@@ -2093,7 +2214,7 @@ def _lint_skill_text(path, raw_lines, force_json=False):
             # Read/Grep directives are intentionally left alone.
             for bm in _BASH_DIRECTIVE.finditer(line):
                 if _PLUGIN_ROOT_TOKEN.search(bm.group(1)):
-                    findings.append(_finding_plugin_root(path, i, "Bash() directive"))
+                    findings.append(_finding_plugin_root(path, i, "Bash() directive", bm.group(1)))
     # A bash fence left unclosed at EOF still has buffered token hits — flush them (else a real WARN/INFO
     # would be silently dropped).
     if in_fence and fence_lang in _BASH_FENCE_LANGS:
@@ -2824,10 +2945,225 @@ def _lint_skill_sizes(md_path):
     return findings
 
 
+# --------------------------------------------------------------------------- #
+# lint-skill rule registry + per-rule suppression
+# --------------------------------------------------------------------------- #
+#
+# id -> (highest severity it is emitted at, suppressible). Only a judgement-call rule is suppressible: a
+# heuristic whose true and false positives look the same in the skill text, or a size cap the author may
+# accept. A PROVABLE rule is not: an ERROR (nothing was linted, or the hook never runs), a hooks.json the
+# agent never reads, a pinned `<this-plugin>:<agent>` missing from the plugin's own agents. Nor are the
+# suppression diagnostics themselves. A test checks this table against every `Finding(...)` literal.
+LINT_SKILL_RULES = {
+    "no-skill": ("ERROR", False),
+    "hook-event-unknown": ("ERROR", False),
+    "hooks-json-misplaced": ("WARN", False),
+    "subagent-type-not-found-in-plugin": ("WARN", False),
+    "hook-event-not-served": ("INFO", True),
+    "hook-host-side-write": ("WARN", True),
+    "plugin-root-in-vm-bash": ("WARN", True),
+    "plugin-root-guarded": ("INFO", True),
+    "guard-pattern-mismatch": ("WARN", True),
+    "subagent-type-unresolvable": ("INFO", True),
+    "subagent-type-unknown": ("INFO", True),
+    "skill-corpus-over-evidence-ceiling": ("WARN", True),
+    "skill-corpus-near-evidence-ceiling": ("INFO", True),
+    "skill-body-over-reattach-cap": ("WARN", True),
+    "skill-body-near-reattach-cap": ("INFO", True),
+    "skill-reference-over-read-cap": ("WARN", True),
+    "lint-skill-ignore-invalid": ("WARN", False),
+    "lint-skill-ignore-unclosed": ("WARN", False),
+    "lint-skill-ignore-unused": ("INFO", False),
+}
+
+
+def _suppressible_rules():
+    return sorted(k for k, (_, ok) in LINT_SKILL_RULES.items() if ok)
+
+
+def _why_not_suppressible(rule):
+    """None when `rule` is a known, suppressible lint-skill rule; else the reason it cannot be suppressed."""
+    if rule not in LINT_SKILL_RULES:
+        return f"unknown lint-skill rule: {rule}; suppressible rules: {', '.join(_suppressible_rules())}"
+    if not LINT_SKILL_RULES[rule][1]:
+        return (
+            f"`{rule}` cannot be suppressed: it reports a provable fact (or is a suppression diagnostic), not a "
+            "judgement call — fix the skill instead"
+        )
+    return None
+
+
+def _ignore_rule_spec(value):
+    """argparse `type=` for `--ignore-rule <id>[=<glob>]`: a typo or a provable rule is a usage error (exit 2),
+    never a suppression that silently matches nothing."""
+    rule, sep, glob = value.partition("=")
+    rule = rule.strip()
+    why = _why_not_suppressible(rule)
+    if why:
+        raise argparse.ArgumentTypeError(why)
+    if sep and not glob.strip():
+        raise argparse.ArgumentTypeError(f"empty glob in `{value}` — use `{rule}` alone to apply it to every file")
+    return {"raw": value, "rule": rule, "glob": glob.strip() if sep else None, "used": False}
+
+
+# A marker line, outside any fence: an HTML comment (recommended), a `[//]: # (…)` link comment, or a bare
+# line, each optionally as a list item, indented at most 3 spaces (4 is indented code in CommonMark). A `>`
+# blockquote line never matches. The reason separator is `:`,
+# because an HTML comment may not contain `--`.
+# `ignore-start: reason` (no rule) still parses as a marker, so it is reported rather than silently inert.
+_MARKER_WORD = r"lint-skill:\s*(ignore-start|ignore-end)(?:(?:\s+|(?=:))(.*?))?"
+_MARKER_RES = (
+    re.compile(r"^ {0,3}(?:[-*]\s+)?<!--\s*" + _MARKER_WORD + r"\s*-->\s*$"),
+    re.compile(r"^ {0,3}(?:[-*]\s+)?\[[^\]]*\]:\s*#\s*\(\s*" + _MARKER_WORD + r"\s*\)\s*$"),
+    re.compile(r"^ {0,3}(?:[-*]\s+)?" + _MARKER_WORD + r"\s*$"),
+)
+
+
+def _match_marker(line):
+    for rx in _MARKER_RES:
+        m = rx.match(line)
+        if m:
+            return m.group(1), (m.group(2) or "").strip()
+    return None
+
+
+def _lint_skill_markers(path, raw_lines):
+    """Parse `lint-skill: ignore-start <rule>[,<rule>…]: <reason>` … `lint-skill: ignore-end` ranges in one
+    SKILL.md. Returns (ranges, diagnostic findings). A marker inside a fenced block is documentation and is
+    skipped, using the same fence rule as `_lint_skill_text`. Ranges do not nest."""
+    ranges = []
+    diags = []
+    open_rg = None
+    in_fence = False
+    fence_char = ""
+    fence_len = 0
+
+    def invalid(line_no, message, fix):
+        diags.append(Finding("WARN", "lint-skill-ignore-invalid", message, fix, path, line_no))
+
+    for i, line in enumerate(raw_lines, start=1):
+        m = _FENCE.match(line)
+        if m:
+            marker, lang = m.group(1), m.group(2)
+            if not in_fence:
+                in_fence, fence_char, fence_len = True, marker[0], len(marker)
+                continue
+            if marker[0] == fence_char and len(marker) >= fence_len and not lang:
+                in_fence, fence_char, fence_len = False, "", 0
+                continue
+        if in_fence:
+            continue
+        hit = _match_marker(line)
+        if hit is None:
+            continue
+        word, rest = hit
+        if word == "ignore-end":
+            if open_rg is None:
+                invalid(i, "`lint-skill: ignore-end` with no open `ignore-start` — it closes nothing.",
+                        "Remove it, or add the matching `ignore-start <rule>: <reason>` above the lines it covers.")
+            else:
+                open_rg["end"] = i
+                ranges.append(open_rg)
+                open_rg = None
+            continue
+        if open_rg is not None:
+            invalid(i, f"`lint-skill: ignore-start` while the range opened at :{open_rg['start']} is still open — "
+                    "ranges do not nest; this marker is ignored.",
+                    "Close the first range with `lint-skill: ignore-end` before opening another, or list both rules "
+                    "in one marker: `ignore-start <rule>,<rule>: <reason>`.")
+            continue
+        ids_part, sep, reason = rest.partition(":")
+        ids = [x.strip() for x in ids_part.split(",") if x.strip()]
+        rules = []
+        if not ids:
+            invalid(i, "`lint-skill: ignore-start` names no rule, so it suppresses nothing.",
+                    "Name the rule(s) it is for: `<!-- lint-skill: ignore-start <rule>[,<rule>…]: <reason> -->`.")
+        for rid in ids:
+            why = _why_not_suppressible(rid)
+            if why is None:
+                rules.append(rid)
+            elif rid in LINT_SKILL_RULES:
+                invalid(i, f"`lint-skill: ignore-start` names {why}.", "Remove the rule from the marker.")
+            else:
+                invalid(i, f"`lint-skill: ignore-start` names an unknown lint-skill rule `{rid}`; suppressible "
+                        f"rules: {', '.join(_suppressible_rules())}.", "Fix the rule id (see the `rule` field in `--json`).")
+        open_rg = {"file": path, "start": i, "end": None, "rules": rules,
+                   "reason": reason.strip() or None, "used": set()}
+    if open_rg is not None:
+        open_rg["end"] = len(raw_lines)
+        ranges.append(open_rg)
+        diags.append(Finding(
+            "WARN", "lint-skill-ignore-unclosed",
+            "`lint-skill: ignore-start` has no `ignore-end` before the end of the file, so it suppresses "
+            "everything after it.",
+            "Add `<!-- lint-skill: ignore-end -->` right after the lines it is meant to cover.",
+            path, open_rg["start"],
+        ))
+    return ranges, diags
+
+
+def _glob_matches(glob, file, base):
+    """`--ignore-rule <id>=<glob>`: fnmatch (a `*` also crosses `/`) against the finding's `file` as printed,
+    or against that path relative to the PARENT of the skill directory it came from, so the relative form
+    always starts with the skill's own directory name (`deck-review/SKILL.md`). A bare `SKILL.md` therefore
+    cannot silently cover every skill in a run that passes one directory per skill."""
+    cand = [Path(file).as_posix()]
+    try:
+        cand.append(Path(os.path.relpath(Path(file).resolve(), base)).as_posix())
+    except ValueError:
+        pass
+    return any(fnmatch.fnmatchcase(c, glob) for c in cand)
+
+
+def _apply_suppressions(tagged, ranges, specs):
+    """Mark each finding a marker or an --ignore-rule covers. A marker applies to the SAME file, a rule it
+    names, and a line inside its range; it wins over a flag for the record. Returns the unused-diagnostics."""
+    for f, root in tagged:
+        if not LINT_SKILL_RULES.get(f.rule, ("", False))[1]:
+            continue
+        for rg in ranges:
+            if (rg["file"] == f.file and f.rule in rg["rules"] and f.line is not None
+                    and rg["start"] <= f.line <= rg["end"]):
+                rg["used"].add(f.rule)
+                if f.suppressed is None:
+                    f.suppressed = {"by": "marker", "marker_line": rg["start"], "reason": rg["reason"]}
+        for sp in specs:
+            if sp["rule"] == f.rule and (sp["glob"] is None or _glob_matches(sp["glob"], f.file, root)):
+                sp["used"] = True
+                if f.suppressed is None:
+                    f.suppressed = {"by": "flag", "marker_line": None, "reason": None}
+    unused = []
+    for rg in ranges:
+        for rid in rg["rules"]:
+            if rid not in rg["used"]:
+                unused.append(Finding(
+                    "INFO", "lint-skill-ignore-unused",
+                    f"`lint-skill: ignore-start` for `{rid}` suppressed nothing in its range (:{rg['start']}-:{rg['end']}).",
+                    "Remove it if the finding it was added for is gone; otherwise check the rule id and that the "
+                    "range wraps the whole fence.",
+                    rg["file"], rg["start"],
+                ))
+    for sp in specs:
+        if not sp["used"]:
+            unused.append(Finding(
+                "INFO", "lint-skill-ignore-unused",
+                f"`--ignore-rule {sp['raw']}` suppressed nothing.",
+                "Remove it if the finding it was added for is gone; otherwise check the glob against the finding's "
+                "`file` in `--json` (fnmatch, where `*` also crosses `/`).",
+                "(--ignore-rule)",
+            ))
+    return unused
+
+
 def cmd_lint_skill(args):
     all_findings = []
+    # (finding, the parent of the argument's skill dir) — the base an --ignore-rule glob is also tried against
+    tagged = []
+    ranges = []
     n_files = 0
     for arg in args.paths:
+        start = len(all_findings)
+        root = (Path(arg) if Path(arg).is_dir() else Path(arg).parent).resolve().parent
         md, hooks = _resolve_skill_targets(arg)
         if md is None and not hooks:
             all_findings.append(
@@ -2839,10 +3175,13 @@ def cmd_lint_skill(args):
                     arg,
                 )
             )
-            continue
+            continue  # an ERROR, never suppressible, so it needs no tag
         if md is not None:
             n_files += 1
             md_lines = Path(md).read_text(encoding="utf-8").splitlines()
+            md_ranges, md_diags = _lint_skill_markers(md, md_lines)
+            ranges.extend(md_ranges)
+            all_findings.extend(md_diags)
             all_findings.extend(_lint_skill_text(md, md_lines))
             all_findings.extend(_lint_subagent_types(md, md_lines))
             all_findings.extend(_lint_skill_corpus_size(md))
@@ -2853,10 +3192,16 @@ def cmd_lint_skill(args):
                 _lint_skill_text(hp, Path(hp).read_text(encoding="utf-8").splitlines(), force_json=True)
             )
             all_findings.extend(_lint_hook_events(hp))
+        tagged.extend((f, root) for f in all_findings[start:])
+    all_findings.extend(_apply_suppressions(tagged, ranges, args.ignore_rule or []))
     if args.json:
         print(json.dumps([x.as_dict() for x in all_findings], indent=2))
     else:
-        _print_findings(all_findings, n_files, kind="skill file", clean_suffix=" — no Cowork host-loop footguns.")
+        _print_findings(
+            all_findings, n_files, kind="skill file", clean_suffix=" — no Cowork host-loop footguns.", suppression=True
+        )
+    # A suppressed finding is reported but does not gate.
+    all_findings = [x for x in all_findings if x.suppressed is None]
     has_error = any(x.severity == "ERROR" for x in all_findings)
     # --strict fails on WARN too, per its own --help text ("exit non-zero on WARN too, not just ERROR")
     # — but NEVER on INFO. Of the subagent_type ladder, only `subagent-type-not-found-in-plugin` is
@@ -3087,12 +3432,18 @@ def main(argv=None):
         description=(
             "Inspect skill bodies (SKILL.md + any sibling hooks.json) for two antipatterns a paid "
             "Cowork host-loop run would expose:\n"
-            "  (a) ${CLAUDE_PLUGIN_ROOT} used as a PATH in an in-VM bash context — dead in the host-loop VM;\n"
+            "  (a) ${CLAUDE_PLUGIN_ROOT} in an in-VM bash context — in a plugin skill the agent replaces it "
+            "at load with a path that, at host-loop, is on the HOST and does not exist in the VM (a bare "
+            "$CLAUDE_PLUGIN_ROOT is not replaced, and is empty in the VM shell at host-loop). A value only "
+            "forwarded to a host-side file tool is correct; suppress such a reviewed site with a marker "
+            "(below);\n"
             "  (b) a hook command that exports an env var or writes into /tmp for the in-VM agent — a "
             "host-side hook write is not VM-visible (works in the CLI, silently no-ops in Cowork).\n\n"
             "HONEST LIMITS (v1 is deliberately narrow to bound false positives): an in-VM bash context is "
-            "ONLY a fenced ```bash/```sh/```shell block, a hooks-config JSON \"command\" value, or a "
-            "Bash(...) directive. Host-side prose and Read/Grep directives (the correct way to read a "
+            "ONLY a fenced ```bash/```sh/```shell block or a Bash(...) directive (a hook command gets a "
+            "plugin-root path valid where it runs, so it is checked for (b) only). Every `\"command\"` value in "
+            "a ```json/```jsonc/```json5 fence in SKILL.md is read as a hook command, so a JSON example of a "
+            "Bash tool input there is not checked for (a). Host-side prose and Read/Grep directives (the correct way to read a "
             "reference via ${CLAUDE_PLUGIN_ROOT}/...) are left alone. False negatives are expected: a token "
             "in an indented/unfenced shell snippet won't be caught.\n\n"
             "Also statically resolves any pinned `subagent_type` value in the SKILL.md against the "
@@ -3113,6 +3464,18 @@ def main(argv=None):
             "page. The body cap counts UTF-8 bytes, never fewer than the UTF-16 units the agent estimates "
             "from, so it warns early; the reference cap rests on a measured ~2.65 B per real token for "
             "markdown, with a margin.\n\n"
+            "SUPPRESSION: a reviewed judgement-call WARN/INFO finding can be suppressed so `--strict` stays the "
+            "gate. `--ignore-rule RULE[=GLOB]` (repeatable) is run-wide, or limited to files matching GLOB — the "
+            "only form for a finding without a line, such as the size caps. In a SKILL.md, "
+            "`<!-- lint-skill: ignore-start RULE[,RULE...]: reason -->` ... `<!-- lint-skill: ignore-end -->` "
+            "suppresses the named rules on the lines between, in that file only; a marker inside a fenced block "
+            "is ignored, so wrap the whole fence. references/ files are not linted, so a marker there does "
+            "nothing. A suppressed finding is still printed (glyph ⊘) and kept in --json with its severity and "
+            "a `suppressed` record ({by, marker_line, reason}); it only stops gating. Provable rules (ERROR, "
+            "`hooks-json-misplaced`, `subagent-type-not-found-in-plugin`) cannot be suppressed. A bad marker "
+            "is WARN `lint-skill-ignore-invalid` (unknown or provable rule, no rule, nested, stray end), an "
+            "unclosed one WARN `lint-skill-ignore-unclosed`, and one that suppressed nothing INFO "
+            "`lint-skill-ignore-unused`.\n\n"
             "Plain `lint-skill` (no `--strict`) is ADVISORY — it prints findings but exits 0 on "
             "WARN/INFO. CI should invoke `lint-skill --strict` to actually gate on the WARN-class "
             "findings above (the two host-loop footguns, the provable subagent_type typo and the two "
@@ -3129,6 +3492,19 @@ def main(argv=None):
         "advisory-only). NEVER fails on INFO — the same default as `lint --strict` (which, unlike this "
         "flag, can be widened with `--min-severity INFO`). See the subparser description for why the "
         "INFO-class subagent_type findings are deliberately unfailable.",
+    )
+    lsp.add_argument(
+        "--ignore-rule",
+        action="append",
+        type=_ignore_rule_spec,
+        metavar="RULE[=GLOB]",
+        help="suppress a reviewed WARN/INFO rule (repeatable). With `=GLOB`, only in files whose path matches "
+        "(fnmatch; `*` also crosses `/`), either as printed or relative to the parent of the skill directory, "
+        "so the relative form starts with the skill's directory name: `deck-review/SKILL.md`, "
+        "`deck-review/references/*`. A bare `SKILL.md` matches no skill passed as `<dir>/`. A suppressed finding is "
+        "still reported (it keeps its severity; `--json` adds a `suppressed` record) but no longer gates. "
+        "An unknown rule, or a provable one (ERROR, `hooks-json-misplaced`, `subagent-type-not-found-in-plugin`), "
+        "is a usage error. Unscoped, it also hides the next new finding of that rule in any file.",
     )
     lsp.set_defaults(func=cmd_lint_skill)
 
@@ -3186,6 +3562,10 @@ def main(argv=None):
             e == "--min-severity" or e.startswith("--min-severity=") for e in extras
         ):
             (target or ap).error("unrecognized arguments: " + " ".join(extras) + " (--min-severity is a `lint` flag, not `lint-skill` — rerun with `cowork-harness lint` instead)")
+        if getattr(args, "command", None) == "lint" and any(
+            e == "--ignore-rule" or e.startswith("--ignore-rule=") for e in extras
+        ):
+            (target or ap).error("unrecognized arguments: " + " ".join(extras) + " (--ignore-rule is a `lint-skill` flag; `lint` has no rule suppression)")
         (target or ap).error("unrecognized arguments: " + " ".join(extras))
     return args.func(args)
 

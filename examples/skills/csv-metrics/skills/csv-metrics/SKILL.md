@@ -22,8 +22,15 @@ per-column statistics or a metrics report.
    `${CLAUDE_PLUGIN_ROOT}`:
 
    ```bash
-   python3 "${CLAUDE_PLUGIN_ROOT}/skills/csv-metrics/scripts/metrics.py" uploads/sales.csv outputs
+   S="${CLAUDE_PLUGIN_ROOT}/skills/csv-metrics/scripts/metrics.py"
+   [ -f "$S" ] || S="$(find /sessions/*/mnt/.local-plugins /sessions/*/mnt/.remote-plugins \
+     -path '*/skills/csv-metrics/scripts/metrics.py' 2>/dev/null | head -1)"
+   python3 "$S" uploads/sales.csv outputs
    ```
+
+   The second line matters in Cowork's default host-loop mode, where the path the agent
+   writes in for `${CLAUDE_PLUGIN_ROOT}` is on the host and the VM shell cannot open it;
+   it then finds the script at the plugin's mount inside the VM.
 
    It writes `outputs/metrics.json` and `outputs/summary.md` and prints a
    one-line summary.

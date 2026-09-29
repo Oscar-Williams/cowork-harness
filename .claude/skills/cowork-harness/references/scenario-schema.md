@@ -73,7 +73,7 @@ answers:                            # scripted answers (see below)
   - when_question: "Which output format"
     choose: "Markdown"
   - when_tool: Bash
-    allow_if: "!command.includes('rm')"
+    allow_if: '!/\brm\b/.test(command)' # a word match; `includes('rm')` also denies "normalize"
     else: deny
   - when_tool: Write
     decide: allow
@@ -238,7 +238,8 @@ with no session file, the CLI flags `--folder <dir>` and `--upload <file>` are t
 `plugins.remote_plugins` instead — Cowork serves an installed plugin from `.remote-plugins/plugin_<id>`
 (named by id, not plugin name), while `local_plugins` mounts two levels deeper
 (`.local-plugins/marketplaces/local-desktop-app-uploads/<plugin>`). The choice matters to a skill that
-locates its own files from the shell (`$CLAUDE_PLUGIN_ROOT` is unset in the VM shell on every tier).
+locates its own files from the shell (at host-loop, Cowork's default, the braced `${CLAUDE_PLUGIN_ROOT}` is
+replaced with a HOST path and a bare `$CLAUDE_PLUGIN_ROOT` is empty in the VM shell).
 Search for the skill's own `SKILL.md`, not for a directory named after the plugin — that finds nothing
 under `.remote-plugins/plugin_<id>` — and set no `-maxdepth` that stops short of the deeper local layout:
 `find /sessions/*/mnt/.local-plugins /sessions/*/mnt/.remote-plugins -path '*/skills/<skill-name>/SKILL.md' 2>/dev/null | head -1`.
@@ -281,7 +282,7 @@ label validation by intent (mutually exclusive with `choose`):
 - when_tool: Write
   decide: allow                   # allow | deny
 - when_tool: Bash
-  allow_if: "!command.includes('rm') && !command.includes('curl')"  # JS predicate over tool input
+  allow_if: '!/\brm\b/.test(command) && !command.includes("curl")'  # JS predicate over tool input
   else: deny                      # decision when predicate is false (default deny)
 - when_tool: "webfetch:example.com"   # a web_fetch approval (provenance-miss gate)
   decide: allow

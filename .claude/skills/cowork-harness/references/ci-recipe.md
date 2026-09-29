@@ -93,7 +93,10 @@ GitHub-hosted runners, no token/Docker/agent:
                                                     # 3.x CLI bare `--strict` also fails on INFO, so keep
                                                     # the pair explicit. `--min-severity INFO` gates on
                                                     # INFO as well. (`lint-skill --strict` never fails
-                                                    # on INFO and has no floor to widen.)
+                                                    # on INFO and has no floor to widen; to accept a
+                                                    # reviewed lint-skill WARN, keep --strict and add
+                                                    # `--ignore-rule <rule>[=<skill-dir>/<path>]` or an
+                                                    # ignore-start/ignore-end marker in the SKILL.md.)
 - run: cowork-harness verify-cassettes cassettes/    # privacy + staleness — FAILS on a stale recording
                                                     # ALSO fails on a leaked host inventory: recording at
                                                     # protocol/hostloop freezes YOUR machine's MCP servers,

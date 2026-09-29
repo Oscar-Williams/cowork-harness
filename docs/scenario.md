@@ -54,7 +54,7 @@ answers:                                 # scripted answers (see below)
   - when_question: "Which output format"
     choose: "Markdown"
   - when_tool: Bash
-    allow_if: "!command.includes('rm')"
+    allow_if: '!/\brm\b/.test(command)' # a word match; `includes('rm')` also denies "normalize"
     else: deny
   - when_tool: Write
     decide: allow
@@ -395,7 +395,7 @@ deterministic CI: scripted answers + `fail` for everything they don't cover.
   decide: allow                   # allow | deny
 
 - when_tool: Bash
-  allow_if: "!command.includes('rm') && !command.includes('curl')"  # JS predicate over the tool input
+  allow_if: '!/\brm\b/.test(command) && !command.includes("curl")'  # JS predicate over the tool input
   else: deny                      # decision when the predicate is false (default: deny)
 
 - when_tool: "webfetch:example.com"   # a web_fetch APPROVAL (raised on a provenance miss)
