@@ -819,6 +819,15 @@ def test_missing_cassette_dir_is_a_usage_error(tmp_path):
     assert exc.value.code == 2
 
 
+def test_empty_cassette_dir_is_a_usage_error(tmp_path):
+    # An empty value must not silently fall back to lint without cassettes.
+    f = tmp_path / "scenario.yaml"
+    _write_scenario(f, body="assert:\n  - result: success\n")
+    with pytest.raises(SystemExit) as exc:
+        scenario.main(["lint", str(f), "--cassette-dir=", "--json"])
+    assert exc.value.code == 2
+
+
 # --- vacuous-gate-assert: gate_answers_delivered needs a PRESENCE companion -------------------------
 # `gate_answers_delivered` checks that every gate which fired was delivered non-error, and ZERO gates
 # fired passes VACUOUSLY (gate firing is model-dependent). So the assertion that looks like it guards

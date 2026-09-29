@@ -3767,6 +3767,8 @@ def main(argv=None):
         ):
             (target or ap).error("unrecognized arguments: " + " ".join(extras) + " (--ignore-rule is a `lint-skill` flag; `lint` has no rule suppression)")
         (target or ap).error("unrecognized arguments: " + " ".join(extras))
+    if getattr(args, "command", None) == "lint" and getattr(args, "cassette_dir", None) == "":
+        sub.choices["lint"].error("--cassette-dir needs a path")
     if getattr(args, "command", None) == "lint" and getattr(args, "cassette_dir", None):
         cassette_path = Path(args.cassette_dir)
         if not cassette_path.is_file() and not cassette_path.is_dir():

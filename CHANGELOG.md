@@ -26,8 +26,9 @@ All notable changes to this project are documented here. The format is based on
   cassette counts for a scenario when its recorded `scenarioSource` resolves to that file, the same way
   replay resolves it, and the directory is read as `*.cassette.json` like `replay` and `verify-cassettes`.
   An advisory is dropped only when every matching cassette proves it. A cassette that cannot be checked
-  (unreadable, not JSON, an unsupported `cassetteVersion`, or no usable `scenarioSource`) keeps the
-  advisory and is reported as INFO `cassette-evidence-skipped`, and a missing directory is a usage error
+  (unreadable, not a JSON object, an unsupported `cassetteVersion`, or no usable `scenarioSource`) is
+  reported as INFO `cassette-evidence-skipped` and keeps the advisories for every scenario in that run,
+  since it might have been any of their evidence. A missing or empty `--cassette-dir` is a usage error
   (exit 2). A stale cassette still counts: this checks that the evidence exists, and `verify-cassettes`
   checks that it is current. `lint --strict --min-severity INFO --cassette-dir <dir>` keeps the actionable
   INFO findings and drops only the ones a cassette covers.
