@@ -35,6 +35,9 @@ All notable changes to this project are documented here. The format is based on
   difference is in the receiving program, not in the skill text; the fix text now says which case is which
   and how to suppress a reviewed site. `docs/plugin-root.md` is corrected to match: it no longer says the
   token is unset in the VM shell on every tier.
+- **The companion skill now tells the agent to read its debugging reference first** when a run failed or a
+  green looks wrong, instead of summarising part of it inline. The reference's triage separates a
+  misbehaving skill from a green you don't trust, which the summary skipped.
 
 ### Fixed
 
