@@ -242,7 +242,7 @@ describe.skipIf(!can)("record <dir/> --dry-run reports missing input paths under
     const r = cli(["record", "sc/", "--dry-run"], d);
     expect(r.code, r.all).toBe(0);
     expect(r.stderr).toMatch(/⚠ input error: .*b\.yaml: mount source\(s\) not found/);
-    expect(r.stderr).toMatch(/will fail on the real record/);
+    expect(r.stderr).toMatch(/will fail on the real record\n/);
   });
 
   it("--quiet still prints the warning line", () => {
@@ -261,5 +261,138 @@ describe.skipIf(!can)("record <dir/> --dry-run reports missing input paths under
     expect(doc.refusals).toHaveLength(1);
     expect(doc.refusals[0].message).toMatch(/no model is pinned/);
     expect(doc.inputErrors ?? []).toEqual([]);
+  });
+});
+
+describe.skipIf(!can)("input pre-checks: baselines, --repeat, hints and the budget path", () => {
+  type Doc = {
+    ok: boolean;
+    refusals: { file: string; message: string }[];
+    inputErrors?: { file: string; message: string; hint?: string }[];
+  };
+
+  it("record <dir/> --dry-run: a baseline that fails to LOAD is left to the real record (exit 0, payload)", () => {
+    // The pre-check answers input-path questions; a malformed baseline file is not one it can answer, just
+    // as a session that does not load is skipped. It must not crash the preview.
+    const d = fixture();
+    writeFileSync(join(d, "bad-baseline.json"), "{not json");
+    writeFileSync(join(d, "sc", "a.yaml"), SCENARIO("a", "../ok.yaml"));
+    writeFileSync(join(d, "sc", "m.yaml"), SCENARIO("m", "../ok.yaml", `baseline: ${join(d, "bad-baseline.json")}\n`));
+    const r = cli(["record", "sc/", "--dry-run", "--output-format", "json"], d);
+    expect(r.code, r.all).toBe(0);
+    const doc = JSON.parse(r.stdout) as Doc;
+    expect(doc.ok).toBe(true);
+    expect(doc.inputErrors).toEqual([]);
+  });
+
+  it("record <dir/> --dry-run: a baseline NAME that resolves nowhere is an inputErrors[] entry, hint carried", () => {
+    const d = fixture();
+    writeFileSync(join(d, "sc", "u.yaml"), SCENARIO("u", "../ok.yaml", "baseline: no-such-baseline\n"));
+    const r = cli(["record", "sc/", "--dry-run", "--output-format", "json"], d);
+    expect(r.code, r.all).toBe(0);
+    const doc = JSON.parse(r.stdout) as Doc;
+    expect(doc.inputErrors).toHaveLength(1);
+    expect(doc.inputErrors![0].file).toMatch(/u\.yaml$/);
+    expect(doc.inputErrors![0].message).toMatch(/no-such-baseline/);
+    expect(typeof doc.inputErrors![0].hint).toBe("string");
+  });
+
+  it("run <dir/>: every scenario whose baseline does not resolve is named, with its file prefix", () => {
+    const d = fixture();
+    writeFileSync(join(d, "sc", "a.yaml"), SCENARIO("a", "../ok.yaml", "baseline: no-such-baseline\n"));
+    writeFileSync(join(d, "sc", "b.yaml"), SCENARIO("b", "../ok.yaml", "baseline: no-such-baseline\n"));
+    const r = cli(["run", "sc/", "--output-format", "json"], d);
+    expect(r.code, r.all).toBe(2);
+    const msg = envelope(r.stdout).error?.message ?? "";
+    expect(msg).toMatch(/a\.yaml: .*no-such-baseline/);
+    expect(msg).toMatch(/b\.yaml: .*no-such-baseline/);
+    expect(runDirsUnder(r.runs)).toEqual([]);
+  });
+
+  it("run --repeat keeps its per-scenario rollup for a missing input path (exit 1, error null)", () => {
+    // Pin: the batch pre-check does not apply under --repeat, whose accepted invocations report a failed
+    // scenario in its rollup (stoppedEarly "error") rather than refusing up front.
+    const d = fixture();
+    writeFileSync(join(d, "sc", "b.yaml"), SCENARIO("b", "../no-folder.yaml"));
+    const r = cli(["run", "sc/b.yaml", "--repeat", "2", "--output-format", "json"], d);
+    expect(r.code, r.all).toBe(1);
+    const doc = JSON.parse(r.stdout) as { rollups?: { stoppedEarly?: string }[]; error: unknown };
+    expect(doc.error).toBeNull();
+    expect(doc.rollups).toHaveLength(1);
+    expect(doc.rollups![0].stoppedEarly).toBe("error");
+  });
+
+  it("record <dir/> --dry-run: input errors survive the budget refusal on stderr", () => {
+    const d = fixture();
+    writeFileSync(join(d, "sc", "b.yaml"), SCENARIO("b", "../no-folder.yaml"));
+    const runs = join(d, ".runs");
+    mkdirSync(runs);
+    writeFileSync(
+      join(runs, "index.jsonl"),
+      JSON.stringify({
+        v: 1,
+        ts: "2026-08-30T00:00:00Z",
+        command: "record",
+        scenario: "b",
+        slug: "b",
+        runId: "x1",
+        fidelity: "protocol",
+        baseline: "latest",
+        result: "success",
+        pass: true,
+        signals: [],
+        partial: false,
+        nonDeterministic: false,
+        outDir: "/tmp/x1",
+        costUsd: 5,
+        git: { branch: "main", sha: "abc" },
+      }) + "\n",
+    );
+    const r = cli(["record", "sc/", "--dry-run", "--max-budget-usd", "0.01", "--output-format", "json"], d);
+    expect(r.all).toMatch(/refused before spending/);
+    expect(r.stderr).toMatch(/⚠ input error: .*b\.yaml: mount source\(s\) not found/);
+  });
+});
+
+describe.skipIf(!can)("tier vacuity: the record lanes", () => {
+  const VACUOUS = (name: string) =>
+    `name: ${name}\nprompt: hi\nfidelity: hostloop\nsession: ../ok.yaml\nassert:\n  - tool_not_called: NotebookEdit\n`;
+
+  it("real record <file> (no CLI pre-check) refuses it before the run dir exists", () => {
+    // `record` reaches executeScenario with no batch pre-flight in front, so this pins the check's position
+    // inside executeScenario itself: moved back after the run-dir mkdir, a run dir appears here.
+    const d = fixture();
+    writeFileSync(join(d, "sc", "v.yaml"), VACUOUS("v"));
+    const r = cli(["record", "sc/v.yaml", "--out", join(d, "v.cassette.json")], d, { CLAUDE_CODE_OAUTH_TOKEN: "dummy" });
+    expect(r.all).toMatch(/can never be violated/);
+    expect(r.all).not.toMatch(SPAWN_GUARD);
+    expect(runDirsUnder(r.runs)).toEqual([]);
+  });
+
+  it("record <dir/> --dry-run lists it under inputErrors[] (exit and ok unchanged)", () => {
+    const d = fixture();
+    writeFileSync(join(d, "sc", "a.yaml"), SCENARIO("a", "../ok.yaml"));
+    writeFileSync(join(d, "sc", "v.yaml"), VACUOUS("v"));
+    const r = cli(["record", "sc/", "--dry-run", "--output-format", "json"], d);
+    expect(r.code, r.all).toBe(0);
+    const doc = JSON.parse(r.stdout) as { ok: boolean; inputErrors?: { file: string; message: string }[] };
+    expect(doc.ok).toBe(true);
+    expect(doc.inputErrors).toHaveLength(1);
+    expect(doc.inputErrors![0].file).toMatch(/v\.yaml$/);
+    expect(doc.inputErrors![0].message).toMatch(/can never be violated/);
+  });
+
+  it("record <file> --dry-run warns (inputErrors[] + a ⚠ line) and keeps exit 0", () => {
+    const d = fixture();
+    writeFileSync(join(d, "sc", "v.yaml"), VACUOUS("v"));
+    const json = cli(["record", "sc/v.yaml", "--dry-run", "--output-format", "json"], d);
+    expect(json.code, json.all).toBe(0);
+    const doc = JSON.parse(json.stdout) as { ok: boolean; inputErrors?: { file: string; message: string }[] };
+    expect(doc.ok).toBe(true);
+    expect(doc.inputErrors).toHaveLength(1);
+    expect(doc.inputErrors![0].message).toMatch(/can never be violated/);
+    const text = cli(["record", "sc/v.yaml", "--dry-run", "--quiet"], d);
+    expect(text.code, text.all).toBe(0);
+    expect(text.stderr).toMatch(/⚠ input error: .*v\.yaml: .*can never be violated/);
   });
 });

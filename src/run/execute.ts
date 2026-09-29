@@ -2177,12 +2177,14 @@ export function ablateSession<T extends { plugins: Record<string, unknown>; skil
  *  scenario's session, apply the model the run would resolve (and `ablateSkill`, as the run applies it), and
  *  run the same write-free source resolution `executeScenario` runs before it creates a run dir. Throws that
  *  resolution's `UsageError` (a path that does not exist or is the wrong kind, an effort the model does not
- *  offer). A session that does not load at all is left to the real run, as the model pre-flight leaves it.
- *  `quiet` mutes the resolution's warnings, for a caller whose run resolves again and prints them itself. */
+ *  offer, a baseline name that resolves nowhere). A session or baseline FILE that does not load at all is
+ *  left to the real run, as the model pre-flight leaves it: that is not an input question this can answer.
+ *  `quiet` mutes the resolution's warnings, for a caller whose run resolves again and prints them itself;
+ *  `baseline` passes one the caller already loaded. */
 export function launchSourcesPreflight(
   scenario: Scenario,
   modelOverride: string | undefined,
-  opts: { quiet?: boolean; ablateSkill?: boolean } = {},
+  opts: { quiet?: boolean; ablateSkill?: boolean; baseline?: PlatformBaseline } = {},
 ): void {
   let loaded: ReturnType<typeof loadSession>;
   try {
@@ -2194,11 +2196,45 @@ export function launchSourcesPreflight(
   const model = resolvePinnedModel(modelOverride, loaded.model, envModelDefault());
   const withModel = model !== undefined && model !== loaded.model ? applySessionOverrides(loaded, { model }) : loaded;
   const session = opts.ablateSkill ? ablateSession(withModel) : withModel;
-  const baseline = loadBaseline(scenario.baseline);
+  const baseline = opts.baseline ?? loadBaselineForPreflight(scenario);
+  if (baseline === undefined) return;
   resolveLaunchSources(session, baseline, effectiveTier(scenario.fidelity, baseline), false, {
     stageFilters: false,
     quiet: opts.quiet,
   });
+}
+
+/** The scenario's baseline for a pre-check: a name that resolves nowhere throws its `UsageError`; a file
+ *  that does not load (malformed JSON, a shape the schema rejects) returns `undefined`, left to the run. */
+function loadBaselineForPreflight(scenario: Scenario): PlatformBaseline | undefined {
+  try {
+    return loadBaseline(scenario.baseline);
+  } catch (e) {
+    if (e instanceof UsageError) throw e;
+    return undefined;
+  }
+}
+
+/** Every input check `executeScenario` makes before it creates a run dir, in its order, for a caller that
+ *  must answer before that (a batch pre-flight, a dry run): the baseline name, a tier-vacuous negative tool
+ *  assertion, then every declared input path. Returns the first refusal as the `UsageError` the run would
+ *  throw (message and hint), or `undefined`. Anything that is not an input error is left to the run. */
+export function scenarioInputRefusal(
+  scenario: Scenario,
+  modelOverride: string | undefined,
+  opts: { quiet?: boolean; ablateSkill?: boolean } = {},
+): UsageError | undefined {
+  try {
+    const baseline = loadBaselineForPreflight(scenario);
+    if (baseline === undefined) return undefined;
+    const vacuous = tierVacuityRefusal(scenario, baseline);
+    if (vacuous) return new UsageError(vacuous);
+    launchSourcesPreflight(scenario, modelOverride, { ...opts, baseline });
+    return undefined;
+  } catch (e) {
+    if (e instanceof UsageError) return e;
+    throw e;
+  }
 }
 
 /** Refuse a `tool_not_called` / `subagent_tool_absent` naming a tool the scenario's tier provably does not
