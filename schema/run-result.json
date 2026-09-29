@@ -1086,6 +1086,16 @@
         "hostPathLeaked": {
           "type": "boolean"
         },
+        "inputHostPathTokens": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Distinct host-path tokens the scenario's inputs carried (staged uploads and connected folders, captured before the agent ran, plus the prompt). The tokens themselves are never written. Omitted when zero."
+        },
+        "hostPathsFromInputs": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Distinct host-path tokens in model-visible text exempted from hostPathLeaked because they came verbatim from the scenario's inputs. Omitted when zero; non-zero means a clean scan relied on the exemption."
+        },
         "selfHealRan": {
           "type": "boolean"
         },

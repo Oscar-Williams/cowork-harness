@@ -42,7 +42,7 @@ import {
 } from "./decide/decider.js";
 import { claudeCliComplete } from "./decide/llm-transport.js";
 import { toDecisionRequest, questionLabel, type DecisionRequest } from "./agent/session.js";
-import { vmInit, vmDelete, vmStatus, vmPrune, instanceName } from "./runtime/lima.js";
+import { vmInit, vmDelete, vmStatus, vmPrune, instanceName, vmProvisioned, type VmProvisioning } from "./runtime/lima.js";
 import { resolveVmBaselineArg } from "./runtime/vm-baseline-arg.js";
 import { sync, canonicalizeEnv, syncedNetworkBlock } from "./sync/cowork-sync.js";
 import { diffBaselines, formatDiffLines, renderChangelog } from "./sync/baseline-diff.js";
@@ -2648,12 +2648,20 @@ function vmEnvelopeBase(subcommand: string, baselineName: string, baseline: Plat
   };
 }
 
-function vmStatusEnvelope(baselineName: string, baseline: PlatformBaseline, instance: string, status: string) {
+function vmStatusEnvelope(
+  baselineName: string,
+  baseline: PlatformBaseline,
+  instance: string,
+  status: string,
+  provisioning: VmProvisioning | null,
+) {
   const warnings: string[] = [];
   // vmStatus returns "Absent" when no Lima VM exists for this config hash (see lima.ts) — surface that
   // as a warning so a JSON caller doesn't read "Absent" as a running VM.
   if (status === "Absent") warnings.push(`no VM exists for ${instance} (run \`vm init\` to create it)`);
-  return { ...vmEnvelopeBase("status", baselineName, baseline, instance, warnings), status };
+  // `provisioning` (additive): how far a Running guest's provisioning got — Running alone does not mean
+  // usable. null when the VM is not Running (nothing to ask).
+  return { ...vmEnvelopeBase("status", baselineName, baseline, instance, warnings), status, provisioning };
 }
 
 const VM_SUB_HELP: Record<string, string> = {
@@ -2735,9 +2743,10 @@ function cmdVm(args: string[]) {
   const instance = instanceName(baseline);
   if (sub === "status") {
     const status = vmStatus(instance);
+    const provisioning = status === "Running" ? vmProvisioned(instance) : null;
     // honor --output-format json (the flag was advertised but every branch printed text).
-    if (vmJson) out(JSON.stringify(vmStatusEnvelope(baselineName, baseline, instance, status)));
-    else log(`${instance}: ${status}`);
+    if (vmJson) out(JSON.stringify(vmStatusEnvelope(baselineName, baseline, instance, status, provisioning)));
+    else log(`${instance}: ${status}${provisioning && provisioning !== "ready" ? ` (provisioning: ${provisioning})` : ""}`);
   } else if (sub === "init") {
     const { status } = vmInit(baseline);
     // honor --output-format json (init/delete/prune printed text unconditionally; only status did).

@@ -370,9 +370,33 @@ function allowed(sample: string, cls: string, allow: AllowPattern[]): boolean {
 
 /** macOS system paths that identify no one and appear in ordinary recordings: from Desktop 2.7032.0 the
  *  host-loop agent runs at `/var/empty` and reports its realpath. Exact directory, or a path under it with
- *  no `..` segment (which could walk out of it into a path that does identify someone). */
+ *  no `..` segment (which could walk out of it into a path that does identify someone).
+ *
+ *  The reference redaction policy (`.cowork-redact.json`) exempts it too, and keeps only what this scanner
+ *  also calls clean (the policy is at least as strict, never looser): compared case-insensitively (the path class and the policy both
+ *  match with `i`), and cut at `]` or a backtick, which end a path in the policy but not in this pattern
+ *  (a backtick-quoted `/private/var/empty` would otherwise carry the closing backtick into the sample). A
+ *  trailing `.`, `,` or `;` ends it in neither, so `/private/var/empty.` is not exempt in either layer; nor is
+ *  anything containing `%`. */
 const SYSTEM_CONSTANT_PATHS = ["/private/var/empty"];
-function isSystemConstantPath(p: string): boolean {
+const PATH_PATTERN = DEFAULT_SCAN_PATTERNS.find((p) => p.cls === "path")!.re;
+function isSystemConstantPath(sample: string): boolean {
+  // A `%` can spell a `..` or a host root (`%2e%2e`, `%2fUsers`) that the segment check below cannot see;
+  // the policy's exemption refuses it too.
+  if (sample.includes("%")) return false;
+  const cut = sample.search(/[\]`]/);
+  const p = (cut === -1 ? sample : sample.slice(0, cut)).toLowerCase();
+  // Whatever follows the cut is still part of this one finding. If the path pattern itself — its slug arm
+  // included — matches there, or a host root appears after a non-boundary char (`]/../../Users/…`, which
+  // the policy's own /Users/ rule still redacts), the finding stays.
+  if (cut !== -1) {
+    const tail = sample.slice(cut);
+    if (new RegExp(PATH_PATTERN.source, PATH_PATTERN.flags.replace("g", "")).test(tail)) return false;
+    if (/\/(?:users|home|root|private|var|system|volumes)\//i.test(tail)) return false;
+    // A slugged home segment glued straight onto the cut char (`]-Users-…`) has no boundary the path
+    // pattern's slug arm accepts, but the policy's slug rule does redact it.
+    if (/-(?:users|home|root)-/i.test(tail)) return false;
+  }
   if (p.split("/").includes("..")) return false;
   return SYSTEM_CONSTANT_PATHS.some((c) => p === c || p.startsWith(`${c}/`));
 }

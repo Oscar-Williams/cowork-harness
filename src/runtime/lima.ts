@@ -5,6 +5,8 @@ import { join, dirname, basename } from "node:path";
 import { createHash } from "node:crypto";
 import type { PlatformBaseline } from "../types.js";
 import { resolveAgentBinary } from "../baseline.js";
+import { envPositiveNumber, warn } from "../io.js";
+import { forgetMicrovmCapabilities } from "./image-capabilities.js";
 
 /** Host dir mounted writable into the VM at /sessions (the staging area; per-session subdirs). */
 export const VM_WORK_HOST = join(homedir(), ".cowork-harness", "vm-work");
@@ -109,9 +111,134 @@ export function vmStatus(instance: string): string {
   return (r.stdout ?? "").trim() || "Absent";
 }
 
+/**
+ * How far a Running guest's provisioning got. `ready` = Lima's boot scripts (which run our provision blocks
+ * on every boot) have finished AND the agent is on PATH. `failed` = they finished without the agent, so
+ * waiting cannot help. `sealed` = the agent is missing and the guest firewall is already in place — a
+ * previous run firewalled a VM that was still provisioning, so apt can never complete (once apt gives up,
+ * the boot scripts end too, so boot-done alone does not tell sealed from failed). `pending` = still
+ * running, or the guest cannot be asked yet.
+ */
+export type VmProvisioning = "ready" | "pending" | "sealed" | "failed";
+
+/**
+ * The guest-side readiness check, one `limactl shell` round trip. Lima's boot script deletes its
+ * `lima-boot-done` marker at the start of every boot and rewrites it (non-empty: the instance id) after
+ * the last provision script has run, whether or not those scripts succeeded — so the marker, not the
+ * `Running` status, is what says provisioning ended. `/run` and `/var/run` are both checked, as Lima's
+ * own requirement check does. Every check goes through `sudo -n` so a guest that would prompt reads as
+ * "not done" instead of hanging. The script always exits 0 and prints exactly one state line; anything
+ * else is read as `pending` by `provisioningFromProbe`.
+ */
+export function provisioningProbeScript(): string {
+  return [
+    "done=0; sudo -n test -s /run/lima-boot-done || sudo -n test -s /var/run/lima-boot-done && done=1",
+    "if [ $done = 1 ] && sudo -n test -x /usr/local/bin/claude; then echo COWORK_PROVISIONING=ready",
+    "elif sudo -n iptables -S OUTPUT 2>/dev/null | grep -qx -- '-P OUTPUT DROP'; then echo COWORK_PROVISIONING=sealed",
+    "elif [ $done = 1 ]; then echo COWORK_PROVISIONING=failed",
+    "else echo COWORK_PROVISIONING=pending",
+    "fi",
+    "exit 0",
+  ].join("\n");
+}
+
+/** Map one readiness-probe spawn to a state. Only a clean exit carrying a recognised state line counts; a
+ *  non-zero exit (ssh not up yet), a spawn error, a timeout (`status: null`) or unrecognised output all
+ *  read as `pending` — never as `ready`. */
+export function provisioningFromProbe(r: { status: number | null; stdout?: unknown; error?: Error }): VmProvisioning {
+  if (r.error || r.status !== 0 || typeof r.stdout !== "string") return "pending";
+  const m = /^COWORK_PROVISIONING=(ready|pending|sealed|failed)$/m.exec(r.stdout);
+  return m ? (m[1] as VmProvisioning) : "pending";
+}
+
+/** Ask a Running guest how far its provisioning got. Bounded, so a wedged ssh cannot hang the caller. */
+export function vmProvisioned(instance: string): VmProvisioning {
+  const r = spawnSync(limaPath(), ["shell", "--workdir", "/", instance, "sh", "-c", provisioningProbeScript()], {
+    encoding: "utf8",
+    timeout: 60_000,
+  });
+  return provisioningFromProbe(r);
+}
+
+/** The poll loop's clock. An object (not bare functions) so a test can make the wait instant. */
+export const provisionClock = {
+  now: (): number => Date.now(),
+  sleep: (ms: number): void => {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+  },
+};
+
+const PROVISION_POLL_MS = 5_000;
+/** How long `limactl start` may take before Lima gives up on it. A first boot installs the toolchain and
+ *  routinely runs past Lima's default; stopping short left a Running VM mid-provisioning. */
+const LIMA_START_TIMEOUT = "20m";
+
+function provisioningError(instance: string, reason: string): Error {
+  return new Error(
+    `microvm ${instance} never finished provisioning (${reason}). Delete it and retry: cowork-harness vm delete [<baseline>]`,
+  );
+}
+
+/** Why a not-ready state is final. `afterRestart`: a sealed VM was already restarted once to recover it. */
+function reasonFor(state: Exclude<VmProvisioning, "ready">, afterRestart: boolean): string {
+  switch (state) {
+    case "failed":
+      return "provisioning ended without the agent on PATH at /usr/local/bin/claude";
+    case "sealed":
+      return afterRestart
+        ? "its egress firewall was applied before provisioning finished, and a restart did not recover it"
+        : "its egress firewall is in place but the agent is not on PATH";
+    case "pending":
+      return "provisioning had not finished when the restart returned";
+  }
+}
+
+/** Wait for a reused Running guest to finish provisioning: poll every 5 s up to
+ *  COWORK_VM_PROVISION_TIMEOUT_S (default 900). Returns the first non-pending state, or throws on timeout. */
+function awaitProvisioning(instance: string): Exclude<VmProvisioning, "pending"> {
+  const timeoutS = envPositiveNumber("COWORK_VM_PROVISION_TIMEOUT_S", 900);
+  const deadline = provisionClock.now() + timeoutS * 1000;
+  let noticed = false;
+  for (;;) {
+    const state = vmProvisioned(instance);
+    if (state !== "pending") return state;
+    const remaining = deadline - provisionClock.now();
+    if (remaining <= 0)
+      throw provisioningError(instance, `still provisioning after ${timeoutS}s — raise COWORK_VM_PROVISION_TIMEOUT_S if it is just slow`);
+    if (!noticed) {
+      warn(`::notice:: [microvm] ${instance} is Running but still provisioning — waiting up to ${timeoutS}s\n`);
+      noticed = true;
+    }
+    provisionClock.sleep(Math.min(PROVISION_POLL_MS, remaining));
+  }
+}
+
+/** A reused Running VM is handed back only once it is provisioned. A `sealed` one is restarted once: the
+ *  firewall's iptables rules do not survive a reboot and Lima re-runs the provision scripts on every boot,
+ *  so a restart lets provisioning finish. Never deletes — that is the user's call, and the error says how. */
+function reuseRunning(instance: string, status: string): { instance: string; status: string } {
+  let state: VmProvisioning = awaitProvisioning(instance);
+  const restarted = state === "sealed";
+  if (restarted) {
+    warn(`::notice:: [microvm] ${instance} was firewalled before provisioning finished — restarting it once\n`);
+    try {
+      run(["stop", "-f", instance]);
+      run(["start", instance, "--tty=false", "--timeout", LIMA_START_TIMEOUT]);
+    } catch (e) {
+      throw provisioningError(instance, `it was firewalled before provisioning finished, and the restart failed: ${(e as Error).message}`);
+    }
+    state = vmProvisioned(instance);
+  }
+  if (state !== "ready") throw provisioningError(instance, reasonFor(state, restarted));
+  return { instance, status };
+}
+
 /** Boot (or reuse) the VZ microVM. The instance name encodes the config (see instanceName), so a
  *  `Running`/`Stopped` instance of THIS name is guaranteed to match the current config — there is no
- *  stale-config reuse to guard against. Returns when it is Running. */
+ *  stale-config reuse to guard against. Returns when it is Running AND provisioned: `Running` alone only
+ *  means the guest booted, and a first boot cut off by `limactl start`'s timeout is Running with
+ *  provisioning unfinished. The caller applies the guest firewall right after this returns, so returning
+ *  a half-provisioned VM would seal it in that state (apt could never finish). */
 export function vmInit(baseline: PlatformBaseline): { instance: string; status: string } {
   // Resolve BEFORE the reuse short-circuit below. A VM created while the pinned binary was present keeps
   // a mount pointing at that host path, so a later Desktop prune leaves a Running instance whose mount
@@ -121,7 +248,7 @@ export function vmInit(baseline: PlatformBaseline): { instance: string; status: 
   const stagedHost = stagedHostOf(baseline, { strict: true }); // fails LOUD here, with the resolver's message
   const instance = instanceName(baseline);
   const status = vmStatus(instance);
-  if (status === "Running") return { instance, status };
+  if (status === "Running") return reuseRunning(instance, status);
 
   mkdirSync(VM_WORK_HOST, { recursive: true });
   const cfg = limaConfig(stagedHost);
@@ -132,13 +259,23 @@ export function vmInit(baseline: PlatformBaseline): { instance: string; status: 
   if (status === "Absent") {
     run(["create", "--name", instance, cfgPath, "--tty=false"]);
   }
-  run(["start", instance, "--tty=false"]);
+  run(["start", instance, "--tty=false", "--timeout", LIMA_START_TIMEOUT]);
+  // `limactl start` waits for Lima's own boot-done requirement, so one probe is enough here: not ready
+  // now means the start itself went wrong, and polling would only delay saying so.
+  const state = vmProvisioned(instance);
+  // Still provisioning is not a broken VM: a Running VM is waited for, so the next run picks it up.
+  if (state === "pending")
+    throw new Error(
+      `microvm ${instance} has not finished provisioning (limactl start returned first) — re-run; the next run waits for provisioning to finish (COWORK_VM_PROVISION_TIMEOUT_S)`,
+    );
+  if (state !== "ready") throw provisioningError(instance, reasonFor(state, false));
   return { instance, status: vmStatus(instance) };
 }
 
 export function vmDelete(instance: string): void {
   spawnSync(limaPath(), ["stop", "-f", instance], { stdio: "ignore" });
   spawnSync(limaPath(), ["delete", "-f", instance], { stdio: "ignore" });
+  forgetMicrovmCapabilities([instance]);
 }
 
 /** Delete every `cowork-vm-*` instance except `keep` (the current config's instance) — orphaned VMs

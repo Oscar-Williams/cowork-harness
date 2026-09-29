@@ -41,6 +41,7 @@ const OK_PROBE: DoctorProbe = {
   runtimeDaemonUp: () => true,
   limaAvailable: () => true,
   vmInstanceStatus: () => "Running",
+  vmProvisioning: () => "ready",
   imageName: () => "cowork-agent-base:2",
   imagePresent: () => true,
   proxyImageName: () => "cowork-egress-proxy:3",

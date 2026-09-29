@@ -14,7 +14,7 @@ import { currentTurnEventLines } from "../run/turn-events.js";
 import { isAbsolute, join, resolve } from "node:path";
 import { runsWriteRoot } from "../run/trace-view.js";
 import { warn } from "../io.js";
-import { vmStatus } from "./lima.js";
+import { vmStatus, vmProvisioned, limaPath } from "./lima.js";
 
 export type CapabilityFamily = "ocr" | "office_convert" | "ml_extract" | "cv" | "pdf_tables" | "magick";
 
@@ -87,6 +87,20 @@ function writeCache(c: Record<string, string[]>): void {
   }
 }
 
+/** Drop the cached microvm capability probe of each named instance. Called when a VM is deleted or pruned:
+ *  the name can come back (a pinned COWORK_LIMA_INSTANCE, or the same config hash) on a VM that was never
+ *  probed, and the cache is otherwise kept for the instance's lifetime. */
+export function forgetMicrovmCapabilities(instances: string[]): void {
+  const cache = readCache();
+  let changed = false;
+  for (const i of instances)
+    if (`microvm:${i}` in cache) {
+      delete cache[`microvm:${i}`];
+      changed = true;
+    }
+  if (changed) writeCache(cache);
+}
+
 export interface ProbeOpts {
   runtime: string; // "docker" | "podman"
   image: string;
@@ -151,7 +165,11 @@ export function probeMicrovmOmitted(instance: string): CapabilityFamily[] | null
   const cache = readCache();
   if (cache[key]) return cache[key] as CapabilityFamily[];
   if (vmStatus(instance) !== "Running") return null;
-  const r = spawnSync("limactl", ["shell", "--workdir", "/", instance, "sh", "-c", probeScript()], {
+  // Running is not provisioned. This probe runs BEFORE vmInit and its answer is cached for the instance's
+  // lifetime, so probing a guest whose toolchain is still installing (or never will be) would pin "omitted"
+  // on families the finished VM has. Only a provisioned guest is probed; otherwise the pre-flight skips.
+  if (vmProvisioned(instance) !== "ready") return null;
+  const r = spawnSync(limaPath(), ["shell", "--workdir", "/", instance, "sh", "-c", probeScript()], {
     encoding: "utf8",
     timeout: 120_000,
   });

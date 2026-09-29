@@ -6,7 +6,31 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Upgrade notes
+
+- **microvm: if runs failed with "control-protocol write failed" and `env: 'claude': No such file or
+  directory`**, the VM was sealed mid-provisioning (see Fixed). The next run now recovers or names the
+  problem on its own, but the capability probe may have cached an empty toolchain for that VM: delete
+  `capability-cache.json` from the runs root (`~/.cowork-harness/runs/` unless you set
+  `COWORK_HARNESS_RUNS_DIR`) so it is probed again. (`vm delete` and `vm prune` now drop that entry
+  themselves.)
+- **Redaction policy copied by `init-redact`:** the fix below that keeps `/private/var/empty` is in the
+  packaged reference policy. A copy made by an earlier `init-redact` keeps redacting it; re-run
+  `init-redact --force` (after saving any tailoring) or add the same lookahead to your two `/private/var/`
+  rules, and widen the slugged-home-segment rule's lookbehind to also accept `]` and a backtick (so
+  `…]-Users-<name>-…` is redacted). Cassettes already committed are unaffected.
+
 ### Added
+
+- **`COWORK_VM_PROVISION_TIMEOUT_S`** (default `900`): how long a microvm run waits for an already-Running
+  VM to finish provisioning before failing with a named error (see Fixed).
+- **`vm status` reports `provisioning`**: a new field in its JSON output — `ready`, `pending`, `sealed`,
+  `failed`, or `null` when the VM is not Running. The text output appends it when a Running VM is not
+  ready.
+- **`result.json` `scan.inputHostPathTokens` and `scan.hostPathsFromInputs`**: optional counts of the
+  host-path tokens a container/microvm run's inputs carried and of how many matches in model-visible text
+  they exempted from `host_path_leak` (see Fixed). Omitted when zero; the paths themselves are kept only
+  in a private file in the run dir.
 
 - **`lint-skill` per-rule suppression, so `--strict` can stay the gate over a reviewed finding.**
   `--ignore-rule <rule>[=<glob>]` (repeatable) applies to the whole run, or only to files matching the glob
@@ -56,6 +80,43 @@ All notable changes to this project are documented here. The format is based on
   misbehaving skill from a green you don't trust, which the summary skipped.
 
 ### Fixed
+
+- **microvm: a VM that was Running but not yet provisioned is no longer used and sealed.** A first boot
+  that outlasted `limactl start` left the VM Running with its apt/toolchain install unfinished. The next
+  run reused it and applied the guest egress firewall, so provisioning could never complete, the agent
+  never reached PATH, and every later run failed with an opaque control-protocol error until the VM was
+  deleted by hand. Before using a Running VM, a run now checks that Lima's boot scripts finished and the
+  agent is on PATH. A VM still provisioning is waited for (up to `COWORK_VM_PROVISION_TIMEOUT_S`); one
+  whose egress firewall is in place while the agent is missing — whether its provisioning is still stuck
+  or has since given up — is restarted once, which clears the firewall and lets provisioning run again.
+  A VM that `limactl start` returns before it has finished provisioning fails with a message to re-run
+  (the next run waits for it). Anything else, including a restart that fails or does not help, fails with `microvm <instance> never
+  finished provisioning (<reason>). Delete it and retry: cowork-harness vm delete [<baseline>]`. The
+  harness never deletes a VM itself. `limactl start` now gets `--timeout 20m`, so a slow first boot is not
+  cut off in the first place. The capability probe skips a VM that is not provisioned instead of caching
+  its missing toolchain, and runs through `COWORK_LIMACTL` like every other Lima call. `doctor --tier
+  microvm` no longer calls a Running VM "provisioned" until it is.
+- **The reference redaction policy keeps `/private/var/empty`.** From Desktop 2.7032.0 the host-loop agent
+  runs at `/var/empty` and reports its realpath, a system path that identifies no one. `verify-cassettes`
+  already called it clean, but the policy `init-redact` copies rewrote it, so a cassette lost the evidence
+  of where the agent ran. The policy now keeps it (and any path under it with no `..` segment and no `%`)
+  only where the scanner also calls it clean (the policy stays at least as strict); the scanner in turn
+  now matches it case-insensitively and when it is quoted in backticks, as the policy does, and both still
+  flag a slugged home segment glued on after it.
+- **A host path the user supplied no longer fails `host_path_leak`.** At `container`/`microvm` a run
+  failed the moment the agent read or quoted an uploaded or connected file that itself contains host paths
+  (a kept run's `result.json`, a log, a config) — though nothing leaked from the harness, and real Cowork
+  shows the same bytes. Before the agent runs, the staged uploads and connected folders are now scanned for
+  host paths (on the first turn only; each turn's prompt is added too), and a path the agent shows
+  verbatim is exempt. The match is by whole path token, and a token ends at whitespace, a quote, `,`, `;`,
+  `)`, `]`, `<`, `>` or a backslash: a sub-path, another spelling or a different path still fails, and so
+  does a token cut short where the path goes on (`/Users/a/My Documents/x`); after whitespace, a run that
+  itself starts a new path (`/…`) or a URL (`scheme://…`) is the next item, not a continuation. The
+  exemption never covers a
+  location the harness created for this run, nor a truncated spelling of one. A scenario that failed on
+  the default `host_path_leak` signal only because of such an input-borne path now passes, and an
+  authored `transcript_no_host_path: true` applies the same rule. A result that relied on the exemption
+  prints a `::notice::`.
 
 - **`lint-skill` no longer flags `${CLAUDE_PLUGIN_ROOT}` in a hook command.** A plugin hook gets a path valid
   where it runs (the agent substitutes the token when it runs the hook, and sets the variable), so the

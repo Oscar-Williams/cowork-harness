@@ -7,6 +7,7 @@ import { agentArgs, spawnEnv, dockerRunArgv } from "./argv.js";
 import { runtimeAuthEnv } from "./host-env.js";
 import { stageWorkspace } from "./stage.js";
 import { capturePreRunManifest } from "../run/pre-run-manifest.js";
+import { captureInputHostPathCorpus } from "../run/input-host-paths.js";
 import { makeCoworkHandler } from "../hostloop/cowork-handler.js";
 import { makeSkillsHandler, SKILLS_PLUGINS_TOOL_NAMES } from "../hostloop/skills-handler.js";
 import { makePluginsHandler } from "../hostloop/plugins-handler.js";
@@ -96,6 +97,9 @@ export function spawnContainer(
   const { mcpStaged } = stageWorkspace(plan, mntHost);
   // no_unexpected_files baseline: snapshot the user-visible roots' paths post-staging, pre-spawn.
   capturePreRunManifest(plan, mntHost, outDir, "container");
+  // Host-path tokens in the user's staged inputs, so the post-run host_path_leak scan can tell a path the
+  // user supplied from one the sandbox leaked. First turn only (a no-op on resume).
+  captureInputHostPathCorpus(plan, mntHost, outDir);
   const mcpGuest = mcpStaged ? `${configGuest}/mcp.json` : undefined;
 
   const agentHost = resolveAgentBinary(baseline);

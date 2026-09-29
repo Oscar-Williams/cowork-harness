@@ -15,7 +15,7 @@ import {
   isPatchBump,
 } from "../baseline.js";
 import { decideLoopFromBaseline } from "../loop-decision.js";
-import { limaPath, vmStatus, instanceName } from "../runtime/lima.js";
+import { limaPath, vmStatus, instanceName, vmProvisioned } from "../runtime/lima.js";
 import { fail, isJsonOutput, jsonPayloadEnvelope } from "./envelope.js";
 import { writeAllSync } from "../io.js";
 import { pinnedDigestFor, resolveAgentImage, resolveContainerRuntime, resolveProxyImage } from "../runtime/agent-image.js";
@@ -112,6 +112,7 @@ export interface DoctorProbe {
   runtimeDaemonUp(): boolean;
   limaAvailable(): boolean; // microvm (L2) only — `limactl` present (Lima / Apple Virtualization.framework)
   vmInstanceStatus(): string; // microvm (L2) only — `limactl list <instance> --format {{.Status}}` for the current baseline's derived Lima instance; surfaces whether `vm init` has provisioned it yet ("Running"/"Stopped"/"Absent")
+  vmProvisioning(): string; // microvm (L2) only, asked only when the instance is Running — how far its provisioning got ("ready"/"pending"/"sealed"/"failed"; see lima.ts vmProvisioned)
   imageName(): string;
   imagePresent(): boolean;
   proxyImageName(): string;
@@ -186,6 +187,13 @@ export const realProbe: DoctorProbe = {
   vmInstanceStatus() {
     try {
       return vmStatus(instanceName(loadBaseline("latest")));
+    } catch (e) {
+      return `unknown (${(e as Error).message.split("\n")[0]})`;
+    }
+  },
+  vmProvisioning() {
+    try {
+      return vmProvisioned(instanceName(loadBaseline("latest")));
     } catch (e) {
       return `unknown (${(e as Error).message.split("\n")[0]})`;
     }
@@ -405,20 +413,47 @@ export function runDoctorChecks(tier: Tier, probe: DoctorProbe = realProbe): Doc
       required: true,
     });
     const vmStatusStr = limaOk ? probe.vmInstanceStatus() : "Absent";
-    const vmProvisioned = vmStatusStr === "Running" || vmStatusStr === "Stopped";
+    // `Running` only means the guest booted: a first boot cut off by `limactl start`'s timeout is Running
+    // with provisioning unfinished, so a Running instance is asked how far it got. A Stopped one cannot be
+    // asked; a run re-checks it when it starts it.
+    const provisioning = limaOk && vmStatusStr === "Running" ? probe.vmProvisioning() : undefined;
+    const vmCheck = ((): { status: "ok" | "warn" | "skip"; detail: string; remedy?: string } => {
+      if (!limaOk) return { status: "skip", detail: "not checked — limactl missing" };
+      if (vmStatusStr === "Stopped") return { status: "ok", detail: "instance stopped — readiness is checked when a run starts it" };
+      if (vmStatusStr !== "Running")
+        return {
+          status: "warn",
+          detail: `no provisioned instance yet (status: ${vmStatusStr})`,
+          remedy:
+            "run `cowork-harness vm init` once to pre-provision (a live microvm run self-provisions too, just with first-run VM-boot latency)",
+        };
+      if (provisioning === "ready") return { status: "ok", detail: "instance running — provisioned" };
+      if (provisioning === "pending")
+        return {
+          status: "warn",
+          detail: "instance running — still provisioning",
+          remedy: "wait for it (a run waits up to COWORK_VM_PROVISION_TIMEOUT_S), then re-run doctor",
+        };
+      if (provisioning === "sealed")
+        return {
+          status: "warn",
+          detail: "instance running — firewalled before provisioning finished",
+          remedy: "the next microvm run restarts it once to recover; if that fails, run `cowork-harness vm delete`",
+        };
+      if (provisioning === "failed")
+        return {
+          status: "warn",
+          detail: "instance running — provisioning ended without the agent on PATH",
+          remedy: "run `cowork-harness vm delete`, then retry",
+        };
+      return { status: "warn", detail: `instance running — provisioning state ${provisioning ?? "unknown"}` };
+    })();
     checks.push({
       id: "vm-instance",
       title: "Lima VM instance (vm init)",
-      status: !limaOk ? "skip" : vmProvisioned ? "ok" : "warn",
-      detail: !limaOk
-        ? "not checked — limactl missing"
-        : vmProvisioned
-          ? `instance ${vmStatusStr.toLowerCase()} — provisioned`
-          : `no provisioned instance yet (status: ${vmStatusStr})`,
-      remedy:
-        vmProvisioned || !limaOk
-          ? undefined
-          : "run `cowork-harness vm init` once to pre-provision (a live microvm run self-provisions too, just with first-run VM-boot latency)",
+      status: vmCheck.status,
+      detail: vmCheck.detail,
+      remedy: vmCheck.remedy,
       required: false,
     });
     checks.push(agentCheck(false));

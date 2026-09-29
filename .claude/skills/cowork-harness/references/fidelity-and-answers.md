@@ -73,7 +73,9 @@ The instance is `cowork-vm-<config-hash>` — a config or agent-version change y
 stale VM is never silently reused (the old one is orphaned until `vm prune`). Pin a fixed name with
 `COWORK_LIMA_INSTANCE`. The optional argument to every `vm` subcommand is a **baseline**
 (`desktop-<version>`, default `latest`), never the `cowork-vm-<hash>` VM name — passing a VM name is a
-usage error that names the baseline(s) deriving it.
+usage error that names the baseline(s) deriving it. A Running VM is used only once its provisioning has
+finished (a run waits up to `COWORK_VM_PROVISION_TIMEOUT_S`, default 900 s); `microvm <instance> never
+finished provisioning (…)` means it will not — `cowork-harness vm delete` and retry.
 
 ## Answer paths (resolving gates: AskUserQuestion + tool-permission)
 
@@ -325,7 +327,7 @@ up often enough to spell out:
 - `COWORK_HARNESS_SCRUB_KEYS` / `COWORK_HARNESS_SCRUB_VALUES` — extra env names / literal values to
   redact from logs (beyond the auth tokens + `ANTHROPIC_CUSTOM_HEADERS`).
 - `COWORK_HARNESS_SOFT_MISSING` — downgrade a missing mount source from hard-error to warn-and-skip.
-- `COWORK_VM_GATEWAY` / `COWORK_VM_PROXY_PORT` / `COWORK_LIMA_INSTANCE` — L2 (microVM) knobs.
+- `COWORK_VM_GATEWAY` / `COWORK_VM_PROXY_PORT` / `COWORK_LIMA_INSTANCE` / `COWORK_VM_PROVISION_TIMEOUT_S` — L2 (microVM) knobs.
 - `COWORK_LOCKDOWN` — default `on`: gates sandbox hardening on every isolated tier — **aborts loudly**
   if the L2 guest firewall fails to apply (no silent unprotected run), and also gates the
   `container`/`hostloop` Docker hardening. Set `=off` to opt out and run without isolation deliberately.

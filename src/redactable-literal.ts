@@ -23,6 +23,8 @@ export function hasRedactionToken(text: string): boolean {
 
 const REDACTABLE_SHAPES: RegExp[] = [
   /\/(?:Users|home|root)\/[^/\s]/,
+  // Still matches `/private/var/empty`, which the reference policy keeps: this is a "might be redacted"
+  // heuristic, and over-warning on that one system path is its safe side.
   /\/private\/(?:tmp|var)\//,
   /\/var\/folders\//,
   /\/Volumes\/[^/\s]/,
