@@ -49,7 +49,7 @@ For a **question** gate you do not hand-write those files — two CLI subcommand
   | Case | Exit | Category |
   |---|---|---|
   | The run finished (`done.json`), or one pass found nothing more | `0` | — |
-  | No pass over a directory that does not exist (without `--follow`) | `2` | `usage` |
+  | One pass (no `--follow`) over a directory that does not exist | `2` | `usage` |
   | The path exists but is not a directory (with or without `--follow`) | `2` | `usage` |
   | A gate request that cannot be parsed — under `--follow` after three reads, in one pass on the first | `2` | `runtime` |
 
