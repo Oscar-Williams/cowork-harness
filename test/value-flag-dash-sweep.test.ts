@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { SKILL_FLAG_SURFACE } from "../src/run/skill-flag-surface.js";
@@ -89,11 +89,13 @@ describe.skipIf(!can)("every value-taking flag refuses a flag-looking value", ()
 describe.skipIf(!can)("--label keeps the CLI's negative-number carve-out", () => {
   it("skill --label -1 is a label (exit 0), as it was before the guard", () => {
     const d = mkdtempSync(join(tmpdir(), "dash-sweep-"));
+    mkdirSync(join(d, "plugin")); // a dry run refuses a plugin folder that does not exist
     const r = cli(["skill", "./plugin", "hi", "--dry-run", "--label", "-1"], d);
     expect(r.code, r.out).toBe(0);
   });
   it("skill --label -v2 is refused as a forgotten value; --label=-v2 is the escape", () => {
     const d = mkdtempSync(join(tmpdir(), "dash-sweep-"));
+    mkdirSync(join(d, "plugin"));
     const spaced = cli(["skill", "./plugin", "hi", "--dry-run", "--label", "-v2"], d);
     expect(spaced.code).toBe(2);
     expect(spaced.out).toMatch(/--label/);

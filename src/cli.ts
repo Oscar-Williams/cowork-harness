@@ -16,7 +16,7 @@ import {
 } from "./types.js";
 import { writeAllSync } from "./io.js";
 import { loadBaseline, BASELINES_DIR, cmpVersionStrings, sha256File, countStringInFile, newestStagedSibling } from "./baseline.js";
-import { loadSession, resolveSessionPaths, applySessionOverrides } from "./session.js";
+import { loadSession, resolveSessionPaths, applySessionOverrides, resolveLaunchSources } from "./session.js";
 import {
   executeScenario,
   parseScenarioFile,
@@ -26,6 +26,7 @@ import {
   BoundaryError,
   UsageError,
   LegacyRunDirError,
+  effectiveTier,
   type ExecuteOptions,
 } from "./run/execute.js";
 import { unresolvedModelRefusal, envModelDefault } from "./run/model-provenance.js";
@@ -2237,43 +2238,10 @@ async function cmdSkill(rawArgs: string[]) {
       isJson,
     );
 
-  if (dryRun) {
-    out(
-      JSON.stringify(
-        {
-          fidelity,
-          // `null`, not absent, when nothing resolves: the real run refuses that (exit 2), and the preview
-          // says so in its payload rather than omitting the one input that decides it. It does not refuse:
-          // it spends nothing, and it is how a reader checks an invocation before adding the model.
-          model: model ?? null,
-          prompt,
-          localPlugins,
-          marketplaces,
-          enabled: enables,
-          answers,
-          // The preview is what a reader checks the invocation against, so it reports the gate settings
-          // too — omitting them also made the equals-vs-spaced parity test for --on-unanswered vacuous
-          // (it compared two previews that never carried the value).
-          on_unanswered: useLlm ? "llm" : resolvePolicy("skill", flags),
-          ...(flags.deciderDir != null ? { decider: "decider-dir" } : flags.deciderCmd != null ? { decider: "decider-cmd" } : {}),
-          ...(useLlm ? { decider: "decider-llm" } : {}),
-          ...(timeoutMs !== undefined ? { timeout_ms: timeoutMs } : {}),
-          ...(allowStall ? { allow_stall: true } : {}),
-        },
-        null,
-        2,
-      ),
-    );
-    return;
-  }
-
-  // The skill lane's inline session carries no `model:` of its own, so `--model` or COWORK_HARNESS_MODEL
-  // must supply it. Refused here, before staging; executeScenario is the backstop. After the --dry-run
-  // branch on purpose: the preview spends nothing, so it reports `model: null` instead of refusing.
-  if (model === undefined) fail("skill", "usage", unresolvedModelRefusal("this `skill` run"), undefined, isJson);
-
   // Resolve the inline session's relative paths against cwd (consistent with `run`'s file path, which
   // goes through resolveSessionPaths) so uploads/folders/plugins are cwd-independent for the skill path.
+  // Built before the --dry-run return so the preview checks the same sources the run would stage. `model`
+  // may be unresolved here: a preview reports that (below) rather than refusing it.
   const session = resolveSessionPaths(
     loadSession({
       model,
@@ -2284,6 +2252,52 @@ async function cmdSkill(rawArgs: string[]) {
     }),
     process.cwd(),
   );
+  // A plugin folder, marketplace, upload or folder that does not exist is refused HERE — before the
+  // --dry-run return, because a preview of a path that is not there previews nothing — through the same
+  // resolution the run stages from (executeScenario repeats it as the backstop for every other lane).
+  // Contrast the model: an unresolved model is a choice the preview reports as `model: null`, not a
+  // missing input, so its refusal stays after the preview.
+  try {
+    const previewBaseline = loadBaseline("latest");
+    resolveLaunchSources(session, previewBaseline, effectiveTier(fidelity, previewBaseline), resume, { stageFilters: false });
+  } catch (e) {
+    if (e instanceof UsageError) return void fail("skill", "usage", e.message, e.hint, isJson);
+    throw e;
+  }
+
+  if (dryRun) {
+    const preview = {
+      fidelity,
+      // `null`, not absent, when nothing resolves: the real run refuses that (exit 2), and the preview
+      // says so in its payload rather than omitting the one input that decides it. It does not refuse:
+      // it spends nothing, and it is how a reader checks an invocation before adding the model.
+      model: model ?? null,
+      prompt,
+      localPlugins,
+      marketplaces,
+      enabled: enables,
+      answers,
+      // The preview is what a reader checks the invocation against, so it reports the gate settings
+      // too — omitting them also made the equals-vs-spaced parity test for --on-unanswered vacuous
+      // (it compared two previews that never carried the value).
+      on_unanswered: useLlm ? "llm" : resolvePolicy("skill", flags),
+      ...(flags.deciderDir != null ? { decider: "decider-dir" } : flags.deciderCmd != null ? { decider: "decider-cmd" } : {}),
+      ...(useLlm ? { decider: "decider-llm" } : {}),
+      ...(timeoutMs !== undefined ? { timeout_ms: timeoutMs } : {}),
+      ...(allowStall ? { allow_stall: true } : {}),
+    };
+    // Under json the preview rides in the standard envelope (one framed document on stdout); text mode
+    // prints the bare object, as it always has.
+    if (isJson) out(jsonPayloadEnvelope("skill", true, { dryRun: true, ...preview }));
+    else out(JSON.stringify(preview, null, 2));
+    return;
+  }
+
+  // The skill lane's inline session carries no `model:` of its own, so `--model` or COWORK_HARNESS_MODEL
+  // must supply it. Refused here, before staging; executeScenario is the backstop. After the --dry-run
+  // branch on purpose: the preview spends nothing, so it reports `model: null` instead of refusing.
+  if (model === undefined) fail("skill", "usage", unresolvedModelRefusal("this `skill` run"), undefined, isJson);
+
   // Name the run after the skill folder's BASENAME (not the whole dashified path → "skill-ill-…").
   const sourceName = basename((folder ?? marketplaces[0] ?? extraPlugins[0] ?? "test").replace(/\/+$/, "")) || "test";
   const scenario = Scenario.parse({
@@ -4046,7 +4060,13 @@ function cmdAnswer(args: string[]) {
     // multiSelect → write the ARRAY (the on-wire shape normalize expects); single-select → the scalar.
     answers[key] = q0?.multiSelect ? chooses : chooses[0];
   } else return void fail("answer", "usage", 'answer needs --choose <label> or --answer "<q>=<label>"', undefined, json);
-  answerGate(dir, seq, answers);
+  // `--answer` writes without reading the gate first, so a missing directory or gate surfaces here: the
+  // same usage error `--choose` reports when it cannot read the gate, not a harness failure.
+  try {
+    answerGate(dir, seq, answers);
+  } catch (e) {
+    return void fail("answer", "usage", `cannot answer gate ${seq} in ${dir}: ${String((e as Error).message)}`, undefined, json);
+  }
   if (json) out(JSON.stringify({ tool: "cowork-harness", command: "answer", ok: true, gate: seq, answers }));
   else log(`✓ answered gate ${seq}: ${JSON.stringify(answers)}`);
 }

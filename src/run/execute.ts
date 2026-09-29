@@ -10,7 +10,7 @@ import { homedir } from "node:os";
 import { join, dirname, resolve, basename, isAbsolute, sep } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { Scenario } from "../types.js";
-import type { RunResult, InfraErrorSource, Assertion, OutputsFsDiff } from "../types.js";
+import type { RunResult, InfraErrorSource, Assertion, OutputsFsDiff, PlatformBaseline } from "../types.js";
 import { writeRunningStatus, startStatusTicker, registerRunForCrashSafety, statusLine, type RunStatusMeta } from "./run-status.js";
 import {
   deriveModelProvenance,
@@ -31,6 +31,7 @@ import {
   loadSession,
   resolveSessionPaths,
   buildLaunchPlan,
+  resolveLaunchSources,
   userVisibleRootsFromPlan,
   readonlyFolderRootsFromPlan,
   deleteDeniedRootsFromPlan,
@@ -397,6 +398,12 @@ export function assertContradiction(scenario: Scenario): string | undefined {
   );
 }
 
+/** The tier a scenario actually runs at: its declared `fidelity`, with `cowork` resolved to hostloop or
+ *  container through the loop-decision gate (the same resolution real Cowork makes). */
+export function effectiveTier(fidelity: Scenario["fidelity"], baseline: PlatformBaseline): Exclude<Scenario["fidelity"], "cowork"> {
+  return fidelity === "cowork" ? (decideLoopFromBaseline(baseline) === "host" ? "hostloop" : "container") : fidelity;
+}
+
 /** Does this scenario need the pre-run baseline captured? Extracted from `executeScenario` so the rule is
  *  ONE named, testable thing rather than an inline predicate — the list of arming keys covers every
  *  assertion that reads the baseline (plus two that no longer do, kept deliberately — see the inline note at
@@ -508,6 +515,19 @@ export async function executeScenario(scenario: Scenario, opts: ExecuteOptions =
   // by cpSync staging. It MUST stay here; moving it into the staged tree would surface it as an artifact.
   const originPath = join(outDir, ".origin");
 
+  // Resolve the effective tier early — it is needed to resolve the mounts just below (mount naming is
+  // tier-accurate: host-loop folders use hL, VM/container use fy), to stamp the session manifest (so a
+  // --resume at a different tier fails loud; the agent's native conversation store is tier-local), and by
+  // buildLaunchPlan. `cowork` resolves to hostloop|container via the loop-decision gate. Depends only on
+  // scenario.fidelity + baseline (both resolved above). The `[loop]` line announcing it is printed below,
+  // after the status line, where it has always been.
+  const effectiveFidelity = effectiveTier(scenario.fidelity, baseline);
+
+  // Every declared source (plugins, skills, uploads, folders, marketplaces) is resolved and checked HERE,
+  // before the run directory exists: a path that does not exist is a UsageError, and a run refused for it
+  // leaves no run dir, status.json or index row behind. buildLaunchPlan stages from this same resolution.
+  const launchSources = resolveLaunchSources(session, baseline, effectiveFidelity, !!opts.resume);
+
   if (opts.sessionId) {
     // Pinned (`sess-<id>`) run dirs are DETERMINISTIC, so on the shared (flat) runs root two different
     // projects can resolve to the same path. Identify the run by its SOURCE content (sessionOriginSources)
@@ -612,13 +632,6 @@ export async function executeScenario(scenario: Scenario, opts: ExecuteOptions =
   // instead of killing the process by the signal, which runs none of them. Every tier.
   installTerminationHandler();
 
-  // Resolve the effective tier early — it is needed BOTH to stamp the session manifest below (so a
-  // --resume at a different tier fails loud; the agent's native conversation store is tier-local) AND,
-  // later, before buildLaunchPlan so mount naming is tier-accurate (host-loop folders use hL, VM/container
-  // use fy). `cowork` resolves to hostloop|container via the loop-decision gate. Depends only on
-  // scenario.fidelity + baseline (both resolved above); nothing between here and its former site read it.
-  const effectiveFidelity =
-    scenario.fidelity === "cowork" ? (decideLoopFromBaseline(baseline) === "host" ? "hostloop" : "container") : scenario.fidelity;
   if (scenario.fidelity === "cowork") process.stderr.write(`[loop] cowork → ${effectiveFidelity} (per gate 1143815894)\n`);
 
   // Refuse a `tool_not_called` naming a tool this tier provably does not serve. Placed HERE, not in the
@@ -693,7 +706,7 @@ export async function executeScenario(scenario: Scenario, opts: ExecuteOptions =
   // deliberately at turn START: the post-run path has already let `foldResources` read.
   const turnNumber = beginTurn(outDir);
 
-  const plan = buildLaunchPlan(session, baseline, outDir, effectiveFidelity, !!opts.resume, scenario.lane);
+  const plan = buildLaunchPlan(session, baseline, outDir, effectiveFidelity, !!opts.resume, scenario.lane, launchSources);
   // Same layer, protocol's own hazard: this tier passes --plugin-dir, so a staged plugin's hooks execute
   // as native host processes. Gate only when a plugin actually declares runnable hooks.
   if (effectiveFidelity === "protocol") {

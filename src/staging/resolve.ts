@@ -9,6 +9,7 @@
  */
 
 import { existsSync, statSync } from "node:fs";
+import { UsageError } from "../errors.js";
 
 /** A concrete mount the runtime should create (path relative to the mnt cwd). Mirrors `Mount` in session.ts. */
 export interface ResolvedMount {
@@ -61,7 +62,7 @@ export function resolveDeclaredSource(
   if (!present) {
     if (opts.deferMissing) return { hostPath, mountPath, mode }; // post-loop batch check owns the decision
     if (opts.softMissing) return null; // immediate-copy caller: warn-and-skip is the caller's job
-    throw new Error(`${opts.what} not found: ${hostPath}. Fix the path, or set COWORK_HARNESS_SOFT_MISSING=1 to skip it.`);
+    throw new UsageError(`${opts.what} not found: ${hostPath}. Fix the path, or set COWORK_HARNESS_SOFT_MISSING=1 to skip it.`);
   }
   // Present → kind-check now (the only place a wrong-kind source can be caught before staging).
   if (kind === "file") requireFile(hostPath, opts.what);
