@@ -1,6 +1,6 @@
 # Scenario & session schema, replay class, web_fetch, authoring gotchas
 
-Self-contained reference for authoring `cowork-harness` scenarios. Tracks `cowork-harness 3.10.0`
+Self-contained reference for authoring `cowork-harness` scenarios. Tracks `cowork-harness 4.0.0`
 (baseline `desktop-2.9939.4`). If your checkout is newer, prefer the live [`docs/scenario.md`](https://github.com/yaniv-golan/cowork-harness/blob/main/docs/scenario.md),
 [`docs/session.md`](https://github.com/yaniv-golan/cowork-harness/blob/main/docs/session.md), and `SPEC.md`.
 
@@ -192,7 +192,7 @@ plugins:
   local_plugins: [./skills/my-skill]   # host plugin dirs → mnt/.local-plugins/marketplaces/local-desktop-app-uploads/<plugin>
                                        #   (the marketplace segment is that fixed synthetic name; ≥1.14271.0 —
                                        #   older baselines use mnt/.local-plugins/cache)
-  remote_plugins: []
+  remote_plugins: []             # → mnt/.remote-plugins/plugin_<id> — how Cowork serves a UI-installed plugin
 skills:
   local: []                      # extra host skill dirs
   suggest_enabled: true          # gate 245679952 override — `mcp__skills__suggest_skills` on/off (default true)
@@ -233,6 +233,16 @@ repo, so `git add` a new skill (an all-untracked folder hard-fails as a would-be
 ships the committed tree, so commit before recording the locking cassette. For an ad-hoc `skill` run
 with no session file, the CLI flags `--folder <dir>` and `--upload <file>` are the equivalents of
 `folders[]` / `uploads[]`.
+
+**Installed vs. local-uploads layout:** to mirror a plugin installed through Cowork's UI, declare it under
+`plugins.remote_plugins` instead — Cowork serves an installed plugin from `.remote-plugins/plugin_<id>`
+(named by id, not plugin name), while `local_plugins` mounts two levels deeper
+(`.local-plugins/marketplaces/local-desktop-app-uploads/<plugin>`). The choice matters to a skill that
+locates its own files from the shell (`$CLAUDE_PLUGIN_ROOT` is unset in the VM shell on every tier).
+Search for the skill's own `SKILL.md`, not for a directory named after the plugin — that finds nothing
+under `.remote-plugins/plugin_<id>` — and set no `-maxdepth` that stops short of the deeper local layout:
+`find /sessions/*/mnt/.local-plugins /sessions/*/mnt/.remote-plugins -path '*/skills/<skill-name>/SKILL.md' 2>/dev/null | head -1`.
+Details: [docs/plugin-root.md](https://github.com/yaniv-golan/cowork-harness/blob/main/docs/plugin-root.md#in-vm-bash--the-token-is-not-reliable).
 
 **Mount enforcement:** `mode:r` mounts get a real per-mount `:ro` bind (a write fails in-guest). The
 `rw` vs `rwd` (write-but-no-delete) distinction is **not** mount-enforced — a delete in `outputs/` or a

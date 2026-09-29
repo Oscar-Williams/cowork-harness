@@ -253,7 +253,8 @@ describe("the call site — STRUCTURAL only, and deliberately labelled as such",
 
   it("the quarantine branch THROWS rather than falling through to the write", () => {
     const branch = src.slice(src.indexOf('leak.kind === "quarantine"'), src.indexOf("writeFileAtomic(cassettePath,"));
-    expect(branch).toMatch(/throw new Error\(/);
+    // A post-run refusal: it carries the run it refused (see RecordPostRunRefusalError).
+    expect(branch).toMatch(/throw new RecordPostRunRefusalError\(/);
     expect(branch).toMatch(/quarantineCassette\(/);
   });
 });

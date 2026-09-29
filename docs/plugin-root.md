@@ -33,15 +33,35 @@ is a different story:
   fails. The agent's own plugin-hook self-heal recovers by **discovering** the mount at runtime, but a
   hardcoded `${CLAUDE_PLUGIN_ROOT}` path in *your* script does not get that treatment.
 - The plugin's files ARE present in the VM — they are bind-mounted under the session's
-  `mnt/.local-plugins/…` (marketplace/local plugins) or `mnt/.remote-plugins/plugin_<id>` (uploaded /
-  org-remote plugins). So the fix is to **discover the mount**, not to depend on the env var:
+  `mnt/.local-plugins/…` (the local-uploads channel, or a marketplace plugin) or
+  `mnt/.remote-plugins/plugin_<id>` (a plugin installed through Cowork's UI, or an org-remote one). So the
+  fix is to **discover the mount**, not to depend on the env var:
 
   ```bash
-  # derive the plugin root from the script's own location, or search the session mount:
-  PLUGIN_ROOT="$(cd "$(dirname "$0")/.." && pwd)"              # if the script lives inside the plugin
-  # or, when you only know the plugin name:
-  PLUGIN_ROOT="$(find /sessions/*/mnt/.*-plugins -maxdepth 3 -type d -name '<plugin-name>' | head -1)"
+  # derive the plugin root from the script's own location, when the script lives inside the plugin:
+  PLUGIN_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+  # or search both plugin mounts for this skill's own SKILL.md:
+  SKILL_MD="$(find /sessions/*/mnt/.local-plugins /sessions/*/mnt/.remote-plugins \
+    -path '*/skills/<skill-name>/SKILL.md' 2>/dev/null | head -1)"
+  SKILL_DIR="${SKILL_MD%/SKILL.md}"          # …/skills/<skill-name>
+  PLUGIN_ROOT="${SKILL_DIR%/skills/*}"        # assumes the usual <plugin>/skills/<skill-name>/ layout
   ```
+
+  **Search by the skill's own path, not by the plugin's directory name.** An installed plugin's directory
+  is named by its id (`.remote-plugins/plugin_<id>`), never by the plugin name, so a `find … -name
+  '<plugin-name>'` matches nothing for it. A local plugin sits deeper
+  (`.local-plugins/marketplaces/<marketplace>/<plugin>/…`, or `.local-plugins/cache/<marketplace>/<plugin>/<version>/…`
+  for a marketplace plugin), so keep `-maxdepth` off, or loose enough to reach
+  `<plugin>/skills/<skill-name>/SKILL.md` from there. The `-path '*/skills/<skill-name>/…'` form is also
+  the one `lint-skill` checks against the skill's own name (the `guard-pattern-mismatch` WARN below). If
+  two plugins in one session ship a skill with the same name, match on something only yours has — a
+  `.claude-plugin/plugin.json` whose `name` is your plugin's, for example.
+
+  The scenario key decides which of the two layouts a harness run reproduces: `remote_plugins:` mounts a
+  plugin the way Cowork serves one installed through its UI (`.remote-plugins/plugin_<id>`), and
+  `local_plugins:` mounts it through Cowork's local-uploads channel, two directory levels deeper
+  (`.local-plugins/marketplaces/local-desktop-app-uploads/<plugin>`). To test a skill that will ship as an
+  installed plugin, declare it under `remote_plugins:` — see [session.md](./session.md).
 
 ## How the tiers map
 
@@ -60,6 +80,12 @@ TEXT when the definition loads, not because any tier's shell inherits `CLAUDE_PL
 token is unset everywhere in-VM bash actually runs, **author for the mount-discovery pattern
 unconditionally**: never hardcode `${CLAUDE_PLUGIN_ROOT}` in a VM shell step; discover the mount, as
 shown above.
+
+`CLAUDE_SKILL_DIR` is empty in the in-VM shell too, and the path the agent substitutes into the skill's
+text does not help: at host-loop it is a HOST path, which does not exist in the VM. Do not rewrite it
+into a VM path by its suffix either — the harness's host path happens to share the VM path's
+`/mnt/.local-plugins/…` suffix, but real Cowork's does not, so that rewrite passes here and fails in
+Cowork (see [fidelity-gaps.md](./fidelity-gaps.md#hostloop-the-substituted-plugin-path-shares-the-vm-paths-suffix-real-coworks-does-not)).
 
 ## A second, related footgun: host-side hooks
 

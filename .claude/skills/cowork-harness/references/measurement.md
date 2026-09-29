@@ -1,6 +1,6 @@
 # Measurement
 
-Tracks `cowork-harness 3.10.0` (baseline `desktop-2.9939.4`). Read it before comparing runs: `--repeat`, `--ablate-skill`, and the hygiene that keeps a batch valid.
+Tracks `cowork-harness 4.0.0` (baseline `desktop-2.9939.4`). Read it before comparing runs: `--repeat`, `--ablate-skill`, and the hygiene that keeps a batch valid.
 
 ### Measure — before/after, with/without (`--repeat`, `--ablate-skill`)
 
@@ -10,7 +10,9 @@ discipline that is cheap to follow and expensive to skip.
 **"Did it pass, or pass once?"** → `--repeat N` (2-100, on `skill` AND `run`) samples the same
 skill+prompt N times and prints a variance rollup instead of a single verdict. `--min-pass-rate` sets
 the batch threshold, `--stop-on-diverge` stops the moment flakiness is proven, `--max-budget-usd` caps
-spend.
+spend. The cap counts each run's `cost.usd` only — the agent session — and estimates a single run
+from prior runs' `cost.usd`; the `semantic_matches` judge and the LLM decider (`on_unanswered: llm` /
+`--decider-llm`) are separate model calls it never sees.
 
 **"Does the skill actually help?"** → `--ablate-skill` runs the prompt with every skill/plugin
 discovery source removed, so the agent answers from its own priors. **It is ONE arm, not a paired

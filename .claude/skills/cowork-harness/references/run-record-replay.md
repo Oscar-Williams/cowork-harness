@@ -1,6 +1,6 @@
 # Run, record and lock
 
-Tracks `cowork-harness 3.10.0` (baseline `desktop-2.9939.4`). Read it when running a scenario, recording or placing a cassette, reading verdict signals, checking a background run, or choosing CI lanes.
+Tracks `cowork-harness 4.0.0` (baseline `desktop-2.9939.4`). Read it when running a scenario, recording or placing a cassette, reading verdict signals, checking a background run, or choosing CI lanes.
 
 ## Part II — RUN, RECORD & LOCK
 
@@ -57,6 +57,16 @@ Neither question is answered by passing `--allow-host-inventory-fixture` to get 
 flag is consent for a recording you intend to make, and reaching for it as a load-check habit is how it
 stops meaning anything.
 
+**`record <file>` exit codes.** `2` means the scenario did not load. `1` means it loaded and this record
+was refused: before the spend (`on_unanswered: prompt`, an unsatisfiable assert pairing, the host-inventory
+destination refusal, a slug collision, a scenario that resolves no model, and the `--max-budget-usd`
+refusal — `1` on `record` since 4.0.0, still `2` on `run`/`skill`), or after it, once the agent has
+finished: a failing verdict without `--allow-failing`, an assert on an artifact too large to commit (also waived by `--allow-failing`), a
+quarantined inventory finding, or any other error before the cassette is written. Only the after-the-run
+refusals report the run: under `--output-format json` they carry it in `results[0]` (verdict and
+cost) with `error.category: "runtime"`; every pre-spend refusal, and a run that throws before returning a
+result (an unanswered gate), has `results: []`.
+
 **Decide WHERE the cassette lives before you record it — a cassette cannot be moved afterwards.**
 Without `--out`, `record` writes `cassettes/<scenario-name-slug>.cassette.json` (gitignored by
 default); pass `--out <path>` to put it somewhere tracked, e.g. `examples/replays/<name>.cassette.json`.
@@ -96,7 +106,11 @@ certify.) (A token-free probe of "which gates fire" isn't possible — gates are
 Run artifacts are written to `~/.cowork-harness/runs/…` by default — **outside any working tree**, so a run
 launched from a repo root never drops sensitive skill inputs/outputs into it. Pass `--run-dir <path>` (or set
 `COWORK_HARNESS_RUNS_DIR`) to relocate; in CI point it at a workspace path so an artifact-upload step can
-collect the runs.
+collect the runs. The runs dir is also where `--max-budget-usd` reads its cost history: pointed at a fresh or
+per-job directory it finds no priced run for the scenario, warns `no priced run history … proceeding
+UNCAPPED`, and runs with no cap (a batch's estimate becomes a lower bound; only the `--concurrency 1`
+running total still stops it). To keep the cap, leave `--run-dir` at the default, or reuse the same
+directory across invocations (a CI cache, say) so it holds at least one priced run of that scenario.
 
 #### Validate a skill against real documents (not a cassette)
 
@@ -320,6 +334,6 @@ than a stuck `"running"`.)
 ### Place assertions in the right CI lane
 
 CI placement: a **token-free `replay` PR gate** (content/structure only) + a **nightly live `run`**
-(filesystem/egress). Fastest setup: `uses: yaniv-golan/cowork-harness@v3` (a packaged GitHub Action with a
+(filesystem/egress). Fastest setup: `uses: yaniv-golan/cowork-harness@v4` (a packaged GitHub Action with a
 PR job-summary reporter). See `references/ci-recipe.md` for the Action, the manual step-by-step form, and
 the four-stage pipeline.

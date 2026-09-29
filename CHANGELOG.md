@@ -6,12 +6,15 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [4.0.0] — 2026-09-29
+
 ### Changed — BREAKING (requires a major bump; see [SPEC.md §12](./SPEC.md#12-versioning--the-10-compatibility-contract))
 
 - **`lint --strict` now fails only on ERROR and WARN, and hides INFO.** Under `--strict` the default
   `--min-severity` is WARN, so an INFO finding is neither printed nor failing. Without `--strict` the
   default is still INFO, and an explicit `--min-severity` always wins. `lint-skill --strict` already never
-  failed on INFO, so the two flags now agree by default.
+  failed on INFO, so the two flags now agree by default. SPEC §12 now states the rule this follows: a flag's
+  default is part of its meaning, so changing it is breaking.
   - *Who is affected:* anyone running bare `lint --strict`, including the packaged Action with
     `command: lint` and `strict: true`. A scenario that failed only on INFO now passes. A step that
     already passes `--strict --min-severity WARN` behaves exactly as before.
@@ -30,7 +33,7 @@ All notable changes to this project are documented here. The format is based on
     spending` in the error message (`error.message` in the JSON envelope).
 - **`fidelity:` is required in every scenario.** It defaulted to `container`, with a warning since 2.4.0.
   A scenario without the key no longer loads: `run` (a file or a directory) and `record <file>` exit 2 (usage) before anything runs,
-  `record <dir/> --dry-run` lists the file as broken, and `lint` reports ERROR `scenario-invalid` (and
+  `record <dir/>` (and its `--dry-run`) lists the file as broken and exits 1, and `lint` reports ERROR `scenario-invalid` (and
   ERROR `fidelity-missing`, which replaces the `fidelity-defaulted` WARN) without `--strict`. The error
   names the fix. The published `schema/scenario.schema.json` now lists `fidelity` as required, with no
   default.
@@ -85,6 +88,8 @@ All notable changes to this project are documented here. The format is based on
   - *To fix:* set `model:` in the session file, which keeps the model part of the scenario (recommended
     for anything you re-run or compare). Or pass `--model <id>`, or set `COWORK_HARNESS_MODEL` (for
     example in `.env`) as a machine default.
+  - *`scaffold <run>`* output now opens with a `# MODEL:` comment saying the generated scenario's inline
+    session pins no model, and how to supply one.
   - *Sessions with committed cassettes:* a session file's `model:` is part of the session fingerprint, so
     adding it to a session that cassettes were recorded against makes `verify-cassettes` report them stale
     (exit 1) until you re-record them. To migrate without re-recording, supply the model with `--model` or
@@ -93,7 +98,6 @@ All notable changes to this project are documented here. The format is based on
   - *Action users:* `command: run` needs a model the same way. Set it in the session, pass the new `model`
     input, or use `extra-args: --model <id>`. A job-level `env: COWORK_HARNESS_MODEL` also works. Pin
     `version: "^3"` to defer the change.
-
 - **`COWORK_HARNESS_OUTPUT_FORMAT=json` selects JSON on every command's success path.** `doctor`, `status`,
   `verify-run`, `vm`, `analyze-skill`, `replay`, `verify-cassettes` and `critique` honoured the variable
   only when they failed: a failure printed the JSON error envelope, a success printed human text on
@@ -109,6 +113,20 @@ All notable changes to this project are documented here. The format is based on
   - *Who is affected:* a consumer that read `ok` from `record --allow-failing` as the run's verdict,
     including the packaged Action's `ok` output for `command: record`.
   - *To keep the old behaviour:* read `.results[0].verdict.pass` instead of `.ok`.
+- **A `record` refusal after the run is category `runtime` and carries the run it refused.** Once the
+  agent has finished, anything that stops the cassette being written — a failing verdict without
+  `--allow-failing`, an assert on an artifact too large to commit (also waived by `--allow-failing`), a quarantined host/machine-inventory
+  finding, or any other error before the write — still exits 1 with `ok: false`, but its category is
+  `runtime` (it was `usage`: the scenario loaded and ran, so it is not a usage error), the run is in
+  `results[0]` beside the error (a single file) or on the `failed` item's `verdict`/`result` (a batch),
+  and a batch counts its cost toward `--max-budget-usd`'s running total, which stops a batch only at
+  `--concurrency 1`. These refusals printed `results: []`, so `.results[0].verdict.pass` raised and the
+  run's cost was lost. A refusal before the run (credentials, model, budget, policy), and a run that ends
+  in a thrown error before returning a result (an unanswered gate, say), still have `results: []`.
+  - *Who is affected:* a consumer that branched on `error.category == "usage"` for these refusals, or
+    that assumed a non-null `error` means an empty `results`.
+  - *To keep the old behaviour:* none; read `error.category` as `runtime` for them, and `results[0]` for
+    the run.
 - **`gates <dir>` without `--follow` refuses a directory that does not exist, and a malformed gate
   request.** Both exited 0 with nothing printed, which is also what a directory with no pending gate
   prints. A missing directory is now a usage error and a request that cannot be parsed is a runtime
@@ -142,6 +160,17 @@ All notable changes to this project are documented here. The format is based on
 
 ### Upgrade notes
 
+- **Cassettes: no re-record needed for this release's harness changes; a cassette recorded through
+  `baseline: latest` needs a re-stamp or a re-record for the new baseline.** Nothing moved under
+  `src/runtime`, `src/hostloop` or `src/agent`. `src/session.ts` and `src/staging` changed how an input
+  that does not exist or does not load is reported, and when it is checked, not what a run stages or
+  spawns. `latest` now resolves to `desktop-2.9939.4`, so `verify-cassettes` reports a `baseline` finding
+  on a cassette recorded through it against 2.9939.2. The recorded contract (spawn env, system prompt,
+  sub-agent append, prompt assets, egress allowlist) is byte-identical between the two, so a re-stamp is
+  sound. A re-stamp is a hand edit: set the cassette's `fingerprint.baseline` to `"2.9939.4"`, one
+  line per cassette, no run ([docs/cassette.md](./docs/cassette.md#cassette-versioning), "Clearing a drifted
+  baseline"). A re-record does the same and also picks up agent 2.1.284. Only a scenario using the object form of
+  `tool_called` / `tool_not_called` stamps v13; every other cassette still stamps v12.
 - **`lint` reports two new WARNs.** `transcript-command-shaped` flags a `transcript_*` value that looks
   like a shell command: it checks what the agent *said*, not what *ran*. `tool-input-regex-redactable`
   flags a negative tool-input check that a committed (redacted) cassette cannot evaluate. A CI step
@@ -183,15 +212,13 @@ All notable changes to this project are documented here. The format is based on
     the harness and in Cowork today.
   - `desktopInitSurface` is observed from **2 init frames, both from a scheduled task**, the same kind
     of session as 2.9939.2's. The tool surface is identical.
-  - No live pass has run against it yet.
-  - **The committed cassettes are re-stamped, not re-recorded.** The three in `examples/replays/` and
-    `test/fixtures/tool-call-dispatch/dispatch-shell.cassette.json` now name `2.9939.4` in
-    `fingerprint.baseline`, but the recordings are unchanged: three were made against agent 2.1.281, and the protocol-tier
-    one against the host CLI (2.1.282). The
-    re-stamp is sound only because the recorded contract (spawn env, system prompt, sub-agent append,
-    prompt assets) is byte-identical between the two releases; `verify-cassettes` is clean and all four
-    replay green under `--strict`. A real re-record is owed.
-
+  - Desktop's raw feature cache moved (378 → 384 entries); the 32 gates the harness tracks read the same
+    values as in 2.9939.2.
+  - A live pass ran against it on 2026-09-29, recorded in `DESIGN.md`.
+  - **The committed cassettes are re-recorded** against it (agent 2.1.284): the three in
+    `examples/replays/` and `test/fixtures/tool-call-dispatch/dispatch-shell.cassette.json`, each on its
+    original model. Tools called, verdicts, fingerprints and the frozen scenario are unchanged;
+    `verify-cassettes` is clean and all four replay green under `--strict`.
 - **The packaged Action takes a `model` input** for the live `run` lane. It is exported as
   `COWORK_HARNESS_MODEL` when set, so it fills in where a scenario's session sets no `model:`. Left empty,
   it exports nothing, so a job-level `COWORK_HARNESS_MODEL` still applies.
@@ -202,14 +229,17 @@ All notable changes to this project are documented here. The format is based on
   every tier. It fails closed: an unpaired call, a truncated result or input that cannot settle a
   predicate, or a result.json without the new evidence reports *evidence unavailable*, never a pass.
   `{tool: X}` alone behaves exactly like `tool_called: X`. The tier refusal and load-time regex checks
-  cover the new form.
+  cover the new form, and a `count` whose `min` is greater than its `max` is refused at load. A passing
+  `tool_not_called` names the matching calls outside its scope that it did not check.
 - **`RunResult.toolCalls`:** every observed tool call with its top-level inputs (each capped at 10 KB,
   flagged when truncated) and its origin. **`RunResult.toolResults[].assertTextTruncated`** is now part
   of the typed result shape.
 - **Cassette format v13** (`schema/cassette.v13.json`), stamped only by scenarios that use the object
   form.
-- **Lint:** `transcript-command-shaped` (WARN), `tool-input-regex-redactable` (WARN), and
-  `tool-input-shell-tier` (INFO: a `Bash` command check at `hostloop`/`cowork` should list both shells).
+- **Lint:** `transcript-command-shaped` (WARN), `tool-input-regex-redactable` (WARN),
+  `tool-input-shell-tier` (INFO: a `Bash` command check at `hostloop`/`cowork` should list both shells),
+  and `tool-called-always-passes` (INFO: `count: {min: 0}` with no `max` is satisfied by any number of
+  calls, including none).
   The tier-vacuity and gate-witness lints now read the object form.
 - **`record` warns** when redaction rewrote a negative tool-input regex, the bytes it matched, or any
   field (or paired result) such a check reads — the common host-path case — and names the ways out:
@@ -245,7 +275,6 @@ All notable changes to this project are documented here. The format is based on
   `unknown`) is kept only by `any`, and a narrowed scope counts those as `unknownOrigin` and calls absent
   from `toolCalls` as `unclassified`. **`--per-call`** adds one row per call with its duration, or "no result" when it
   never paired.
-
 - **`--dotenv` and `--run-dir` after the subcommand, on every command.** Both still work before it.
   Each command's own parser takes them, so a `--dotenv`-shaped value of another flag is never taken as
   the flag. Precedence is unchanged (`process.env` > `--dotenv` > `./.env` > `<install>/.env`;
@@ -260,6 +289,9 @@ All notable changes to this project are documented here. The format is based on
   with the flag-built form, or asking it for json (`--output-format json`, or a
   `COWORK_HARNESS_OUTPUT_FORMAT=json` default without `--output-format text`), is a usage error that says
   why.
+- **`COWORK_HARNESS_FORBID_SPAWN=1`** refuses to launch a model anywhere the harness would (`run`, `skill`,
+  `record`, `chat`, the `--decider-llm` transport), after every load-time check. It exists for test suites:
+  a regressed load-time refusal fails red instead of starting a real agent.
 - **`--allow-stall` on `skill` and `probe-dispatch`:** the open-ended lanes' spelling of `allow_stall:
   true`, which these lanes had no `assert:` block to carry. `critique` forwards it to the task turn.
 
@@ -277,7 +309,6 @@ All notable changes to this project are documented here. The format is based on
   size caps' stamp in `scenario.py`.
 - **SPEC §12 now states for the RunResult envelope what it already stated for the others:** renaming or
   removing a key, or changing an existing key's meaning, is breaking; adding one is not.
-
 - **The `stalled` and `ended_with_question` messages name the opt-out the lane accepts:** `pass
   --allow-stall` on `skill` / `probe-dispatch`, `assert allow_stall: true` on a scenario.
 - **A host-inventory flag given to the wrong command names the command that owns it.**
@@ -289,6 +320,8 @@ All notable changes to this project are documented here. The format is based on
   unchanged.
 - **A trailing `--dotenv` / `--run-dir` is no longer refused** with "is a GLOBAL flag and must come
   BEFORE the subcommand"; it is applied (see *Added*).
+- **The companion skill's description also names measuring tool-call timing (`toolDurations` / `trace`)
+  and debugging a failed run or verdict,** so a request about either loads the skill.
 
 ### Fixed
 
@@ -355,11 +388,45 @@ All notable changes to this project are documented here. The format is based on
   `--choose` form, instead of an internal error. A gate request that exists but cannot be read or parsed,
   or an answer that cannot be written (an unwritable directory), is a `runtime` error, as `gates` reports
   it; the message names the request file's own error.
-- **A session `effort:` the schema rejects, or that the model does not offer, and an upload whose file name
-  cannot be a mount name (a `:`), are usage errors** with one readable line (the full schema issues in
-  `error.hint`), instead of an internal error carrying a raw issue array.
-- **`lint` under `--output-format json` no longer turns a python exit 0 without JSON into a green:** it is
+- **A session file the schema rejects is a usage error** with one readable line (the full schema issues in
+  `error.hint`), instead of an internal error carrying a raw issue array. So are an `effort:` the model does
+  not offer and an upload whose file name cannot be a mount name (a `:`).
+- **`lint` and `lint-skill` under `--output-format json` no longer turn a python exit 0 without JSON into a green:** it is
   an internal error (exit 2). The only known trigger was `--help`, which no longer reaches that path.
+- **The CI recipe's `lint` Action example sets `strict: true`.** Without it the step failed only on
+  ERROR, so a WARN finding printed and the step still passed.
+- **SPEC: a session file's `model:` is part of the session fingerprint.** SPEC said the fingerprint did not
+  cover the model, so a model swap went undetected; `verify-cassettes` does report a cassette stale when
+  the session file's pinned model changes. A model supplied by `--model` or `COWORK_HARNESS_MODEL` is not
+  in the fingerprint.
+
+### Documentation
+
+- **Finding a plugin's own files from the in-VM shell: the recipe now works for an installed plugin.**
+  The `find … -maxdepth 3 -type d -name '<plugin-name>'` recipe in `docs/plugin-root.md` never matched a
+  plugin installed through Cowork's UI, whose directory is `.remote-plugins/plugin_<id>` (named by id),
+  and for a marketplace plugin it stopped above the version directory. It now searches
+  `.local-plugins` and `.remote-plugins` for the skill's own `skills/<skill-name>/SKILL.md`, with no
+  depth limit. The same search is in the skill's `scenario-schema.md` reference.
+- **Which plugin key to use:** to mirror a plugin installed through Cowork's UI, declare it under
+  `remote_plugins:`; `local_plugins:` mounts it through the local-uploads channel, two directory levels
+  deeper (`docs/plugin-root.md`, `docs/session.md`, the skill's `scenario-schema.md`).
+- **New fidelity gap:** at `hostloop` the plugin path the agent substitutes into a skill's text is the
+  run dir's staged copy, whose `/mnt/.local-plugins/…` suffix matches the VM path; real Cowork
+  substitutes `$TMPDIR/claude-hostloop-plugins/<hash>/<basename>/…` (a symlink Desktop makes only when
+  the host plugin path contains a space; otherwise the raw host path). Both are dead in the VM shell, but a skill that
+  rewrites the host path into a VM path by its suffix passes in the harness and fails in Cowork
+  (`docs/fidelity-gaps.md`).
+- **Asserting on a `context: fork` skill's answer.** `subagent_output_contains` covers what a run
+  dispatches, not a fork skill invoked through the `Skill` tool, whose answer comes back as the `Skill`
+  tool result; `semantic_matches` does not grade that answer either, even with `include_subagent_text`.
+  For a foreground fork, use `tool_result_matches` anchored on the result agent 2.1.284 builds,
+  `Skill "<name>" completed (forked execution).` (a backgrounded fork's result carries no answer)
+  (`docs/scenario.md`, the skill's assertion references).
+- **What a run's cost counts:** `cost.usd` (and the index row's `costUsd`) is the agent session's own
+  spend and leaves out the `semantic_matches` judge and the LLM decider. `max_cost_usd`, `stats` and
+  `--max-budget-usd` inherit that scope (`docs/cli.md`, `docs/scenario.md`, `docs/stats.md`, the skill's
+  `measurement.md`, `debugging.md` and `assertion-catalog.md`).
 
 ## [3.10.0] — 2026-09-27
 

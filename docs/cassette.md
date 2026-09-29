@@ -381,8 +381,8 @@ policy). When a gate is actually answered by a live decider (or `--on-unanswered
 gains an `authoring: { nonDeterministic: true, channel }` stamp and `record` warns that **re-recording
 may drift** — but the cassette itself **replays deterministically**, because the chosen answers are
 frozen into it. A `--decider-dir` that goes unused (your scripted `answers:` covered every gate) leaves
-the cassette unstamped. (Note: `--allow-failing` only relaxes the post-run *verdict* gate — it does not
-salvage an unanswered gate.)
+the cassette unstamped. (Note: `--allow-failing` relaxes the post-run *verdict* gate and the too-large-artifact refusal —
+both become warnings — but it does not salvage an unanswered gate.)
 
 ## Artifact scrubbing at record time
 
@@ -969,10 +969,18 @@ document, last, right before the exit (progress lines stay on stderr):
 
 `ok` is the exit code's verdict on every `record` path (ok ⇔ exit 0) — a recorded item's own verdict is
 `items[].verdict.pass`, a single file's is `results[0].verdict.pass`, and the two differ when
-`--allow-failing` records a failing run. A file that does not load is a `failed` item. A batch the
+`--allow-failing` records a failing run. A refusal after the agent finished — a failing verdict
+without `--allow-failing`, an assert on an artifact too large to commit (also waived by `--allow-failing`), a quarantined inventory finding,
+or any other error before the cassette is written — still publishes the run: a batch's `failed` item
+carries its `verdict` and `result` (and its cost counts toward the running total, which stops a batch only
+at `--concurrency 1`), and a single file exits 1 with `ok: false`, `error.category: "runtime"` and the run
+in `results[0]`, so `.results[0].verdict.pass` and the run's cost stay readable. A file that does not load
+is a `failed` item. A batch the
 `--max-budget-usd` cap stopped early exits 0, so `ok: true` can come with `skipped-budget` items. A sweep
 with nothing stale prints `ok: true` and `items: []`. A refusal before the first recording (credentials,
-an unresolved model, the budget pre-flight, a slug collision) prints the standard error envelope instead.
+an unresolved model, the budget pre-flight, a slug collision) prints the standard error envelope instead,
+with `results: []` because no run happened; so does a run that throws before returning a result (an
+unanswered gate).
 
 ### Parallel re-records (`--concurrency`)
 

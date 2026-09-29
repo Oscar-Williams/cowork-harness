@@ -146,14 +146,22 @@ export function jsonEnvelope(command: string, results: RunResult[], opts: JsonEn
   return JSON.stringify(jsonEnvelopeObj(command, results, opts));
 }
 
-/** The error envelope (compact, single line). */
-export function jsonError(command: string, category: ErrCategory, message: string, hint?: string): string {
+/** The error envelope (compact, single line). `results` is `[]` unless a run completed before the refusal —
+ *  `record` refusing to freeze a failing run passes that run, already projected by `publishedResult`, so the
+ *  consumer still reads its verdict and cost. */
+export function jsonError(
+  command: string,
+  category: ErrCategory,
+  message: string,
+  hint?: string,
+  results: ReturnType<typeof publishedResult>[] = [],
+): string {
   return JSON.stringify({
     tool: "cowork-harness",
     version: pkgVersion(),
     command,
     ok: false,
-    results: [],
+    results,
     error: { category, message, ...(hint ? { hint } : {}) },
   });
 }
@@ -185,7 +193,8 @@ export function isJsonOutput(args: string[]): boolean {
  *  contract names two exceptions that exit `1` instead of the general `2`: `sync` hard-failures (missing
  *  baseline version fields, a refused empty allowlist, unknown deltas) and a `status`/`verify-run` runtime
  *  failure reading a prior run's output (SPEC.md:428-436). Every EXISTING call site omits `exitCode` and
- *  keeps its current behavior exactly. */
+ *  keeps its current behavior exactly. `results` is for a refusal that comes after a completed run (see
+ *  `jsonError`); every other call site omits it and prints `results: []`. */
 export function fail(
   command: string,
   category: ErrCategory,
@@ -193,8 +202,9 @@ export function fail(
   hint: string | undefined,
   json: boolean,
   exitCode?: 1 | 2 | 3,
+  results?: ReturnType<typeof publishedResult>[],
 ): never {
-  if (json) out(jsonError(command, category, message, hint));
+  if (json) out(jsonError(command, category, message, hint, results));
   else {
     log(message);
     if (hint) log(hint);

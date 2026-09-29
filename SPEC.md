@@ -602,6 +602,18 @@ there are three families:
 `--rerecord-stale`, and `--dry-run`): `ok` ⇔ exit `0`. A recording's own verdict is published beside it —
 `results[0].verdict.pass` for a single file, `items[].verdict.pass` for a batch — and the two differ exactly
 when `--allow-failing` records a failing run on purpose (exit `0`, `ok: true`, `verdict.pass: false`).
+**A `record` refusal after the run publishes the run.** Once the agent has finished and returned a result,
+anything that stops the cassette being written — a failing verdict without `--allow-failing`, an assert on
+an artifact too large to commit (also waived by `--allow-failing`), the record-time scan quarantining a host/machine-inventory finding, or any
+other error before the write (a cassette directory that cannot be created, say) — exits `1` with
+`ok: false`, `error.category: "runtime"`, and that run in `results[0]` (a single file) or on its `failed`
+item as `verdict`/`result` (a batch), and its cost counts toward a batch's `--max-budget-usd` running total
+(which stops a batch only at `--concurrency 1`). It is `runtime`, not `usage`, because the scenario loaded
+and ran; what refused it is the run's own evidence. Every other failure has `results: []` and no
+`verdict`/`result` on a batch item: a refusal before the run (credentials, an unresolved model, the budget
+pre-flight, a policy refusal) and a run that ends in a thrown error before it returns a result (an
+unanswered gate, say). Before 4.0.0 the post-run refusals printed `results: []` with category `usage`, so
+the run they refused, and its cost, were not in the document.
 Before 4.0.0 single-file `record` set `ok` from the verdict, so that case printed `ok: false` beside exit
 `0`; and `record <empty dir/> --dry-run` printed `ok: true` beside exit `2`.
 The batch arms (`record <dir/>`, `record --rerecord-stale <dir/>`) print one payload-shaped document, last,
@@ -613,7 +625,7 @@ right before the exit:
   "items": [ { "file?": "<scenario>", "cassette?": "<cassette>",
                "status": "recorded" | "failed" | "skipped-budget",
                "error?": "string",                 // failed only
-               "verdict?": { "pass": bool, ... }, // recorded only: the run's verdict
+               "verdict?": { "pass": bool, ... }, // recorded, or failed after the run: the run's verdict
                "result?": { /* RunResult + verdict/provenance/outcome, as single-file record publishes it */ } } ],
   "skipped?": ["<non-scenario file>"],             // <dir/> only: files without a `prompt:`
   "error": null }
@@ -714,10 +726,14 @@ assertions (never user-authored themselves):
 
 **Error envelope** — a thrown failure (not an assertion failure) under `--output-format json`:
 ```jsonc
-{ "tool":"cowork-harness","version":"...","command":"...","ok":false,"results":[],
+{ "tool":"cowork-harness","version":"...","command":"...","ok":false,
+  "results":[],  // [] except record's post-run refusal: the refused run, beside the non-null error
   "error": { "category": "usage|unanswered|boundary|runtime|internal", "message": "string", "hint?": "string" } }
 ```
 Categories come from TYPED errors (`UnansweredError`→`unanswered`, `BoundaryError`→`boundary`).
+`results` is `[]` with one exception: when `record` refuses to write a cassette after the agent finished,
+the run it refused is in `results[0]` beside the non-null `error` (category `runtime`, exit `1`; see
+`record` above).
 
 **Exit codes** (branchable without parsing): `0` all-pass · `1` assertion/agent failure · `2` usage /
 unanswered-under-`fail` / runtime · `3` boundary/integrity. (`--output-format json` writes via `writeSync` so the envelope
@@ -1014,7 +1030,8 @@ Covered-surface changes follow semver as of `1.0.0` — see [RELEASING.md](./REL
   a `runtime`-category pre-spend refusal also exits `2`, alongside usage errors.
 - *Scenario schema (tightened validation).* `fidelity:` is required; before 4.0.0 it defaulted to
   `container`. No exit code changes meaning: a scenario without the key is a loader rejection, so
-  `run`/`record` exit `2` as for any file that does not load (§11). Its knock-on in the
+  `run` (a file or a directory) and `record <file>` exit `2` as for any file that does not load, and
+  `record <dir/>` lists it as broken and exits `1`, as for any broken file in a batch (§11). Its knock-on in the
   *`verify-cassettes` envelope*: a cassette's recorded scenario source that the loader rejects is an
   `unverifiable[]` entry (exit `3`), where before 4.0.0 it was a non-failing note, so a gate that is
   green on 3.x can fail on 4.0.0.
@@ -1030,6 +1047,12 @@ Covered-surface changes follow semver as of `1.0.0` — see [RELEASING.md](./REL
 - *RunResult envelope (what `ok` means) — `record`.* `record`'s `ok` is "exited 0" in every arm (§11): a
   single-file `--allow-failing` recording of a failing run now says `ok: true` (it said `false`), and
   `record <empty dir/> --dry-run` says `ok: false` (it said `true`, beside exit `2`).
+- *Error envelope (category and `results`) — `record`.* A `record` refusal after the run (a failing
+  verdict without `--allow-failing`, an assert on an artifact too large to commit (also waived by `--allow-failing`), a quarantined
+  inventory finding, or any other error before the cassette is written) has category `runtime`; it was
+  `usage`. Its error envelope carries the refused run in `results[0]` beside the non-null `error`, and a
+  batch's `failed` item carries `verdict`/`result`; both were absent. The exit code (`1`) is unchanged
+  (§11).
 - *CLI surface (an exit-code meaning).* `gates <dir>` without `--follow` exits `2` (usage) on a directory
   that does not exist, and `2` (runtime) on a malformed gate request; both exited `0`. A path that is not
   a directory is a usage error with or without `--follow`.

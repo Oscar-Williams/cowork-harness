@@ -170,6 +170,38 @@ export function recordErrorText(e: unknown): string {
   return msg;
 }
 
+/** A `record` refusal that comes AFTER the run: the agent ran and was paid for, so the error carries the
+ *  RunResult and each catch site publishes it — `results[0]` on a single file (category `runtime`), the
+ *  item's `verdict`/`result` in a batch — and a budgeted batch counts its cost. Thrown directly by the named
+ *  refusals (a failing verdict, an assert on an artifact too large to commit, a quarantined inventory
+ *  finding), and wrapped around anything else that throws after the run (a redaction that would change the
+ *  verdict, an I/O error). Every other record refusal happens before any spend and carries no run. */
+export class RecordPostRunRefusalError extends Error {
+  constructor(
+    message: string,
+    readonly result: RunResult,
+    options?: { cause?: unknown },
+  ) {
+    super(message, options);
+    this.name = "RecordPostRunRefusalError";
+  }
+}
+
+/** The live verdict failed and `--allow-failing` was not passed. */
+export class RecordVerdictRefusedError extends RecordPostRunRefusalError {
+  constructor(message: string, result: RunResult) {
+    super(message, result);
+    this.name = "RecordVerdictRefusedError";
+  }
+}
+
+/** The run a post-run refusal refused, as a batch item publishes it (empty for any other failure). */
+function refusedRunFields(e: unknown): Pick<RecordBatchItem, "verdict" | "result"> {
+  if (!(e instanceof RecordPostRunRefusalError)) return {};
+  const published = publishedResult(e.result);
+  return { verdict: published.verdict, result: published };
+}
+
 /**
  * Build the cassette's `environment` provenance block. Pure and exported ONLY so it is unit- and
  * mutation-testable OFFLINE: `recordScenarioObject` needs a live agent spawn, so an inline stamp could be
@@ -3699,8 +3731,8 @@ export const RECORD_USAGE =
   '       answer gates LIVE: [--decider-dir <dir>] (single scenario only) | [--decider-llm [--intent "<one line>"] [--decider-model <id>]] | [--on-unanswered fail|first]\n' +
   "       (a live decider flags the cassette non-deterministic — re-recording may drift; replay stays deterministic. --rerecord-stale rejects these flags.)\n" +
   "       --quiet: suppress the --dry-run readiness/scenario preview block (✗ broken:/skipped: lines and exit codes are unaffected).\n" +
-  "       NOTE: --allow-failing only relaxes the post-run VERDICT gate; it does NOT salvage an unanswered gate (that throws before any cassette is written — use --on-unanswered first / a decider).\n" +
-  "       --output-format json: one document on stdout, last. Its `ok` is the exit code's verdict (ok ⇔ exit 0) on every path; the recorded run's verdict is results[0].verdict.pass (a file) or items[].verdict.pass (a dir/ batch or --rerecord-stale, one item per scenario or cassette: status recorded|failed|skipped-budget). They differ when --allow-failing records a failing run.";
+  "       NOTE: --allow-failing relaxes the post-run VERDICT gate and the too-large-artifact refusal (both become warnings); it does NOT salvage an unanswered gate (that throws before any cassette is written — use --on-unanswered first / a decider).\n" +
+  "       --output-format json: one document on stdout, last. Its `ok` is the exit code's verdict (ok ⇔ exit 0) on every path; the recorded run's verdict is results[0].verdict.pass (a file) or items[].verdict.pass (a dir/ batch or --rerecord-stale, one item per scenario or cassette: status recorded|failed|skipped-budget). They differ when --allow-failing records a failing run. A refusal after the agent finished (a failing verdict without --allow-failing, an assert on an artifact too large to commit (also waived by --allow-failing), a quarantined inventory finding, or any other error before the cassette is written) exits 1 with ok:false, error.category runtime, and the run in results[0] or on its failed item; a refusal before the run (credentials, model, budget, policy) and a run that throws before returning a result (an unanswered gate) have results: [].";
 
 /** `record <scenario.yaml | dir> [--out <file>] [--rerecord-stale] [--no-redact] [--allow-failing]` —
  *  run live + save a cassette. A single file records one; a dir batches; --rerecord-stale treats
@@ -3732,8 +3764,9 @@ export function hostInventoryFlagHint(command: "record" | "replay" | "verify-cas
 }
 
 /** One entry of a `record <dir/>` / `record --rerecord-stale <dir/>` JSON envelope. `file` is the scenario
- *  (dir batch), `cassette` the cassette written or re-recorded. A recorded item carries the run's
- *  `verdict` and the `result` in the same published projection single-file `record` uses. */
+ *  (dir batch), `cassette` the cassette written or re-recorded. A recorded item — and a failed item whose
+ *  run finished but was refused before the cassette was written (see RecordPostRunRefusalError) — carries the run's `verdict` and the `result` in the same
+ *  published projection single-file `record` uses. */
 export interface RecordBatchItem {
   file?: string;
   cassette?: string;
@@ -4433,7 +4466,8 @@ export async function cmdRecord(args: string[]) {
         // tier on the next record — a recording-shaping change nobody chose.
         const why = e instanceof FidelityMissingError ? fidelityMissingForCassette(e, cassette.scenario) : recordErrorText(e);
         log(`  ✗ ${tag} ${cp}: ${why}`);
-        staleItems[i] = { cassette: cp, status: "failed", error: why };
+        if (e instanceof RecordPostRunRefusalError) staleBudget.add(budgetFields(e.result).costUsd);
+        staleItems[i] = { cassette: cp, status: "failed", error: why, ...refusedRunFields(e) };
         return false;
       }
     });
@@ -4571,7 +4605,8 @@ export async function cmdRecord(args: string[]) {
       } catch (e) {
         const why = recordErrorText(e);
         log(`  ✗ ${tag} ${why}`);
-        batchItems[i] = { file: f, status: "failed", error: why };
+        if (e instanceof RecordPostRunRefusalError) batchBudget.add(budgetFields(e.result).costUsd);
+        batchItems[i] = { file: f, status: "failed", error: why, ...refusedRunFields(e) };
         return false;
       }
     });
@@ -4650,6 +4685,13 @@ export async function cmdRecord(args: string[]) {
     // A scenario naming no baseline is a usage mistake like any other entry point's: exit 2 with the
     // valid baselines as the hint, not record's general exit 1.
     if (e instanceof UnknownBaselineError) return fail("record", "usage", `record: ${e.message}`, e.hint, asJson);
+    // A post-run refusal (failing verdict, an assert on an artifact too large to commit, a quarantined
+    // inventory finding) comes AFTER a completed, paid run: publish that run in `results` (the same
+    // projection the success path prints) so `results[0].verdict.pass` and the cost stay readable. The
+    // category is `runtime`, not `usage` — the scenario loaded and ran; what refused it is the run's own
+    // evidence. Exit 1 like every refusal of a scenario that loaded.
+    if (e instanceof RecordPostRunRefusalError)
+      return fail("record", "runtime", `record: ${e.message}`, undefined, asJson, 1, [publishedResult(e.result)]);
     return fail("record", "usage", `record: ${recordErrorText(e)}`, undefined, asJson, 1);
   } finally {
     channel?.close?.();
@@ -4839,6 +4881,24 @@ async function recordScenarioObject(
   // result here — never freeze it into a cassette, even under --allow-failing. The termination handler
   // owns the exit.
   await parkIfTerminating();
+  // Everything from here on runs after a completed, paid run. Any refusal or failure past this point is
+  // reported WITH that run (see RecordPostRunRefusalError), so no path loses the verdict or the cost.
+  try {
+    return await freezeRecordedRun(scenario, opts, extraPolicyDirs, result);
+  } catch (e) {
+    if (e instanceof RecordPostRunRefusalError) throw e;
+    throw new RecordPostRunRefusalError((e as Error).message ?? String(e), result, { cause: e });
+  }
+}
+
+/** The post-run half of `recordScenarioObject`: refuse, snapshot, scrub, redact and write the run it just
+ *  made. Every throw here is converted to a RecordPostRunRefusalError carrying `result` by the caller. */
+async function freezeRecordedRun(
+  scenario: Scenario,
+  opts: RecordOpts,
+  extraPolicyDirs: string[],
+  result: RunResult,
+): Promise<{ result: RunResult; cassettePath: string; artifacts: number; delta?: string }> {
   // Provenance: stamp from the RESULT, not the flag. result.nonDeterministic (execute.ts) is
   // usage-based — true only if a decision actually came back by:"llm"|"external"|"human"|"first". So a
   // present-but-unused --decider-dir (scripted answers covered every gate) stays deterministic and is NOT
@@ -4864,8 +4924,9 @@ async function recordScenarioObject(
       .filter((s) => s.severity === "fail")
       .map((s) => `${s.code}: ${s.message}`)
       .join("; ");
-    throw new Error(
+    throw new RecordVerdictRefusedError(
       `refusing to freeze a failing run: run result=${result.result}, but the live verdict FAILED — ${why} (re-run, or --allow-failing)`,
+      result,
     );
   }
   // RELOCATABLE session path (relative to the cassette dir) — metadata-only, keeps a moved bundle honest.
@@ -4972,7 +5033,7 @@ async function recordScenarioObject(
         `this passes at record (on-disk) but FAILS replay (no body). Raise --max-artifact-bytes / ` +
         `COWORK_HARNESS_MAX_ARTIFACT_BYTES, or assert a smaller artifact.`;
       if (opts.allowFailing) warn(`::warning:: record: ${msg}\n`);
-      else throw new Error(msg);
+      else throw new RecordPostRunRefusalError(msg, result);
     }
   }
   const timelineRaw = readTimeline(result.outDir);
@@ -5108,7 +5169,7 @@ async function recordScenarioObject(
     );
   } else if (leak.kind === "quarantine") {
     const q = quarantineCassette(cassette, scenario.name, cassettePath, scenario.fidelity, leak.detail, new Date().toISOString());
-    throw new Error(
+    throw new RecordPostRunRefusalError(
       `refusing to write ${cassettePath}: this recording carries THIS MACHINE's inventory, and that path is ` +
         `inside a git repo — committing it would publish your own tool stack.\n${leak.detail}\n` +
         `The recording was NOT discarded (you paid for it). It is quarantined at:\n  ${q.path}\n  ${q.path}.findings.txt\n` +
@@ -5120,6 +5181,7 @@ async function recordScenarioObject(
         `personal MCP servers/agents configured. If this inventory is genuinely part of the fixture, re-run ` +
         `with --allow-host-inventory-findings (NOT --allow-host-inventory-fixture, which only bypasses the ` +
         `pre-flight and deliberately leaves this scan in force).`,
+      result,
     );
   }
 
