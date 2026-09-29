@@ -1907,7 +1907,7 @@ async function cmdRun(rawArgs: string[]) {
   // paid for, and with their results lost to the refusal. After the model refusal, which this resolution
   // needs (an `effort:` is checked against the model). The pre-check is quiet: the run resolves again and
   // prints any warning (a COWORK_HARNESS_SOFT_MISSING exclusion) itself.
-  const badInputs: { file: string; message: string }[] = [];
+  const badInputs: { file: string; message: string; hint?: string }[] = [];
   for (let i = 0; i < files.length; i++) {
     const vacuous = tierVacuityRefusal(loaded[i], loadBaseline(loaded[i].baseline));
     if (vacuous) {
@@ -1918,16 +1918,17 @@ async function cmdRun(rawArgs: string[]) {
       launchSourcesPreflight(loaded[i], modelFlag, { quiet: true, ablateSkill: flags.ablateSkill });
     } catch (e) {
       if (!(e instanceof UsageError)) throw e;
-      badInputs.push({ file: files[i], message: e.message });
+      badInputs.push({ file: files[i], message: e.message, hint: e.hint });
     }
   }
-  // One file keeps the message executeScenario would have thrown, unprefixed; a batch names every offender.
+  // One file keeps the message (and hint) executeScenario would have thrown, unprefixed; a batch names every
+  // offender, one per line, without hints.
   if (badInputs.length)
     fail(
       "run",
       "usage",
       files.length === 1 ? badInputs[0].message : badInputs.map((b) => `${b.file}: ${b.message}`).join("\n"),
-      undefined,
+      files.length === 1 ? badInputs[0].hint : undefined,
       o.json,
     );
   if (maxBudgetUsd !== undefined && repeatN === undefined)
