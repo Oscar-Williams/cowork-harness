@@ -125,8 +125,10 @@ All notable changes to this project are documented here. The format is based on
   check: ablation drops the plugin from the run, but the path is still your input. An unresolved model is
   not refused: the preview still reports `"model": null`. Under `COWORK_HARNESS_SOFT_MISSING` a missing
   path is excluded instead, and the dry run now prints the exclusion warning the real run prints.
-  - *Who is affected:* a check that dry-runs `skill` against a folder that is created later.
-  - *To keep the old behaviour:* none; create the folder before the dry run.
+  - *`record <file> --dry-run`* makes the same check over the scenario's session (uploads, folders,
+    plugins, marketplaces, skills) and refuses a bad path with record's exit 1; it exited 0.
+  - *Who is affected:* a check that dry-runs `skill` or `record` against a path that is created later.
+  - *To keep the old behaviour:* none; create the path before the dry run.
 - **stdout under `--output-format json` is one framed document or nothing.** Not a covered envelope, listed
   so no JSON consumer is surprised:
   - `scaffold <run>` prints `{…, "command": "scaffold", "ok": true, "scenario": "<yaml>", "out": <path or
@@ -322,11 +324,15 @@ All notable changes to this project are documented here. The format is based on
   were reported as category `internal`, the category for a harness bug, and `run`/`skill` left a run dir
   with a `status.json` behind. The sources are now checked before the run dir is created. `record` still
   exits 1 for a refused recording.
-- **`verify-run` with a run dir that does not exist, or a scenario file that does not load, is a usage
-  error** (it was `runtime`). A directory that holds no completed run is still `runtime`. Exit 2 either way.
+- **`verify-run` with a run dir that does not exist or is a file, or a scenario file that does not load, is
+  a usage error** (it was `runtime`). A directory that holds no completed run is still `runtime`. Exit 2 either way.
 - **`answer <dir> --gate N --answer "q=a"` on a missing directory or gate is a usage error,** like the
-  `--choose` form, instead of an internal error. A gate whose answer cannot be written (an unwritable
-  directory) is a `runtime` error.
+  `--choose` form, instead of an internal error. A gate request that exists but cannot be read or parsed,
+  or an answer that cannot be written (an unwritable directory), is a `runtime` error, as `gates` reports
+  it; the message names the request file's own error.
+- **A session `effort:` the schema rejects, or that the model does not offer, and an upload whose file name
+  cannot be a mount name (a `:`), are usage errors** with one readable line (the full schema issues in
+  `error.hint`), instead of an internal error carrying a raw issue array.
 - **`lint` under `--output-format json` no longer turns a python exit 0 without JSON into a green:** it is
   an internal error (exit 2). The only known trigger was `--help`, which no longer reaches that path.
 
