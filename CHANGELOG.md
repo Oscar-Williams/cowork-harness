@@ -6,6 +6,37 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+
+- **`record --dry-run` reports the inputs a real record would refuse under a new `inputErrors[]` key.**
+  On a directory: an input path, effort or baseline name that the real `record` would refuse, a baseline
+  file that does not load, and a `tool_not_called` / `subagent_tool_absent` the scenario's tier can never
+  violate. On a single file, which already refuses a bad input path (exit 1): the tier-vacuous assertion,
+  and when a file has both, the refusal names the vacuity, as the real `record` does. Each entry is
+  `{file, message, hint?}`, with a `⚠ input error:` line on stderr that `--quiet` does not mute. The
+  preview's exit code and `ok` are unchanged: the real `record` fails that scenario, so treat an entry as a
+  failure to come (`jq -e '.ok and (.inputErrors == [])'` gates on both).
+
+### Fixed
+
+- **`run <dir/>` checks every scenario's input paths before the first one runs.** A plugin, skill, upload,
+  folder or marketplace path that did not exist was refused only when its scenario's turn came, after the
+  earlier scenarios had run and been paid for, and their results were not in the JSON output. The refusal
+  (exit 2, `usage`) now comes first and names every scenario with a missing path, an `effort:` its model
+  does not offer, or a baseline name that resolves nowhere. A single file's message is unchanged. `run
+  --repeat` is unchanged: a scenario with a missing path is still reported in its rollup. Two batches
+  change outcome: one whose earlier scenario creates (on the host) a path a later scenario names is now
+  refused up front, and one whose earlier scenario would have thrown now exits 2 before anything runs.
+- **A `tool_not_called` / `subagent_tool_absent` that the scenario's tier can never violate is refused
+  before the run directory is created.** It was refused after the run directory and its `status.json`
+  existed; now it leaves nothing behind, and `run <dir/>` (without `--repeat`) refuses it before the first
+  scenario runs.
+- **`chat` no longer leaves a run directory behind when an input path does not exist.** A missing skill
+  folder, `--plugin`, `--upload` or `--folder` was refused (exit 2) only after `chat` had created its run
+  directory; it is now checked first, as `run` and `skill` already do.
+- **`answer --output-format json` prints the standard frame on success**: it now carries `version` and
+  `error: null` beside `gate` and `answers`, like its error output and every payload-shaped command.
+
 ## [4.0.0] — 2026-09-29
 
 ### Breaking changes (requires a major bump; see [SPEC.md §12](./SPEC.md#12-versioning--the-10-compatibility-contract))

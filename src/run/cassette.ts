@@ -44,7 +44,8 @@ import {
   slugForPath,
   FidelityMissingError,
   unresolvedModelPreflight,
-  launchSourcesPreflight,
+  scenarioInputRefusal,
+  scenarioInputFindings,
 } from "./execute.js";
 import { unresolvedModelRefusal } from "./model-provenance.js";
 import { UsageError, UnknownBaselineError, compactSchemaError } from "../errors.js";
@@ -157,6 +158,12 @@ import { parse as parseYaml, YAMLParseError } from "yaml";
 // a bare writeSync does NOT block until drained once the fd is non-blocking.
 const out = (s: string) => writeAllSync(1, s + "\n");
 const log = (s: string) => writeAllSync(2, s + "\n");
+/** A dry run's `⚠ input error:` line. The verdict goes on the FIRST line: a multi-line message (the
+ *  tier-vacuity refusal has a second line) would otherwise bury it after the explanation. */
+const inputErrorLine = (file: string, message: string): string => {
+  const [first, ...rest] = message.split("\n");
+  return [`⚠ input error: ${file}: ${first} — will fail on the real record`, ...rest].join("\n");
+};
 
 /** Format a record error for the user. An `UnansweredError` carries the offered labels (and a closest-match
  *  suggestion) in `.hint`; the record catch sites historically printed only `.message`, so a scripted-answer
@@ -4023,6 +4030,12 @@ export async function cmdRecord(args: string[]) {
       // must not gate. A preview that refuses what the real path allows is worse than one that stays quiet:
       // it teaches operators to stop trusting the preview.
       const notes: { file: string; message: string; kind: "refuse" | "warn" }[] = [];
+      // An input the real record would refuse before it runs: a baseline name that resolves nowhere, a
+      // `tool_not_called` the tier can never violate, a declared path that does not exist or is the wrong
+      // kind. Path-INDEPENDENT (none depends on `--out`), and the real record fails that scenario — but this
+      // arm exited 0 on them through 4.0.0, and the dry-run exit code is a covered meaning, so they are
+      // reported under their own key, beside `ok` and the exit code, rather than as refusals.
+      const inputErrors: { file: string; message: string; hint?: string }[] = [];
       for (const f of disc.scenarios) {
         let sc;
         try {
@@ -4039,6 +4052,14 @@ export async function cmdRecord(args: string[]) {
         // the session is new I/O on this arm; a session that does not load is skipped, not refused.
         const noModel = unresolvedModelPreflight(sc, modelOverride);
         if (noModel) refusals.push({ file: f, message: noModel });
+        // The inputs, checked as executeScenario checks them — but only once a model resolves: the real
+        // record stops at the model refusal first, and without a model the effort check would report a
+        // confusing second reason for the same file.
+        else {
+          // A baseline file that does not load is listed too: the real record fails that item.
+          const bad = scenarioInputRefusal(sc, modelOverride, { unloadableBaseline: "report" });
+          if (bad) inputErrors.push({ file: f, message: bad.message, ...(bad.hint !== undefined ? { hint: bad.hint } : {}) });
+        }
         // Path-dependent: reported, never gating. `preSpendVerdicts` re-runs promptPolicyRejection, which is
         // already covered above — drop that one here rather than reporting it twice.
         for (const v of preSpendVerdicts(sc, defaultCassettePath(sc.name), {
@@ -4076,6 +4097,8 @@ export async function cmdRecord(args: string[]) {
             skipped: disc.skipped,
             broken: disc.broken,
             refusals,
+            // Would fail on the real record; not (yet) a refusal — see where it is collected.
+            inputErrors,
             // Advisory; deliberately a separate key from `refusals` so automation cannot mistake a guess
             // for a verdict, and does not gate on it.
             notes,
@@ -4097,6 +4120,8 @@ export async function cmdRecord(args: string[]) {
       const logFindings = () => {
         for (const b of disc.broken) log(`✗ broken: ${b.file}: ${stripScenarioPrefix(b.error, b.file)}`);
         for (const r of refusals) log(`✗ refused: ${r.file}: ${r.message}`);
+        // Survives --quiet like a refusal: it is a failure of the real record, not part of the preview.
+        for (const e of inputErrors) log(inputErrorLine(e.file, e.message));
       };
       if (!asJson) {
         for (const s of disc.skipped) log(`· skipped: ${s}`);
@@ -4185,15 +4210,26 @@ export async function cmdRecord(args: string[]) {
     // with exit 1. This arm opens the scenario's session to answer it, so the preview agrees.
     const noModel = unresolvedModelPreflight(scenario, modelOverride);
     if (noModel) return fail("record", "usage", noModel, undefined, asJson, 1);
-    // The input paths the session declares, checked the way `skill --dry-run` checks its own (existence and
-    // kind; not the git tracked-set filter): a preview of a path that is not there previews nothing. A
-    // scenario that loaded and is refused exits 1, record's rule.
-    try {
-      launchSourcesPreflight(scenario, modelOverride);
-    } catch (e) {
-      if (e instanceof UsageError) return fail("record", "usage", `record: ${e.message}`, e.hint, asJson, 1);
-      throw e;
+    // The inputs, checked once in executeScenario's order. The input paths the session declares are checked
+    // the way `skill --dry-run` checks its own (existence and kind; not the git tracked-set filter): a
+    // preview of a path that is not there previews nothing. A scenario that loaded and is refused exits 1,
+    // record's rule — naming the reason the real record gives, which is the vacuity when both apply. A
+    // baseline file that does not load throws, as it does on the real record.
+    const { vacuity, inputs } = scenarioInputFindings(scenario, modelOverride);
+    if (inputs) {
+      const why = vacuity ?? inputs;
+      return fail("record", "usage", `record: ${why.message}`, why.hint, asJson, 1);
     }
+    // A `tool_not_called` the tier can never violate, alone: the real record refuses it, but this arm
+    // exited 0 on it through 4.0.0 and the dry-run exit code is a covered meaning, so it is reported
+    // (`inputErrors[]` and a line that survives --quiet), not refused.
+    const singleInputErrors = vacuity
+      ? [{ file: target, message: vacuity.message, ...(vacuity.hint !== undefined ? { hint: vacuity.hint } : {}) }]
+      : [];
+    const logSingleInputErrors = () => {
+      for (const e of singleInputErrors) log(inputErrorLine(e.file, e.message));
+    };
+    if (!asJson) logSingleInputErrors();
     // mirror the EXACT default cassette path recordScenarioObject uses (slugForPath via the shared
     // defaultCassettePath helper) so a name with spaces/separators reports the same path it writes.
     const cassettePath = p.options["--out"] ?? defaultCassettePath(scenario.name);
@@ -4227,7 +4263,11 @@ export async function cmdRecord(args: string[]) {
     // says was designed out for `dryRefusal`, reintroduced three lines later by a gate that also exits.
     // It exits 1, like the refusals above, on the preview and the real `record` alike (`budget.ts`), so
     // moving it keeps preview and real path agreeing, which is the property that matters.
-    if (maxBudgetUsd !== undefined) preflightBudget("record", scenario.name, maxBudgetUsd, asJson);
+    if (maxBudgetUsd !== undefined) {
+      // The budget refusal's error envelope replaces the payload below; keep the input errors on stderr.
+      if (asJson) logSingleInputErrors();
+      preflightBudget("record", scenario.name, maxBudgetUsd, asJson);
+    }
     if (asJson) {
       out(
         jsonPayloadEnvelope("record", true, {
@@ -4236,6 +4276,7 @@ export async function cmdRecord(args: string[]) {
           scenario: scenario.name,
           fidelity: scenario.fidelity,
           cassette: cassettePath,
+          inputErrors: singleInputErrors,
           token,
           agent: agentPayload,
         }),
