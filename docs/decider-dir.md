@@ -76,6 +76,7 @@ prior run's answers can never leak into this one. Run the harness in the backgro
 work the gate stream while it's live:
 
 ```bash
+export COWORK_HARNESS_MODEL=claude-sonnet-5   # a run must name its model (or pass --model <id>)
 GATES=$(mktemp -d)
 cowork-harness skill ~/my-plugin "Render the report" \
   --decider-dir "$GATES" \
@@ -136,6 +137,7 @@ Two terminals (or a driving agent issuing the same commands):
 
 ```bash
 # Terminal 1 — the session under test
+export COWORK_HARNESS_MODEL=claude-sonnet-5   # a run must name its model (or pass --model <id>)
 GATES=$(mktemp -d)
 cowork-harness skill ~/my-plugin "Export the deck" --decider-dir "$GATES"
 

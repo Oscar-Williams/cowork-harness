@@ -79,8 +79,9 @@ gates are LLM-authored and reworded every run so a literal regex will not match 
 ## Which model was graded — `gradedModels`
 
 **The two turns are a SUBPROCESS.** They inherit no model from whatever invoked `critique` — not your
-session, not a project setting. With no `--model`, the graded run uses the spawned agent's own default,
-which may not be the model you are otherwise working under, and nothing about the run announces it.
+session, not a project setting. They take `--model`, or `COWORK_HARNESS_MODEL` from critique's own
+environment; with neither, critique refuses before the task turn (exit 2). That env value may not be the
+model you are otherwise working under.
 
 `gradedModels` (text header: `graded model(s):`) is read back from the graded turn's own `result.json` and
 is the only record of which model produced the behaviour being graded — distinct from the evaluator's

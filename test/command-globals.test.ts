@@ -189,7 +189,10 @@ describe.skipIf(!can)("a --dotenv-shaped token that is another flag's VALUE is n
       "baseline: latest\nfidelity: container\non_unanswered: fail\nprompt: hello\nassert:\n  - result: success\n",
     );
     const runs = join(d, "runs");
-    const r = cli(["run", "s.yaml", "--label=--run-dir=x", "--run-dir", runs], { cwd: d, env: { COWORK_HARNESS_FORBID_SPAWN: "1" } });
+    const r = cli(["run", "s.yaml", "--label=--run-dir=x", "--run-dir", runs, "--model", "claude-sonnet-5"], {
+      cwd: d,
+      env: { COWORK_HARNESS_FORBID_SPAWN: "1" },
+    });
     expect(r.out).toMatch(/COWORK_HARNESS_FORBID_SPAWN/);
     const statusFiles = readdirSync(join(runs, "s")).map((id) => join(runs, "s", id, "status.json"));
     expect(statusFiles).toHaveLength(1);

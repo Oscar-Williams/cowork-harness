@@ -48,7 +48,8 @@ const FROZEN_NUMBERED_ITEMS = [
   "4. **Inspect the outputs to judge correctness.** `cowork-harness inspect <run-dir>` shows what the run",
   "5. **For image-only / scanned PDFs, use the full-parity image.** The default agent image omits OCR and",
   "6. **Iterate across fixes — verify before you trust, and don't cross-pair generations.** A green run is",
-  "1. **Pin the model.** With no `model:` in the session (or `--model` on the `skill` lane) the run uses",
+  // Reworded when a run that resolves no model became a refusal: the item now says where to pin it.
+  "1. **Pin the model in the session.** A run that resolves no model is refused, but one pinned only by",
   // Reworded after the split: "commit the skill" became one way to freeze a recoverable source.
   "2. **Freeze a recoverable source first**: commit it, or snapshot the skill folder next to the run dir.",
   "3. **Check which arm you actually ran** before analysing anything: `ablated` and",

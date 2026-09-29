@@ -61,6 +61,38 @@ All notable changes to this project are documented here. The format is based on
     Pin `version: "^3"` to defer the change.
   - The ad-hoc lanes keep their defaults: `skill --fidelity` (and `$COWORK_HARNESS_FIDELITY`) still
     default to `container`, and `probe-dispatch` to `hostloop`.
+- **A run that resolves no model is refused.** It warned since 3.1.0 and ran on whatever model the local
+  agent binary defaulted to, which made the run's model, and the part of the system prompt the agent
+  selects by model, a property of the machine. A run's model comes from `--model` (or a `--matrix`
+  `models:` axis), then the session's `model:`, then `COWORK_HARNESS_MODEL`; when none names one, the
+  command refuses before it spends or creates a run dir, and the error names all three. An empty
+  `COWORK_HARNESS_MODEL` counts as unset.
+  - *Exit codes:* `run` (a file, a directory, `--repeat`, `--matrix`), `skill`, `probe-dispatch`, `chat`
+    (with or without `--raw`) and `critique` exit 2 (usage). `record` exits 1, like its other refusals of
+    a scenario that loaded, on every path: a file, a directory, `--rerecord-stale`, and `--dry-run`, which
+    now opens the scenario's session file to answer this. `record <dir/> --dry-run` lists each such file
+    under `refusals[]`. A batch (`run <dir/>`, `--matrix`, `record <dir/>`, `--rerecord-stale`) checks
+    every item before the first one runs and names each offender. A real `record` with no credentials
+    still answers with the credential refusal first (exit 2, `runtime`); `--dry-run` needs none.
+  - *An empty `COWORK_HARNESS_MODEL`* counts as unset, but an exported empty value still blocks one in
+    `.env` or `--dotenv`, since a dotenv file never overrides an exported variable. Unset it instead.
+  - *Not refused:* `skill --dry-run` reports `"model": null` in its preview instead. `critique
+    --corpus-only` runs no turn. `replay`, `verify-cassettes` and `lint` run no agent and are unaffected.
+  - *Who is affected:* any session file without `model:` that is run without `--model` or
+    `COWORK_HARNESS_MODEL`, and every `skill`, `probe-dispatch`, `chat` or `critique` invocation without
+    one (their sessions are built inline and carry no model). `skill --resume` needs the model again: the
+    resumed session does not store it.
+  - *To fix:* set `model:` in the session file, which keeps the model part of the scenario (recommended
+    for anything you re-run or compare). Or pass `--model <id>`, or set `COWORK_HARNESS_MODEL` (for
+    example in `.env`) as a machine default.
+  - *Sessions with committed cassettes:* a session file's `model:` is part of the session fingerprint, so
+    adding it to a session that cassettes were recorded against makes `verify-cassettes` report them stale
+    (exit 1) until you re-record them. To migrate without re-recording, supply the model with `--model` or
+    `COWORK_HARNESS_MODEL`, which the fingerprint does not include; move it into the session when you
+    next re-record.
+  - *Action users:* `command: run` needs a model the same way. Set it in the session, pass the new `model`
+    input, or use `extra-args: --model <id>`. A job-level `env: COWORK_HARNESS_MODEL` also works. Pin
+    `version: "^3"` to defer the change.
 
 ### Upgrade notes
 
@@ -89,6 +121,9 @@ All notable changes to this project are documented here. The format is based on
 
 ### Added
 
+- **The packaged Action takes a `model` input** for the live `run` lane. It is exported as
+  `COWORK_HARNESS_MODEL` when set, so it fills in where a scenario's session sets no `model:`. Left empty,
+  it exports nothing, so a job-level `COWORK_HARNESS_MODEL` still applies.
 - **Object form of `tool_called` / `tool_not_called`:** `{tool, input, input_any, result, scope,
   subagent_type, count}`. It asserts what a call carried (top-level input fields, as regexes), where it
   ran (`main` by default, `subagent` at any depth, or `any`), and what its paired result said.

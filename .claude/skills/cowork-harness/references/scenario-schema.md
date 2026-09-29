@@ -134,11 +134,11 @@ session = your setup.**
 
 ```yaml
 # model & reasoning
-model: claude-opus-4-8           # omit ONLY to track the agent default: with no `model:` the harness emits
-                                  # no --model flag at all, so the run uses whatever the STAGED AGENT BINARY
-                                  # defaults to — not a harness constant, and it can move under a baseline
-                                  # bump. PIN IT for anything you will compare (a --repeat batch, a
-                                  # before/after, a with/without); read result.json's `models` back to confirm,
+model: claude-opus-4-8           # a run must resolve a model: --model (or a matrix axis) > this key >
+                                  # COWORK_HARNESS_MODEL. A run that resolves none is refused. Set it HERE
+                                  # for anything you will compare (a --repeat batch, a before/after, a
+                                  # with/without): the env var is a property of the machine, not the
+                                  # scenario. Read result.json's `models` back to confirm,
                                   # IGNORING any `<…>`-wrapped entry (`<synthetic>` = a turn the agent
                                   # fabricated locally, not a model id).
                                   # On the ad-hoc `skill` lane there is no session file, so `--model <id>`

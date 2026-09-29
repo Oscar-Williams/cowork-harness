@@ -20,6 +20,10 @@ function chat(args: string[], env?: Record<string, string>) {
   return { code: r.status, out: (r.stderr || "") + (r.stdout || ""), stderr: r.stderr || "" };
 }
 
+// A session must resolve a model (4.0.0), and that refusal comes before the --raw option checks; pin one
+// where a test is about a later check.
+const PINNED = { COWORK_HARNESS_MODEL: "claude-sonnet-5" };
+
 // Every option the chat parser consumes — the help-completeness contract asserts each appears.
 const CHAT_FLAGS = ["--raw", "--verbose", "--fidelity", "--model", "--upload", "--folder", "--plugin", "--allow-host-writes"];
 
@@ -89,27 +93,27 @@ describe.skipIf(!can)("chat arg guards", () => {
 
   // ── --raw rejects file/sandbox-fidelity options (no longer silently ignored) ──
   it("--raw with --upload is rejected loudly (was silently ignored), exit 2", () => {
-    const r = chat(["./skill", "--raw", "--upload", "f.csv"]);
+    const r = chat(["./skill", "--raw", "--upload", "f.csv"], PINNED);
     expect(r.code).toBe(2);
     expect(r.stderr).toMatch(/--raw does not support/);
     expect(r.stderr).toMatch(/--upload/);
   });
 
   it("--raw with --folder is rejected, exit 2", () => {
-    const r = chat(["./skill", "--raw", "--folder", "./repo"]);
+    const r = chat(["./skill", "--raw", "--folder", "./repo"], PINNED);
     expect(r.code).toBe(2);
     expect(r.stderr).toMatch(/--raw does not support/);
   });
 
   it("--raw with --fidelity is rejected (cannot honor fidelity in native mode), exit 2", () => {
-    const r = chat(["./skill", "--raw", "--fidelity", "protocol"]);
+    const r = chat(["./skill", "--raw", "--fidelity", "protocol"], PINNED);
     expect(r.code).toBe(2);
     expect(r.stderr).toMatch(/--raw does not support/);
     expect(r.stderr).toMatch(/--fidelity/);
   });
 
   it("--raw with --plugin is rejected (the message lists every ignored option)", () => {
-    const r = chat(["./skill", "--raw", "--plugin", "./p"]);
+    const r = chat(["./skill", "--raw", "--plugin", "./p"], PINNED);
     expect(r.code).toBe(2);
     expect(r.stderr).toMatch(/--raw does not support/);
     expect(r.stderr).toMatch(/--plugin/);

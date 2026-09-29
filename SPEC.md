@@ -94,8 +94,8 @@ claude -p --verbose
   (--max-thinking-tokens 31999 | --thinking disabled)   # session.extended_thinking on|off (default on)
                                                 #   debug.max_thinking_tokens → --max-thinking-tokens <N> (fenced, non-Cowork)
   [--append-system-prompt <rendered cowork sections>]
-  [--model <resolved model>]                   # --model flag / matrix axis > session.model > COWORK_HARNESS_MODEL;
-                                                #   omitted when none pin one (the agent picks its own default — warns)
+  [--model <resolved model>]                   # --model flag / matrix axis > session.model > COWORK_HARNESS_MODEL
+                                                #   (empty = unset); a run where none pins one is refused (§11)
   [--mcp-config <configGuest>/mcp.json]         # if session.mcp.config set — HONORED in plain cowork mode (§6)
   (--plugin-dir <mntRoot>/<p>)…                 # one per pluginDirs entry
   --tools <baseline.spawn.tools…>                # variadic, LAST
@@ -517,8 +517,9 @@ the filesystem/egress keys are sourced from on-disk but remain live-only (source
 such an edit). The `session` is **not drift-checked on the replay path**, so a session change between record and
 re-assert does not move the replay verdict — the notice states this; re-record if the session changed.
 It *is* fingerprinted, but only `verify-cassettes` checks that hash (§11.1): `sessionFingerprint`
-covers the session's connected `folders`/`plugins`/`skills`/`mcp`/`egress`/`web_fetch`, plus `projects`
-and `agent_env` when set. `model` is covered by neither, so a model swap is undetected everywhere.
+covers the session's connected `folders`/`plugins`/`skills`/`mcp`/`egress`/`web_fetch` and the `model:` the
+session file pins, plus `projects` and `agent_env` when set. A model supplied by `--model` or
+`COWORK_HARNESS_MODEL` is not in that hash; the cassette's `environment.model` records the model that ran.
 
 **`replay_protocol_fidelity` (O7 guard):** after the run, `replay` re-serializes each decision
 response via `serializeDecision` and compares to the frozen `controlOut` envelope (canonical
@@ -702,14 +703,19 @@ alongside the `sync` hard-failure → `1` note below).
 identically.** A scenario the **loader** rejects — absent file, unparseable YAML, an unknown key, an
 invalid enum value — exits **`2`**, matching `run` and `replay`. A **pre-spend policy refusal** — a
 scenario no run could satisfy, `on_unanswered: prompt`, the host-inventory destination refusal, a slug
-collision — exits **`1`**. So `2` means it did not load and `1` means it loaded and this record was
+collision, a scenario that resolves no model — exits **`1`**. So `2` means it did not load and `1` means it loaded and this record was
 refused, on the preview and the real command alike. The `--max-budget-usd` refusal is one of the `1`s: it
 keeps its `runtime` error category, but since 4.0.0 it exits `1` on both paths (it exited `2` before), so
 no refusal of a scenario that loaded shares `2` with one that did not. `skill` and `run` are unchanged: their
 `--max-budget-usd` refusal still exits `2`. That split is what makes `record <file> --dry-run`
 usable as a "does this still load?" check: a corpus where the destination refusal is routine would
 otherwise report every valid scenario with the same code as a broken one. The scenario is parsed once,
-BEFORE the credential guard, so "does this file load" never depends on holding a token.
+BEFORE the credential guard, so "does this file load" never depends on holding a token. "Would this
+record" reads a second file: to answer the model refusal, `--dry-run` also opens the scenario's session
+(the model resolves from `--model`, the session's `model:`, then `COWORK_HARNESS_MODEL`). A session that
+does not load is skipped by that check, not refused; the real record reports it. On the real
+`record <file>` the credential guard still comes first: with no credentials, `record` exits `2` (`runtime`,
+"no model credentials") before the model refusal can answer.
 A `record <dir/>` target keeps the same 1-vs-2 meaning at batch scale: a directory whose files all fail
 to load exits `1` (they are broken, not absent), while a directory with no scenarios at all exits `2`.
 Where a `--max-budget-usd` cap could also refuse, both outcomes exit `1`: **all** files broken exits `1`
@@ -717,7 +723,8 @@ Where a `--max-budget-usd` cap could also refuse, both outcomes exit `1`: **all*
 alongside a loadable scenario over the cap also exits `1`, because the budget refusal is a refusal of a
 scenario that loaded. Before 4.0.0 the second case exited `2`.
 On a `record <dir/>` target only the **path-independent** refusals (prompt policy,
-assert contradiction, duplicate cassette target) join `broken[]` in exiting `1`; the path-DEPENDENT ones
+assert contradiction, duplicate cassette target, a scenario that resolves no model — `--model` applies
+batch-wide, so this arm knows it exactly) join `broken[]` in exiting `1`; the path-DEPENDENT ones
 (host-inventory destination, cassette portability) are advisory `notes[]` that do not affect the exit
 code, because a dir target takes no `--out` and the preview would be guessing the destination.
 **`verify-cassettes` uses its OWN three-way split, not the `run`/`skill` meanings above:** `0` clean ·
@@ -809,7 +816,8 @@ built-in command (CB-4), printing `"Commands: /exit  /quit  /help"` without send
 prompt reads `"type your message (/help for commands)"`. **CB-2:** `flagValue()` in `src/cli.ts` and
 the inline `--model` parser in `src/run/chat.ts` both reject empty-string values (`""`/whitespace) with
 a usage error (exit 2); passing `--model ""` or `--model` with no following value is now a hard error
-rather than silently propagating an empty model string.
+rather than silently propagating an empty model string. An empty `COWORK_HARNESS_MODEL` counts as unset
+on every lane, for the same reason.
 
 **CB-6 — `scrubField` and artifact redaction (`src/secrets.ts`, `src/run/cassette.ts`):** The exported
 `scrubField(value, secrets)` function applies a three-pass scrub to a single field value: (1) direct
@@ -930,10 +938,10 @@ Covered-surface changes follow semver as of `1.0.0` — see [RELEASING.md](./REL
 - **Environment variables** — the documented `COWORK_HARNESS_*` knobs plus `COWORK_AGENT_BINARY` and
   `COWORK_AGENT_IMAGE`. Renaming a documented var or changing its meaning is breaking.
 - **Packaged GitHub Action** — `action.yml` inputs (`command`, `path`, `version`, `strict`,
-  `fail-on-skill-drift`, `extra-args`, `summary`, `anthropic-api-key`) and outputs (`ok`,
+  `fail-on-skill-drift`, `extra-args`, `summary`, `anthropic-api-key`, `model`) and outputs (`ok`,
   `envelope-path`, `summary-md`).
 
-**4.0.0's major changes.** Three changes made 4.0.0 a major release, each under the clause named:
+**4.0.0's major changes.** Four changes made 4.0.0 a major release, each under the clause named:
 
 - *CLI surface (a flag's default).* Under `lint --strict` the default `--min-severity` is WARN, so INFO
   neither fails nor prints unless `--min-severity INFO` is passed.
@@ -946,6 +954,12 @@ Covered-surface changes follow semver as of `1.0.0` — see [RELEASING.md](./REL
   *`verify-cassettes` envelope*: a cassette's recorded scenario source that the loader rejects is an
   `unverifiable[]` entry (exit `3`), where before 4.0.0 it was a non-failing note, so a gate that is
   green on 3.x can fail on 4.0.0.
+- *CLI surface (an invocation 3.x accepted is refused).* A run that resolves no model — no
+  `--model`, no matrix `models:` axis, no session `model:`, no `COWORK_HARNESS_MODEL` — is refused before
+  it spends; before 4.0.0 it warned and ran on the agent binary's own default. No exit code changes
+  meaning: it is a usage error on `run`/`skill`/`probe-dispatch`/`chat`/`critique` (`2`), and on `record`
+  a pre-spend refusal of a scenario that loaded (`1`, `--dry-run` included, §11). `skill --dry-run` does
+  not refuse; it reports `model: null`. The packaged Action gains an optional `model` input (additive).
 
 **NOT covered (may change in any release — do NOT depend on):**
 

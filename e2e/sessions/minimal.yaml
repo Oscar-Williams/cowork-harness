@@ -1,2 +1,5 @@
 # Minimal session for L0 control-loop smoke tests — no folders/uploads/plugins.
 permission_mode: default
+# No `model:` here on purpose: examples/replays/example-multiselect-gate.cassette.json was recorded
+# against this file, and a pinned model is part of its session fingerprint. A run must still resolve a
+# model, so pass `--model <id>` or set COWORK_HARNESS_MODEL (CI's e2e step sets claude-sonnet-5).

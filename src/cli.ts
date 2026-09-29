@@ -21,12 +21,14 @@ import {
   executeScenario,
   parseScenarioFile,
   loadSessionFromFile,
+  unresolvedModelPreflight,
   UnansweredError,
   BoundaryError,
   UsageError,
   LegacyRunDirError,
   type ExecuteOptions,
 } from "./run/execute.js";
+import { unresolvedModelRefusal, envModelDefault } from "./run/model-provenance.js";
 import {
   ScriptedDecider,
   ExternalDecider,
@@ -202,7 +204,7 @@ const HELP = `cowork-harness <command>   (v${"$VERSION"})
 
 ── Automated scenarios ────────────────────────────────────────────────────────
   run <scenario.yaml | dir/>   run one scenario or every *.yaml in a dir (CI-ready exit code)
-      [--model <id>]   pin the model (overrides the session's 'model:'; unset warns)
+      [--model <id>]   pin the model (overrides the session's 'model:'; a run that resolves none is refused)
       [--on-unanswered fail|first]   ('prompt' rejected — breaks determinism)
       [--decider-cmd '<helper>']   answer live questions via a spawned helper
       [--decider-dir <dir>]   answer live questions in-band; then use 'gates'/'answer' to stream/respond
@@ -430,7 +432,8 @@ Output:
   --allow-host-writes              consent to a writable hostloop connected folder (native host FS access,
                                    no container sandbox); refused loud otherwise. Forwarded to both turns
                                    by critique. No effect off hostloop or without a writable --folder
-  --model <id>                     override the session model
+  --model <id>                     pin the model (or set COWORK_HARNESS_MODEL); a run that resolves none is
+                                   refused (exit 2) — --dry-run reports it as model: null instead
   --dry-run                        preview scenarios, token and binary checks, without recording     NO_COLOR=1   disable ANSI
 
 Long runs:  an idle "still running" heartbeat prints on stderr after ~30s of silence.
@@ -453,8 +456,8 @@ const RUN_HELP = `cowork-harness run <scenario.yaml | dir/>
 Model:
   --model <id>                     pin the model, overriding the session's 'model:' for this run
                                    (env COWORK_HARNESS_MODEL sets a default; a --matrix 'models:' axis
-                                   wins over both). A run that resolves no model warns: omitting it is
-                                   deprecated and becomes an error in the next major.
+                                   wins over both). A run that resolves no model from any of these is
+                                   refused (exit 2) before anything runs.
 
 Input policy:
   --on-unanswered fail|first       policy for an unscripted question (default: fail — deterministic).
@@ -559,7 +562,7 @@ const SUBCOMMAND_USAGE: Record<string, string> = {
   list: "usage: list [--output-format text|json]   (list available platform baselines)",
   "boundary-check": "usage: boundary-check [<baseline>] [--session <file>] [--output-format text|json]",
   vm: "usage: vm <init|status|delete|prune> [<baseline>] [--output-format text|json]   (macOS arm64 only)\n  init    create the L2 Apple-VZ microVM\n  status  show running VM state\n  delete  remove the VM\n  prune   drop all orphaned VMs\n  <baseline> (default: latest) is a baseline name like desktop-<version>, not a VM name — each acts on that baseline's VM",
-  chat: "usage: chat <skill-folder> [prompt] [--fidelity protocol|container|hostloop] [--model <id>]\n              [--upload <file>]... [--folder <dir>]... [--plugin <dir>]... [--verbose] [--raw] [--allow-host-writes]\n       --raw: native cowork mode via docker run -it; egress sandbox NOT applied; rejects --upload/--folder/--plugin/--fidelity/--allow-host-writes (only --model applies)\n       --allow-host-writes: consent to a writable hostloop connected folder (native host FS access); refused loud otherwise\n       --fidelity: protocol/container/hostloop only (no microvm/cowork); protocol = no Docker, no sandbox",
+  chat: "usage: chat <skill-folder> [prompt] [--fidelity protocol|container|hostloop] [--model <id>]\n              [--upload <file>]... [--folder <dir>]... [--plugin <dir>]... [--verbose] [--raw] [--allow-host-writes]\n       --raw: native cowork mode via docker run -it; egress sandbox NOT applied; rejects --upload/--folder/--plugin/--fidelity/--allow-host-writes (only --model applies)\n       --model: required unless COWORK_HARNESS_MODEL is set — a session that resolves no model is refused (exit 2), with or without --raw\n       --allow-host-writes: consent to a writable hostloop connected folder (native host FS access); refused loud otherwise\n       --fidelity: protocol/container/hostloop only (no microvm/cowork); protocol = no Docker, no sandbox",
   // Single-sourced from src/run/cassette.ts's RECORD_USAGE/REPLAY_USAGE/VERIFY_CASSETTES_USAGE (also each
   // command's own `parseArgs` no-target usage error) so this text and each command's *_BOOLEAN_FLAGS/
   // *_VALUE_FLAGS consts can't drift apart again — see P3 (record) and P9 (replay/verify-cassettes,
@@ -1688,10 +1691,6 @@ async function cmdRun(rawArgs: string[]) {
     const { cells, totalBeforeCap, truncated } = expandMatrix(matrixDoc!, maxCells);
     if (truncated)
       log(`::warning:: matrix: ${totalBeforeCap} cells before capping — only the first ${maxCells} ran (raise with --max-cells)`);
-    // The matrix branch exits before the per-file loop below, so without this the cap would be SILENTLY
-    // ignored on the single most expensive invocation shape the flag exists to bound (N paid cells of one
-    // scenario). With --repeat the cumulative cap in runRepeatBatch already applies per cell.
-    if (maxBudgetUsd !== undefined && repeatN === undefined) preflightBudget("run", scenario.name, maxBudgetUsd, o.json);
     let baseSession: ReturnType<typeof loadSessionFromFile>;
     try {
       baseSession = loadSessionFromFile(scenario.session);
@@ -1724,6 +1723,23 @@ async function cmdRun(rawArgs: string[]) {
           o.json,
         );
     }
+    // Every cell must resolve a model, from the same chain a cell run uses: the cell's `models:` axis, then
+    // `--model`, then the session's `model:`, then COWORK_HARNESS_MODEL. Checked for every cell before any
+    // runs: a cell that resolves none would otherwise surface as a per-cell error after the others paid.
+    if (cells.some((c) => (c.axes.model ?? modelFlag ?? baseSession!.model ?? envModelDefault()) === undefined))
+      fail(
+        "run",
+        "usage",
+        unresolvedModelRefusal(`scenario "${scenario.name}" under --matrix ${matrixFile}`) +
+          " A `models:` axis in the matrix file also pins each cell.",
+        undefined,
+        o.json,
+      );
+    // After the model check, as on every other arm. The matrix branch exits before the per-file loop below, so
+    // without this the cap would be SILENTLY ignored on the single most expensive invocation shape the flag
+    // exists to bound (N paid cells of one scenario). With --repeat the cumulative cap in runRepeatBatch
+    // already applies per cell.
+    if (maxBudgetUsd !== undefined && repeatN === undefined) preflightBudget("run", scenario.name, maxBudgetUsd, o.json);
     const results: RunResult[] = [];
     // Every cell resolves its own overridden scenario/session first (shared by both branches below) —
     // an error here (a bad skill_dirs substitution, an unresolvable overridden baseline) is a
@@ -1854,6 +1870,18 @@ async function cmdRun(rawArgs: string[]) {
         o.json,
       );
   }
+  // Every scenario must resolve a model (`--model`, its session's `model:`, or COWORK_HARNESS_MODEL).
+  // executeScenario refuses one that does not, but on a directory that would fire only when that file's
+  // turn came, after the earlier ones had been paid for. Every offender is named in one refusal.
+  const unpinned = files.filter((_, i) => unresolvedModelPreflight(loaded[i], modelFlag) !== undefined);
+  if (unpinned.length)
+    fail(
+      "run",
+      "usage",
+      files.length === 1 ? unresolvedModelPreflight(loaded[0], modelFlag)! : unresolvedModelRefusal(unpinned.join(", ")),
+      undefined,
+      o.json,
+    );
   if (maxBudgetUsd !== undefined && repeatN === undefined)
     for (const scenario of loaded) preflightBudget("run", scenario.name, maxBudgetUsd, o.json);
 
@@ -2071,7 +2099,7 @@ async function cmdSkill(rawArgs: string[]) {
     fail("skill", "usage", `COWORK_HARNESS_FIDELITY must be one of ${FID_VALUES.join("|")} (got "${envFidelity}")`, undefined, isJson);
   let fidelity: "protocol" | "container" | "microvm" | "hostloop" | "cowork" =
     fidelityFlag ?? (envFidelity as "protocol" | "container" | "microvm" | "hostloop" | "cowork" | undefined) ?? "container";
-  const model: string | undefined = modelFlag ?? process.env.COWORK_HARNESS_MODEL;
+  const model: string | undefined = modelFlag ?? envModelDefault();
   if (resume && !sessionId) fail("skill", "usage", "--resume requires --session-id <id> (the session to resume)", undefined, isJson);
 
   // reject extra positionals so a shell-quoting slip (an unquoted multi-word prompt) can't silently
@@ -2198,6 +2226,10 @@ async function cmdSkill(rawArgs: string[]) {
       JSON.stringify(
         {
           fidelity,
+          // `null`, not absent, when nothing resolves: the real run refuses that (exit 2), and the preview
+          // says so in its payload rather than omitting the one input that decides it. It does not refuse:
+          // it spends nothing, and it is how a reader checks an invocation before adding the model.
+          model: model ?? null,
           prompt,
           localPlugins,
           marketplaces,
@@ -2218,6 +2250,11 @@ async function cmdSkill(rawArgs: string[]) {
     );
     return;
   }
+
+  // The skill lane's inline session carries no `model:` of its own, so `--model` or COWORK_HARNESS_MODEL
+  // must supply it. Refused here, before staging; executeScenario is the backstop. After the --dry-run
+  // branch on purpose: the preview spends nothing, so it reports `model: null` instead of refusing.
+  if (model === undefined) fail("skill", "usage", unresolvedModelRefusal("this `skill` run"), undefined, isJson);
 
   // Resolve the inline session's relative paths against cwd (consistent with `run`'s file path, which
   // goes through resolveSessionPaths) so uploads/folders/plugins are cwd-independent for the skill path.
@@ -2344,7 +2381,8 @@ Files:
   --folder <dir>                 connect a folder at mnt/<folder-name> (repeatable)
 
 Probe tuning:
-  --model <id>                   override the session model (e.g. pin a cheaper model for the probe)
+  --model <id>                   pin the model (or set COWORK_HARNESS_MODEL); a run that resolves none is
+                                 refused (exit 2)
   --expect-write <suffix>         narrow "delivered" to a sub-agent write whose path ends with this suffix
                                  (default: ANY sub-agent-origin write under the dispatch's own toolUseId)
   --allow-stall                  don't fail the verdict when the run ends on a question (the \`stalled\` signal) —
@@ -2420,7 +2458,9 @@ async function cmdProbeDispatch(rawArgs: string[]) {
       isJson,
     );
   const [folder, prompt] = positional;
-  const model = modelFlag ?? process.env.COWORK_HARNESS_MODEL;
+  const model = modelFlag ?? envModelDefault();
+  // Same as `skill`: the inline session has no `model:`, so the flag or the env var must supply one.
+  if (model === undefined) fail("probe-dispatch", "usage", unresolvedModelRefusal("this `probe-dispatch` run"), undefined, isJson);
 
   // Session + scenario construction mirrors cmdSkill's own inline-session path (loadSession →
   // resolveSessionPaths, Scenario.parse) — the "thin wrapper, don't reinvent" seam the design calls for.

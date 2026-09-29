@@ -28,6 +28,14 @@ describe.skipIf(!can)("--output-format json — exactly one JSON document on std
   mkdirSync(broken);
   writeFileSync(join(broken, "b.yaml"), `name: b\nprompt: "x"\nfidelity: protocol\nassert:\n  - not_a_real_key: true\n`);
   const missing = join(work, "does-not-exist");
+  // A scenario that resolves no model (inline session, no --model, COWORK_HARNESS_MODEL cleared below): the
+  // refusal is a fail() on every lane, and on `record` it must not follow a dry-run payload.
+  const unpinned = join(work, "unpinned");
+  mkdirSync(unpinned);
+  writeFileSync(join(unpinned, "u.yaml"), `name: u\nprompt: "x"\nfidelity: protocol\nassert:\n  - result: success\n`);
+  const plugin = join(work, "plugin");
+  mkdirSync(plugin);
+  writeFileSync(join(plugin, "SKILL.md"), "---\nname: p\ndescription: d\n---\nbody\n");
 
   // [argv, expected exit, check ok:false?]. The third slot is false only where `ok` is known not to track
   // the exit code — a separate defect, deliberately not pinned here either way.
@@ -65,6 +73,12 @@ describe.skipIf(!can)("--output-format json — exactly one JSON document on std
     [["lint"], 2], // the TS wrapper's fallback envelope: python's usage error is not JSON on --json
     [["lint", join(broken, "b.yaml")], 1],
     [["lint-skill"], 2],
+    [["run", join(unpinned, "u.yaml")], 2], // resolves no model
+    [["run", unpinned], 2], // resolves no model: the directory pre-flight
+    [["skill", plugin, "hi"], 2], // resolves no model
+    [["probe-dispatch", plugin, "hi"], 2], // resolves no model
+    [["record", join(unpinned, "u.yaml"), "--dry-run"], 1], // resolves no model
+    [["record", unpinned, "--dry-run"], 1], // resolves no model: listed under refusals
     [["no-such-command"], 2],
   ];
 
@@ -76,6 +90,7 @@ describe.skipIf(!can)("--output-format json — exactly one JSON document on std
         env: {
           ...process.env,
           COWORK_HARNESS_RUNS_DIR: runs,
+          COWORK_HARNESS_MODEL: "",
           CLAUDE_CODE_OAUTH_TOKEN: "",
           ANTHROPIC_API_KEY: "",
           ANTHROPIC_AUTH_TOKEN: "",

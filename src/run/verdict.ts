@@ -586,8 +586,8 @@ export function computeVerdict(result: RunResult, lane: "live" | "replay"): Verd
   // assertions still mean something, but the model that produced it is not the one on record.
   for (const f of result.modelFallbacks ?? []) {
     const persistent = f.trigger === "model_not_found" || f.trigger === "model_blocked" || f.trigger === "permission_denied";
-    // Whether a PIN existed changes what this event means, so the sentence has to know. On an unpinned run
-    // — and on every replay, which resolves no model by design — there is no pinned id to change, and
+    // Whether a PIN existed changes what this event means, so the sentence has to know. On a result with no pin
+    // — every replay, which resolves no model by design, or one recorded before 4.0.0 — there is no pinned id to change, and
     // telling the reader to change one names a thing that does not exist.
     const pinned = result.modelSource === "user_setting";
     signals.push({

@@ -398,6 +398,10 @@ jobs:
         # to a developer machine — running this same command locally on macOS BILLS, because at hostloop
         # the agent self-sources credentials from the Keychain and an empty environment proves nothing.
         # The lane prints that warning itself now (vitest.config.live.ts's globalSetup).
+        env:
+          # A run must resolve a model. The lane's setup file sets this default too; stated here so the
+          # step does not depend on it.
+          COWORK_HARNESS_MODEL: claude-sonnet-5
         run: npm run test:live
 
   # ── Stage 3a: does this run have a live-inference key? ─────────────────────────────────────
@@ -476,6 +480,9 @@ jobs:
       - name: Run e2e self-tests (L0 / L1 / hostloop — microvm excluded; needs a real VM)
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          # A run must resolve a model. e2e/sessions/skill.yaml pins one; minimal.yaml cannot without
+          # staling a committed cassette's session fingerprint, so the env default fills it in.
+          COWORK_HARNESS_MODEL: claude-sonnet-5
         run: |
           for s in smoke-askuserquestion smoke-multiselect smoke-multiselect-deciderdir smoke-l1-container smoke-l1-egress smoke-present-files smoke-semantic-evidence-files canary-hostloop; do
             node dist/cli.js run "e2e/scenarios/$s.yaml" || exit 1

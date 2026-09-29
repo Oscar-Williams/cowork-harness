@@ -29,9 +29,9 @@ export interface ChatResultOpts {
    *  the wrong turn's samples. Distinct from the `turn` FIELD on the assembled RunResult below, which
    *  stays `undefined` by contract — see that field's comment. */
   turn: number;
-  /** The model this chat session pinned (session `model:` or `--model`), if any. Chat is the one lane
-   *  that proceeds unpinned by design, so this is legitimately undefined there — which is exactly the
-   *  state `modelSource: "unresolved"` exists to record rather than paper over. */
+  /** The model this chat session pinned (`--model` or COWORK_HARNESS_MODEL). `chat` refuses a session that
+   *  resolves none, so on the CLI path this is always set; it stays optional for a caller that builds a
+   *  chat result directly, where `modelSource: "unresolved"` records the absence rather than papering over it. */
   pinnedModel?: string;
 }
 

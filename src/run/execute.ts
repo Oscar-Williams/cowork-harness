@@ -12,7 +12,13 @@ import { parse as parseYaml } from "yaml";
 import { Scenario } from "../types.js";
 import type { RunResult, InfraErrorSource, Assertion, OutputsFsDiff } from "../types.js";
 import { writeRunningStatus, startStatusTicker, registerRunForCrashSafety, statusLine, type RunStatusMeta } from "./run-status.js";
-import { deriveModelProvenance, unpinnedModelWarning, resolvePinnedModel } from "./model-provenance.js";
+import {
+  deriveModelProvenance,
+  resolvePinnedModel,
+  envModelDefault,
+  ModelUnresolvedError,
+  unresolvedModelRefusal,
+} from "./model-provenance.js";
 // Runtime-only circular import: cassette.ts imports executeScenario from here, and we import buildFingerprint
 // from there. Both bindings are used only inside function bodies (call time), never at module load, so the
 // ESM live-binding cycle is safe. buildFingerprint's deps (skillSourceDirs → parseSessionFile) live here, so
@@ -471,7 +477,12 @@ export async function executeScenario(scenario: Scenario, opts: ExecuteOptions =
   // author stated it for this invocation. `COWORK_HARNESS_MODEL` is a machine-scoped DEFAULT and must only
   // fill a gap — letting it outrank a declared `model:` would make the run's model a property of the shell
   // it was launched from, which is the exact defect this field exists to prevent.
-  const resolvedModel = resolvePinnedModel(opts.modelOverride, loadedSession.model, process.env.COWORK_HARNESS_MODEL || undefined);
+  const resolvedModel = resolvePinnedModel(opts.modelOverride, loadedSession.model, envModelDefault());
+  // A run must state its model (since 4.0.0). Refused HERE, before the run dir is chosen, the status file is
+  // written or the turn begins, so a refused run leaves nothing behind. Every lane funnels through this
+  // function, so it is the backstop; `run <dir/>`, matrix, `record` batches, `skill` and `probe-dispatch`
+  // also check up front (a batch must refuse before its FIRST item spends), with the same text.
+  if (resolvedModel === undefined) throw new ModelUnresolvedError(`scenario "${scenario.name}"`);
   const withModel =
     resolvedModel !== undefined && resolvedModel !== loadedSession.model
       ? applySessionOverrides(loadedSession, { model: resolvedModel })
@@ -683,11 +694,6 @@ export async function executeScenario(scenario: Scenario, opts: ExecuteOptions =
   const turnNumber = beginTurn(outDir);
 
   const plan = buildLaunchPlan(session, baseline, outDir, effectiveFidelity, !!opts.resume, scenario.lane);
-  // Ship 1: warn (not fail) on an unpinned model. Placed HERE, at the caller, rather than inside
-  // buildLaunchPlan — that function receives no command identity, so it cannot tell a verdict-bearing
-  // run from an exploratory chat and would have to warn identically for both.
-  if (plan.model === undefined) warn(unpinnedModelWarning("verdict") + "\n");
-
   // Same layer, protocol's own hazard: this tier passes --plugin-dir, so a staged plugin's hooks execute
   // as native host processes. Gate only when a plugin actually declares runnable hooks.
   if (effectiveFidelity === "protocol") {
@@ -2177,6 +2183,25 @@ export function ablateSession<T extends { plugins: Record<string, unknown>; skil
 export function loadSessionFromFile(sessionRef: string): ReturnType<typeof loadSession> {
   const baseDir = sessionRef === "(inline)" ? process.cwd() : dirname(resolve(sessionRef));
   return resolveSessionPaths(loadSession(parseSessionFile(sessionRef)), baseDir);
+}
+
+/** The pre-flight form of `executeScenario`'s model refusal, for a caller that must refuse a batch before
+ *  its first item spends (`run <dir/>`, `record <dir/>`, `--rerecord-stale`) or preview it without spending
+ *  (`record --dry-run`). Resolves the same chain — `explicit` (`--model`), the session's `model:`, then
+ *  `COWORK_HARNESS_MODEL` — and returns the refusal text, or `undefined` when a model resolves.
+ *
+ *  A session that does not load returns `undefined`: this check is not the one that reports a broken
+ *  session (the real path does, with its own message), and a dry run over files whose session paths do not
+ *  exist on this machine must not start failing on a model question it cannot answer. */
+export function unresolvedModelPreflight(scenario: Scenario, explicit: string | undefined): string | undefined {
+  if (explicit !== undefined || envModelDefault() !== undefined) return undefined;
+  let sessionModel: string | undefined;
+  try {
+    sessionModel = loadSessionFromFile(scenario.session).model;
+  } catch {
+    return undefined;
+  }
+  return sessionModel === undefined ? unresolvedModelRefusal(`scenario "${scenario.name}"`) : undefined;
 }
 
 /** THIS write's 1-based turn number, derived from how many prior turns are already archived. Pure — no

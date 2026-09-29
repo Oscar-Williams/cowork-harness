@@ -11,7 +11,15 @@ import { Run } from "../src/run/run.js";
 import { parseMessage } from "../src/agent/session.js";
 import type { AgentEvent, AgentSession, DecisionResponse } from "../src/agent/session.js";
 import { ScriptedDecider } from "../src/decide/decider.js";
-import { deriveModelProvenance, noModelProvenance, unpinnedModelWarning, resolvePinnedModel } from "../src/run/model-provenance.js";
+import {
+  deriveModelProvenance,
+  noModelProvenance,
+  unresolvedModelRefusal,
+  ModelUnresolvedError,
+  envModelDefault,
+  resolvePinnedModel,
+} from "../src/run/model-provenance.js";
+import { UsageError } from "../src/errors.js";
 
 /** The point of these tests is the THIRD state.
  *
@@ -154,60 +162,70 @@ describe("deriveModelProvenance", () => {
   });
 });
 
-describe("unpinnedModelWarning", () => {
-  it("does not tell a `run` user the flag lives on OTHER lanes", () => {
-    // The live run caught this: the warning fired on a `run` invocation and pointed the reader at the
-    // `skill`/`probe-dispatch`/`chat` lanes for a flag `run` itself now accepts.
-    expect(unpinnedModelWarning("verdict")).not.toMatch(/on the `skill`|`probe-dispatch` and `chat` lanes/);
-    expect(unpinnedModelWarning("verdict")).toMatch(/every lane takes it/);
+describe("unresolvedModelRefusal", () => {
+  it("names the key, the flag and the environment variable, never a file path", () => {
+    const w = unresolvedModelRefusal('scenario "s"');
+    expect(w).toContain("`model:`");
+    expect(w).toContain("--model");
+    expect(w).toContain("COWORK_HARNESS_MODEL");
+    // House style names keys and flags: the `skill` lane builds its session inline and has no file to
+    // point at, so an "edit <file>" instruction would be wrong for exactly the lane that most needs it.
+    expect(w).not.toMatch(/edit .*\.yaml|the file to edit/i);
   });
 
-  it("names the key and the flag, never a file path", () => {
-    for (const lane of ["verdict", "chat"] as const) {
-      const w = unpinnedModelWarning(lane);
-      expect(w).toContain("model:");
-      expect(w).toContain("--model");
-      // House style names keys and flags: the `skill` lane builds its session inline and has no file to
-      // point at, so a "edit <file>" instruction would be wrong for exactly the lane that most needs it.
-      expect(w).not.toMatch(/edit .*\.yaml|the file to edit/i);
-    }
+  it("names what was refused", () => {
+    expect(unresolvedModelRefusal('scenario "my-scenario"')).toContain('scenario "my-scenario"');
   });
 
-  it("says the omission is deprecated rather than merely discouraged", () => {
-    // The whole design rests on following the `fidelity:` precedent (deprecate now, require next major).
-    // A warning that does not say so reads as advice a user can ignore indefinitely.
-    expect(unpinnedModelWarning("verdict")).toContain("next major");
+  it("describes a refusal, not a deprecation", () => {
+    const w = unresolvedModelRefusal('scenario "s"');
+    expect(w).not.toMatch(/deprecat|next major|::warning::/i);
   });
 
   it("states the instructions consequence, not just answer quality", () => {
-    expect(unpinnedModelWarning("verdict")).toMatch(/INSTRUCTIONS/);
+    expect(unresolvedModelRefusal('scenario "s"')).toMatch(/INSTRUCTIONS/);
+  });
+
+  it("ModelUnresolvedError is a UsageError, so every lane maps it to its usage exit", () => {
+    const e = new ModelUnresolvedError('scenario "s"');
+    expect(e).toBeInstanceOf(UsageError);
+    expect(e.message).toBe(unresolvedModelRefusal('scenario "s"'));
   });
 });
 
-/** The message is unit-tested above; what these guard is that it is still WIRED.
- *
- *  Source-scraping rather than behavioural, and deliberately so: firing the real warning means running an
- *  agent, which costs money on every CI run for a one-line check. The failure this catches is a refactor
- *  that drops the call — silent, and invisible to every other test in the suite, because a missing warning
- *  breaks nothing. It is a weaker instrument than an executed test and is not a substitute for one; it is
- *  the strongest check that is free. */
-describe("the unpinned warning is wired into both callers", () => {
+describe("envModelDefault", () => {
+  it("reads COWORK_HARNESS_MODEL, and treats an empty value as unset", () => {
+    // An empty model string must never reach argv (SPEC §CB-2), and must not satisfy the refusal either.
+    expect(envModelDefault({ COWORK_HARNESS_MODEL: "claude-sonnet-5" })).toBe("claude-sonnet-5");
+    expect(envModelDefault({ COWORK_HARNESS_MODEL: "" })).toBeUndefined();
+    expect(envModelDefault({})).toBeUndefined();
+  });
+});
+
+/** The message is unit-tested above; what these guard is that it is still WIRED before the spend. The
+ *  behaviour is executed in test/model-required.test.ts; this is the cheap ordering check. */
+describe("the refusal is wired before the agent is driven", () => {
   const read = (p: string) => readFileSync(resolve(p), "utf8");
 
-  it("fires from the verdict-bearing lane and the chat lane, with the right wording for each", () => {
-    expect(read("src/run/execute.ts")).toMatch(/unpinnedModelWarning\("verdict"\)/);
-    expect(read("src/run/chat.ts")).toMatch(/unpinnedModelWarning\("chat"\)/);
+  it("executeScenario throws it before the run dir is chosen and before run.drive(", () => {
+    const src = read("src/run/execute.ts");
+    const refuseAt = src.indexOf("throw new ModelUnresolvedError(");
+    const outDirAt = src.indexOf("const outDir = join(runsWriteRoot()");
+    const driveAt = src.indexOf("run.drive(");
+    expect(refuseAt).toBeGreaterThan(-1);
+    expect(outDirAt).toBeGreaterThan(-1);
+    expect(driveAt).toBeGreaterThan(-1);
+    expect(refuseAt).toBeLessThan(outDirAt);
+    expect(refuseAt).toBeLessThan(driveAt);
   });
 
-  it("warns BEFORE the agent is driven, not after the money is spent", () => {
-    // A warning printed after the run has already happened tells the author nothing they can act on for
-    // that run. Ordering is the whole value, so it is asserted rather than assumed.
-    const src = read("src/run/execute.ts");
-    const warnAt = src.indexOf('unpinnedModelWarning("verdict")');
-    const driveAt = src.indexOf("run.drive(");
-    expect(warnAt).toBeGreaterThan(-1);
-    expect(driveAt).toBeGreaterThan(-1);
-    expect(warnAt).toBeLessThan(driveAt);
+  it("chat refuses before its --raw branch, so both chat lanes refuse", () => {
+    const src = read("src/run/chat.ts");
+    const refuseAt = src.indexOf("unresolvedModelRefusal(");
+    const rawAt = src.indexOf("if (raw) {");
+    expect(refuseAt).toBeGreaterThan(-1);
+    expect(rawAt).toBeGreaterThan(-1);
+    expect(refuseAt).toBeLessThan(rawAt);
   });
 });
 
@@ -219,7 +237,7 @@ describe("--model reaches the launch plan and the argv", () => {
   const out = () => mkdtempSync(join(tmpdir(), "mp-out-"));
   const planFor = (session: Parameters<typeof buildLaunchPlan>[0]) => buildLaunchPlan(session, baseline, out(), "container", false);
 
-  it("a session with no model produces a plan with no model — the state that warns", () => {
+  it("a session with no model produces a plan with no model — the state executeScenario refuses", () => {
     expect(planFor(loadSession({})).model).toBeUndefined();
   });
 
@@ -340,7 +358,7 @@ describe("resolvePinnedModel — precedence", () => {
     expect(resolvePinnedModel("claude-opus-5", undefined, "claude-haiku-4-5")).toBe("claude-opus-5");
   });
 
-  it("nothing pinned anywhere → undefined, the state that warns", () => {
+  it("nothing pinned anywhere → undefined, the state that is refused", () => {
     expect(resolvePinnedModel(undefined, undefined, undefined)).toBeUndefined();
   });
 });

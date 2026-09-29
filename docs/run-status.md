@@ -82,6 +82,7 @@ result (`result.json`, exit code, assertions).
 
 ```bash
 # Start the run in the background, capturing stderr so you can read the printed outDir.
+export COWORK_HARNESS_MODEL=claude-sonnet-5   # a run must name its model (or pass --model <id>)
 cowork-harness skill ~/my-plugin "Render the report" 2> run.stderr.log &
 
 # Grab the outDir the harness printed (poll briefly — it's written within ~1s of starting).

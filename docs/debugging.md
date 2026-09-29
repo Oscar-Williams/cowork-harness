@@ -162,8 +162,8 @@ the reason to read the *record* rather than the answer. (`critique` is built on 
   too), so on a self-referential prompt the model may read `SKILL.md` and answer from it without ever
   invoking anything. Assert it with `skill_triggered` on the `run` lane; on an open-ended `skill` run
   there are no assertions, so this field **is** the signal. Also worth checking before you compare
-  anything across runs: **`models`** (which model actually served the run — with nothing pinned, that's
-  whatever the staged binary defaults to; **ignore any `<…>`-wrapped entry such as `<synthetic>`, which
+  anything across runs: **`models`** (which model actually served the run — the pinned one unless `modelFallbacks` says the agent
+  switched; **ignore any `<…>`-wrapped entry such as `<synthetic>`, which
   is the agent's marker for a turn it fabricated locally, not a model** — see
   [gotchas.md](./gotchas.md#operational-tools-when-youre-stuck)), **`modelSource`** and
   **`modelPinHonored`** (did anything pin the model, and did the pin survive — an absent
@@ -224,6 +224,9 @@ SKILL=./my-skill
 # Skill needs an attached input (cap table, deck, transcript)? Add `--upload <path>` / `--folder <dir>`
 # to BOTH step 1 and step 3 — critique forwards them to its own two turns, and step 3 must reproduce
 # with the same inputs the harvest used. See critique.md → "Skills that need an attached file".
+
+# Every run below needs a model; set it once so all generations use the same one.
+export COWORK_HARNESS_MODEL=claude-sonnet-5   # a run must name its model (or pass --model <id>)
 
 # 1. HARVEST — run the skill against a real input and grade what confused the agent.
 #    `critique` runs the task, asks the agent what was unclear, then verifies every claim against a
