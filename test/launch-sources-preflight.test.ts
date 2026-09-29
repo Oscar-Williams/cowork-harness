@@ -404,6 +404,27 @@ describe.skipIf(!can)("tier vacuity: the record lanes", () => {
     expect(doc.inputErrors![0].message).toMatch(/can never be violated/);
   });
 
+  it("record <file> --dry-run with a vacuous assertion AND a missing path refuses with the real record's message", () => {
+    // executeScenario checks vacuity before input paths, so the real record names the vacuity. The preview
+    // keeps its exit 1 for the missing path, and names the same reason.
+    const d = fixture();
+    writeFileSync(
+      join(d, "sc", "vb.yaml"),
+      `name: vb\nprompt: hi\nfidelity: hostloop\nsession: ../no-folder.yaml\nassert:\n  - tool_not_called: NotebookEdit\n`,
+    );
+    const dry = cli(["record", "sc/vb.yaml", "--dry-run", "--output-format", "json"], d);
+    expect(dry.code, dry.all).toBe(1);
+    const real = cli(["record", "sc/vb.yaml", "--out", join(d, "vb.cassette.json"), "--output-format", "json"], d, {
+      CLAUDE_CODE_OAUTH_TOKEN: "dummy",
+    });
+    expect(real.all).not.toMatch(SPAWN_GUARD);
+    const dryMsg = envelope(dry.stdout).error?.message ?? "";
+    const realMsg = envelope(real.stdout).error?.message ?? "";
+    expect(realMsg).toMatch(/can never be violated/);
+    expect(dryMsg).toBe(realMsg);
+    expect(envelope(dry.stdout).error?.category).toBe(envelope(real.stdout).error?.category);
+  });
+
   it("record <file> --dry-run warns (inputErrors[] + a ⚠ line) and keeps exit 0", () => {
     const d = fixture();
     writeFileSync(join(d, "sc", "v.yaml"), VACUOUS("v"));

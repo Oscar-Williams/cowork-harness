@@ -2215,25 +2215,40 @@ export function launchSourcesPreflight(
 export function scenarioInputRefusal(
   scenario: Scenario,
   modelOverride: string | undefined,
-  opts: { quiet?: boolean; ablateSkill?: boolean; unloadableBaseline?: "throw" | "skip" | "report" } = {},
+  opts: ScenarioInputCheckOptions = {},
 ): UsageError | undefined {
+  const f = scenarioInputFindings(scenario, modelOverride, opts);
+  return f.vacuity ?? f.inputs;
+}
+
+export type ScenarioInputCheckOptions = { quiet?: boolean; ablateSkill?: boolean; unloadableBaseline?: "throw" | "skip" | "report" };
+
+/** The two halves of {@link scenarioInputRefusal}, from ONE resolution, for a caller that treats them
+ *  differently (`record <file> --dry-run` reports vacuity but refuses a bad input): `vacuity`, the
+ *  tier-vacuous refusal; `inputs`, the baseline-name or input-path refusal. The run throws `vacuity` first. */
+export function scenarioInputFindings(
+  scenario: Scenario,
+  modelOverride: string | undefined,
+  opts: ScenarioInputCheckOptions = {},
+): { vacuity?: UsageError; inputs?: UsageError } {
+  let baseline: PlatformBaseline;
   try {
-    let baseline: PlatformBaseline;
-    try {
-      baseline = loadBaseline(scenario.baseline);
-    } catch (e) {
-      if (e instanceof UsageError || (opts.unloadableBaseline ?? "throw") === "throw") throw e;
-      if (opts.unloadableBaseline === "skip") return undefined;
-      return new UsageError(`baseline "${scenario.baseline}" does not load: ${(e as Error).message}`);
-    }
-    const vacuous = tierVacuityRefusal(scenario, baseline);
-    if (vacuous) return new UsageError(vacuous);
-    launchSourcesPreflight(scenario, modelOverride, { quiet: opts.quiet, ablateSkill: opts.ablateSkill, baseline });
-    return undefined;
+    baseline = loadBaseline(scenario.baseline);
   } catch (e) {
-    if (e instanceof UsageError) return e;
-    throw e;
+    if (e instanceof UsageError) return { inputs: e };
+    if ((opts.unloadableBaseline ?? "throw") === "throw") throw e;
+    if (opts.unloadableBaseline === "skip") return {};
+    return { inputs: new UsageError(`baseline "${scenario.baseline}" does not load: ${(e as Error).message}`) };
   }
+  const vacuous = tierVacuityRefusal(scenario, baseline);
+  let inputs: UsageError | undefined;
+  try {
+    launchSourcesPreflight(scenario, modelOverride, { quiet: opts.quiet, ablateSkill: opts.ablateSkill, baseline });
+  } catch (e) {
+    if (!(e instanceof UsageError)) throw e;
+    inputs = e;
+  }
+  return { ...(vacuous ? { vacuity: new UsageError(vacuous) } : {}), ...(inputs ? { inputs } : {}) };
 }
 
 /** Refuse a `tool_not_called` / `subagent_tool_absent` naming a tool the scenario's tier provably does not
