@@ -4148,7 +4148,11 @@ function cmdScaffold(args: string[]) {
       return void fail("scaffold", "runtime", `failed to write ${outPath}: ${(e as Error).message}`, undefined, json);
     }
     log(`✓ scaffolded scenario → ${outPath}`);
-  } else out(yaml);
+  }
+  // Under json the scenario rides inside the envelope (stdout is always one framed document there); text
+  // mode prints the bare YAML to stdout, or nothing when --out wrote it.
+  if (json) out(jsonPayloadEnvelope("scaffold", true, { scenario: yaml, out: outPath ?? null }));
+  else if (outPath === undefined) out(yaml);
 }
 
 /** Read the persisted transcript from a kept run's `run.jsonl` (the `{t:"transcript"}` line).

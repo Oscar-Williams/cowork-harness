@@ -72,6 +72,11 @@ describe("every exit code reachable in src/critique is documented", () => {
         continue;
       }
       for (const m of text.matchAll(/process\.exit\(\s*(\d+)\s*\)/g)) out.add(Number(m[1]));
+      // The pre-report refusals go through the shared `fail()` (via critique's local `refuse`), whose exit
+      // code is fixed by its category: `boundary` → 3, every other category → 2. Counted here so moving a
+      // literal `process.exit(2)` onto that helper does not silently drop 2 from this floor.
+      for (const m of text.matchAll(/\b(?:refuse|fail)\(\s*(?:"critique",\s*)?"(usage|unanswered|boundary|runtime|internal)"/g))
+        out.add(m[1] === "boundary" ? 3 : 2);
     }
     return out;
   }

@@ -68,12 +68,17 @@ function spawnScenarioScript(
   subcommand: string,
   pyArgs: string[],
   env: NodeJS.ProcessEnv,
-  capture: boolean,
+  /** `true` captures the child's stdout; `"stderr"` sends it to this process's stderr (help text). */
+  capture: boolean | "stderr",
 ): ReturnType<typeof spawnSync> | undefined {
   const py = process.env.PYTHON ?? "python3";
-  const r = capture
-    ? spawnSync(py, [resolveScenarioScript(), subcommand, ...pyArgs], { stdio: ["inherit", "pipe", "inherit"], encoding: "utf8", env })
-    : spawnSync(py, [resolveScenarioScript(), subcommand, ...pyArgs], { stdio: "inherit", env });
+  const argv = [resolveScenarioScript(), subcommand, ...pyArgs];
+  const r =
+    capture === "stderr"
+      ? spawnSync(py, argv, { stdio: ["inherit", 2, "inherit"], env })
+      : capture
+        ? spawnSync(py, argv, { stdio: ["inherit", "pipe", "inherit"], encoding: "utf8", env })
+        : spawnSync(py, argv, { stdio: "inherit", env });
   if (r.error) {
     const enoent = (r.error as NodeJS.ErrnoException).code === "ENOENT";
     process.stderr.write((enoent ? pythonNotFoundMessage(py, subcommand) : String(r.error.message)) + "\n");
@@ -158,6 +163,14 @@ function runLintLike(subcommand: "lint" | "lint-skill", args: string[], prepass:
     return process.exit(status);
   };
 
+  // `--help` is not the command's output: python's help goes to stderr in BOTH modes (like every other
+  // command's help), stdout stays empty, and the exit is python's. Under json it used to run python with
+  // `--json`, find no JSON on stdout, and print a usage-error document for a successful help request.
+  if (pyArgs.some((a) => a === "-h" || a === "--help")) {
+    const r = spawnScenarioScript(subcommand, pyArgs, pyEnv, "stderr");
+    return exit(r ? (r.status ?? 1) : 127);
+  }
+
   if (!json) {
     const r = spawnScenarioScript(subcommand, pyArgs, pyEnv, false);
     if (!r) {
@@ -179,6 +192,13 @@ function runLintLike(subcommand: "lint" | "lint-skill", args: string[], prepass:
   } catch {
     // stdio's stderr slot is "inherit" (see the spawnSync call above), so python's usage text already
     // reached the step log directly — r.stderr is always null here, there's no tail to surface as a hint.
+    // A non-zero exit with no JSON is python refusing the arguments (argparse): a usage error, python's code.
+    // Exit 0 with no JSON is the wrapper and the script disagreeing about `--json` — a harness defect, never
+    // a green: `internal`, exit 2.
+    if (status === 0) {
+      cleanup(handoffDir);
+      return fail(subcommand, "internal", `${subcommand}: python exited 0 but emitted non-JSON output on --json`, undefined, true);
+    }
     out(jsonError(subcommand, "usage", `${subcommand}: python emitted non-JSON output on --json (exit ${status})`));
     return exit(status);
   }

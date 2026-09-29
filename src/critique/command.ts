@@ -2156,20 +2156,26 @@ export function prepareCritique(argv: string[]): ParsedArgs {
 }
 
 async function main(argv: string[] = process.argv.slice(2)): Promise<void> {
+  // Help is not the command's output: stderr, like every other command's help, so stdout under
+  // --output-format json stays empty (a consumer never has to tell help text from a report).
   if (argv.includes("--help") || argv.includes("-h")) {
-    writeAllSync(1, usage() + "\n");
+    writeAllSync(2, usage() + "\n");
     return;
   }
+  // A refusal before any report exists: the shared error exit, so --output-format json (or
+  // COWORK_HARNESS_OUTPUT_FORMAT=json) gets the standard error envelope on stdout and text mode gets the
+  // message on stderr. Exit taxonomy: FINDINGS never gate (always 0), but a usage error or an
+  // infra/protocol failure is not a discovery outcome — exiting 0 there made a broken run look like a
+  // clean one. `json` is read from argv until the parse succeeds, then from the parsed options.
+  let json = isJsonOutput(argv);
+  const refuse = (category: ErrCategory, message: string): never => fail("critique", category, message, undefined, json);
   let opts: ParsedArgs;
   try {
     opts = prepareCritique(argv);
   } catch (e) {
-    process.stderr.write(`${(e as Error).message}\n`);
-    // Exit taxonomy: FINDINGS never gate (always 0), but a usage error or an infra/protocol failure is
-    // not a discovery outcome — exiting 0 there made a broken run look like a clean one.
-    process.exit(2);
-    return;
+    return refuse("usage", (e as Error).message);
   }
+  json = opts.outputFormat === "json";
   // Announce a resolved `cowork` the same way `executeScenario` does, in the same shape and to the same
   // stream, so an operator reading a critique's stderr sees the tier decision in the form they already
   // know from a plain run — and so the resolution is on the record when the report is read later.
@@ -2189,9 +2195,7 @@ async function main(argv: string[] = process.argv.slice(2)): Promise<void> {
   try {
     resolvedSkill = resolveCritiquedSkillDir(opts.skillFolder, opts.skillSelector);
   } catch (e) {
-    process.stderr.write(`${(e as Error).message}\n`);
-    process.exit(2);
-    return;
+    return refuse("usage", (e as Error).message);
   }
   if (resolvedSkill.autoSelectedSkill)
     process.stderr.write(
@@ -2202,11 +2206,7 @@ async function main(argv: string[] = process.argv.slice(2)): Promise<void> {
   // same check for the preview and a paid run, so `--corpus-only` greening a target means a critique of it
   // will not die on it after paying for two turns.
   const preflight = preflightCritique(resolvedSkill, opts.corpusOnly ? "preview" : "preflight");
-  if (!preflight.ok) {
-    process.stderr.write(`critique${opts.corpusOnly ? " --corpus-only" : ""}: ${preflight.message}\n`);
-    process.exit(2);
-    return;
-  }
+  if (!preflight.ok) return refuse("usage", `critique${opts.corpusOnly ? " --corpus-only" : ""}: ${preflight.message}`);
 
   // --corpus-only stops HERE: after target resolution and the pre-spend check, and before a session id is
   // minted — nothing under --run-dir, no index row, no spawn.
@@ -2219,19 +2219,12 @@ async function main(argv: string[] = process.argv.slice(2)): Promise<void> {
   // `--model` reaches both turns (forwardBoth); COWORK_HARNESS_MODEL reaches them through this process's env,
   // which `--dotenv` has already been applied to (prepareCritique). --corpus-only returned above: no turn.
   const forwardsModel = opts.forwardBoth.some((a) => a === "--model" || a.startsWith("--model="));
-  if (!forwardsModel && envModelDefault() === undefined) {
-    process.stderr.write(`critique: ${unresolvedModelRefusal("this critique's task and reflection turns")}\n`);
-    process.exit(2);
-    return;
-  }
+  if (!forwardsModel && envModelDefault() === undefined)
+    return refuse("usage", `critique: ${unresolvedModelRefusal("this critique's task and reflection turns")}`);
   // Past this point a turn WILL run. parseArgs guarantees a probe on every non-corpus-only line; the
   // narrowing is for the type, not a second validation.
   const prompt = opts.prompt;
-  if (prompt === undefined || !prompt.trim()) {
-    process.stderr.write(`critique: internal — no probe on a spending invocation\n`);
-    process.exit(2);
-    return;
-  }
+  if (prompt === undefined || !prompt.trim()) return refuse("internal", "critique: internal — no probe on a spending invocation");
 
   // Minted from the SHARED constant the index detector matches on — see `critiqueRoleFor`.
   const sessionId = `${CRITIQUE_SESSION_PREFIX}${randomUUID()}`;

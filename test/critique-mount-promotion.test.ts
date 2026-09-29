@@ -23,9 +23,13 @@ function critique(args: string[], cwd = tmpdir()): { code: number | null; stdout
   try {
     json = JSON.parse((r.stdout ?? "").trim());
   } catch {
-    /* refusals print nothing on stdout */
+    /* no document on stdout */
   }
-  return { code: r.status, stdout: r.stdout ?? "", stderr: r.stderr ?? "", json };
+  // Under --output-format json a refusal is an error envelope on stdout, not a line on stderr. Its message
+  // is folded into `stderr` here so an assertion reads every diagnostic in one place — the notices critique
+  // prints on stderr and the refusal text alike.
+  const refusal: unknown = json?.error?.message;
+  return { code: r.status, stdout: r.stdout ?? "", stderr: (r.stderr ?? "") + (typeof refusal === "string" ? refusal + "\n" : ""), json };
 }
 
 function git(dir: string, ...a: string[]): void {

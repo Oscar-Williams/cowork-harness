@@ -13,9 +13,9 @@ import { resolve, join } from "node:path";
 // nothing. stdout is parsed WHOLE, not counted by lines: several commands print one pretty-printed
 // multi-line document, and JSON.parse rejects anything after the first value.
 //
-// Deliberately absent (JSON-mode gaps of a different kind, not double emission): `critique`'s usage and
-// pre-flight errors print no envelope; `gates <dir>` is a JSONL stream, not a single document;
-// `chat` / `migrate-run-dir` / `prune` / `sync` do not accept --output-format.
+// Deliberately absent: `gates <dir> --follow` is a JSONL stream, not a single document (its error paths
+// are covered in gates-json-contract.test.ts); `chat` / `migrate-run-dir` / `prune` / `sync` do not accept
+// --output-format.
 const CLI = resolve("dist/cli.js");
 const can = existsSync(CLI);
 
@@ -37,9 +37,8 @@ describe.skipIf(!can)("--output-format json — exactly one JSON document on std
   mkdirSync(plugin);
   writeFileSync(join(plugin, "SKILL.md"), "---\nname: p\ndescription: d\n---\nbody\n");
 
-  // [argv, expected exit, check ok:false?]. The third slot is false only where `ok` is known not to track
-  // the exit code — a separate defect, deliberately not pinned here either way.
-  const cases: [string[], number, boolean?][] = [
+  // [argv, expected exit]. Every row is an error path, so every document must say ok:false.
+  const cases: [string[], number][] = [
     [["run", `${missing}.yaml`], 2],
     [["skill"], 2],
     [["probe-dispatch", missing, "hi", "--fidelity", "bogus"], 2],
@@ -63,7 +62,7 @@ describe.skipIf(!can)("--output-format json — exactly one JSON document on std
     [["record", `${missing}.yaml`, "--dry-run"], 2],
     [["record", `${missing}.yaml`], 2],
     [["record", broken, "--dry-run"], 1],
-    [["record", empty, "--dry-run"], 2, false], // nothing discovered: ok:true beside exit 2
+    [["record", empty, "--dry-run"], 2], // nothing discovered: the payload says ok:false, like the exit code
     [["record", "--rerecord-stale", "--dry-run", empty], 2], // the flag-combination refusal, not --rerecord-stale's own paths
     [["replay", missing], 2],
     [["replay", empty], 2],
@@ -79,10 +78,13 @@ describe.skipIf(!can)("--output-format json — exactly one JSON document on std
     [["probe-dispatch", plugin, "hi"], 2], // resolves no model
     [["record", join(unpinned, "u.yaml"), "--dry-run"], 1], // resolves no model
     [["record", unpinned, "--dry-run"], 1], // resolves no model: listed under refusals
+    [["critique"], 2], // usage: no skill folder
+    [["critique", missing, "--prompt", "hi"], 2], // the skill folder does not exist
+    [["gates", missing], 2], // one pass over a directory that does not exist
     [["no-such-command"], 2],
   ];
 
-  for (const [argv, code, checkOk = true] of cases) {
+  for (const [argv, code] of cases) {
     it(argv.map((a) => a.replace(work, "<tmp>")).join(" "), () => {
       const r = spawnSync("node", [CLI, ...argv, "--output-format", "json"], {
         encoding: "utf8",
@@ -103,7 +105,7 @@ describe.skipIf(!can)("--output-format json — exactly one JSON document on std
       } catch (e) {
         throw new Error(`stdout is not exactly one JSON document (${(e as Error).message}):\n${stdout}\nstderr:\n${r.stderr}`);
       }
-      if (checkOk) expect(doc.ok, stdout).toBe(false);
+      expect(doc.ok, stdout).toBe(false);
       expect(r.status, r.stderr).toBe(code);
     });
   }

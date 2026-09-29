@@ -17,6 +17,15 @@ function run(args: string[], cwd: string, env: NodeJS.ProcessEnv = process.env):
   return { code: r.status, stdout: r.stdout ?? "", stderr: r.stderr ?? "" };
 }
 
+/** A refusal under --output-format json: one error envelope on stdout (category usage), nothing else. */
+function refusalMessage(stdout: string): string {
+  const doc = JSON.parse(stdout);
+  expect(doc.ok).toBe(false);
+  expect(doc.command).toBe("critique");
+  expect(doc.error.category).toBe("usage");
+  return doc.error.message as string;
+}
+
 function git(dir: string, ...a: string[]): void {
   execFileSync("git", a, { cwd: dir, stdio: "ignore" });
 }
@@ -273,9 +282,10 @@ describe.skipIf(!can)("critique --corpus-only", () => {
   it("an untracked --skill subdirectory under a tracked root is refused in staging's terms, not measured", () => {
     const out = run(["critique", untrackedSkillRoot, "--skill", "b", "--corpus-only", "--output-format", "json"], untrackedSkillRoot);
     expect(out.code).toBe(2);
-    expect(out.stderr).toContain("skills/b/ has 0 git-tracked files under");
-    expect(out.stderr).toContain("WITHOUT this skill");
-    expect(out.stdout.trim()).toBe("");
+    // Under --output-format json the refusal is the error envelope on stdout.
+    const msg = refusalMessage(out.stdout);
+    expect(msg).toContain("skills/b/ has 0 git-tracked files under");
+    expect(msg).toContain("WITHOUT this skill");
     // The tracked sibling is unaffected — the guard is per-subdirectory, not per-root.
     const ok = run(["critique", untrackedSkillRoot, "--skill", "a", "--corpus-only", "--output-format", "json"], untrackedSkillRoot);
     expect(ok.code).toBe(0);
@@ -292,8 +302,7 @@ describe.skipIf(!can)("critique --corpus-only", () => {
     for (const sel of [rel, "a/../a", "a/", "."]) {
       const out = run(["critique", untrackedSkillRoot, "--skill", sel, "--corpus-only", "--output-format", "json"], untrackedSkillRoot);
       expect(out.code, `selector ${JSON.stringify(sel)}`).toBe(2);
-      expect(out.stderr).toContain("must be a single path segment");
-      expect(out.stdout.trim()).toBe("");
+      expect(refusalMessage(out.stdout)).toContain("must be a single path segment");
     }
   });
 
@@ -390,7 +399,7 @@ describe.skipIf(!can)("critique --corpus-only", () => {
     // (1) the preview refuses.
     const out = run(["critique", root, "--skill", "x", "--corpus-only", "--output-format", "json"], root);
     expect(out.code).toBe(2);
-    expect(out.stderr).toContain("skills/x/ has 0 git-tracked files under");
+    expect(refusalMessage(out.stdout)).toContain("skills/x/ has 0 git-tracked files under");
 
     // (2) the packager, called the way a paid critique calls it for this mount, does not package SKILL.md.
     const runDir = tmp("cwh-corpus-subrun-");
