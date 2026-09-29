@@ -57,6 +57,14 @@ Neither question is answered by passing `--allow-host-inventory-fixture` to get 
 flag is consent for a recording you intend to make, and reaching for it as a load-check habit is how it
 stops meaning anything.
 
+**`record <file>` exit codes.** `2` means the scenario did not load. `1` means it loaded and this record
+was refused: before the spend (`on_unanswered: prompt`, an unsatisfiable assert pairing, the host-inventory
+destination refusal, a slug collision, a scenario that resolves no model, and the `--max-budget-usd`
+refusal — `1` on `record` since 4.0.0, still `2` on `run`/`skill`), or after it, when the run's verdict
+failed and `--allow-failing` was not passed. That last refusal is the only one that ran the agent, so its
+`--output-format json` document carries the run in `results[0]` (verdict and cost) with
+`error.category: "runtime"`; every pre-spend refusal has `results: []`.
+
 **Decide WHERE the cassette lives before you record it — a cassette cannot be moved afterwards.**
 Without `--out`, `record` writes `cassettes/<scenario-name-slug>.cassette.json` (gitignored by
 default); pass `--out <path>` to put it somewhere tracked, e.g. `examples/replays/<name>.cassette.json`.
@@ -96,7 +104,11 @@ certify.) (A token-free probe of "which gates fire" isn't possible — gates are
 Run artifacts are written to `~/.cowork-harness/runs/…` by default — **outside any working tree**, so a run
 launched from a repo root never drops sensitive skill inputs/outputs into it. Pass `--run-dir <path>` (or set
 `COWORK_HARNESS_RUNS_DIR`) to relocate; in CI point it at a workspace path so an artifact-upload step can
-collect the runs.
+collect the runs. The runs dir is also where `--max-budget-usd` reads its cost history: pointed at a fresh or
+per-job directory it finds no priced run for the scenario, warns `no priced run history … proceeding
+UNCAPPED`, and runs with no cap (a batch's estimate becomes a lower bound; only the `--concurrency 1`
+running total still stops it). To keep the cap, leave `--run-dir` at the default, or reuse the same
+directory across invocations (a CI cache, say) so it holds at least one priced run of that scenario.
 
 #### Validate a skill against real documents (not a cassette)
 

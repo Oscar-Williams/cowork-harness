@@ -160,7 +160,9 @@ All notable changes to this project are documented here. The format is based on
   spawns. `latest` now resolves to `desktop-2.9939.4`, so `verify-cassettes` reports a `baseline` finding
   on a cassette recorded through it against 2.9939.2. The recorded contract (spawn env, system prompt,
   sub-agent append, prompt assets, egress allowlist) is byte-identical between the two, so a re-stamp is
-  sound; a re-record also picks up agent 2.1.284. Only a scenario using the object form of
+  sound. A re-stamp is a hand edit: set the cassette's `fingerprint.baseline` to `"2.9939.4"`, one
+  line per cassette, no run ([docs/cassette.md](./docs/cassette.md#cassette-versioning), "Clearing a drifted
+  baseline"). A re-record does the same and also picks up agent 2.1.284. Only a scenario using the object form of
   `tool_called` / `tool_not_called` stamps v13; every other cassette still stamps v12.
 - **`lint` reports two new WARNs.** `transcript-command-shaped` flags a `transcript_*` value that looks
   like a shell command: it checks what the agent *said*, not what *ran*. `tool-input-regex-redactable`
