@@ -65,6 +65,15 @@ export function writeDoneMarker(dir: string): void {
   }
 }
 
+/** A gate request the decider channel cannot read — the channel failed, not the harness. `gates` reports
+ *  it as a `runtime` error. */
+export class GateChannelError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "GateChannelError";
+  }
+}
+
 /**
  * The gate stream behind `cowork-harness gates <dir> --follow` — the harness OWNS the watcher so the
  * driving agent points ONE Monitor at this instead of hand-writing a zsh-safe find/seen-set/poll loop.
@@ -95,13 +104,16 @@ export function streamGates(dir: string, write: (line: string) => void, opts: { 
           // FAIL the decider channel, not be dropped: dropping it leaves the agent blocked forever on a
           // gate the decider can never answer. (Gate files are written temp+rename atomically, so a torn
           // write can't reach here — a persistent parse failure means genuine corruption.)
+          // One pass (`once`) has no next tick to retry on, so its first failed read is the verdict: it
+          // used to swallow the file and resolve, and `gates <dir>` exited 0 as though no gate were pending.
           const n = (tries.get(f) ?? 0) + 1;
           tries.set(f, n);
-          if (n >= 3) {
-            warn(`::warning:: [gates] ${f} is unreadable/malformed after ${n} tries — failing the decider channel\n`);
+          if (n >= 3 || opts.once) {
+            const after = opts.once ? "" : ` after ${n} tries`;
+            warn(`::warning:: [gates] ${f} is unreadable/malformed${after} — failing the decider channel\n`);
             return reject(
-              new Error(
-                `[gates] decider channel failed: ${join(dir, f)} is unreadable/malformed after ${n} tries (the agent is waiting on a gate this file was meant to answer)`,
+              new GateChannelError(
+                `[gates] decider channel failed: ${join(dir, f)} is unreadable/malformed${after} (the agent is waiting on a gate this file was meant to answer)`,
               ),
             );
           }

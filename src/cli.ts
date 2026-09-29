@@ -170,7 +170,15 @@ import {
 import { pMapBounded } from "./async-pool.js";
 import { computeVerdict } from "./run/verdict.js";
 import { evaluate, hostMatches, budgetFields, toolResultEvidence, type AssertContext, expandExpectDenied } from "./assert.js";
-import { spawnChannel, fileChannel, streamGates, answerGate, readGate, type DecisionChannel } from "./decide/external-channel.js";
+import {
+  spawnChannel,
+  fileChannel,
+  streamGates,
+  answerGate,
+  readGate,
+  GateChannelError,
+  type DecisionChannel,
+} from "./decide/external-channel.js";
 
 // Synchronous writes (fd 1/2): `process.stdout.write` + `process.exit()` truncates on a PIPE, which
 // would lose the json envelope for any agent/CI that pipes us. writeAllSync retries EAGAIN and loops
@@ -3902,15 +3910,39 @@ async function cmdGates(args: string[]) {
   ensureOutputFormat("gates", args);
   // Reject unknown flags rather than silently ignoring a typo.
   rejectUnknownFlags("gates", args, ["--follow", "--output-format", "--output-format=json", "--output-format=text"], isJsonOutput(args));
+  const json = isJsonOutput(args);
   const follow = args.includes("--follow");
   // skip the `--output-format` value so `gates --output-format json <dir>` doesn't read `json`
   // as the directory.
   const dir = positionals(args, ["--output-format"])[0];
-  if (!dir) return void fail("gates", "usage", "usage: gates <dir> [--follow]", undefined, isJsonOutput(args));
+  if (!dir) return void fail("gates", "usage", "usage: gates <dir> [--follow]", undefined, json);
   // Reject extra positionals rather than silently using the first.
-  if (positionals(args, ["--output-format"]).length > 1)
-    return void fail("gates", "usage", "gates takes one <dir>", undefined, isJsonOutput(args));
-  await streamGates(dir, (line) => out(line), { once: !follow });
+  if (positionals(args, ["--output-format"]).length > 1) return void fail("gates", "usage", "gates takes one <dir>", undefined, json);
+  // A path that exists but is not a directory can never become a gate directory: refuse it in both modes.
+  if (existsSync(dir) && !statSync(dir).isDirectory())
+    return void fail("gates", "usage", `gates: not a directory: ${dir}`, undefined, json);
+  if (!existsSync(dir)) {
+    // One pass over a directory that does not exist answered exit 0 with nothing printed — the same thing
+    // a directory with no pending gate prints, so a typo read as "nothing to answer".
+    if (!follow)
+      return void fail(
+        "gates",
+        "usage",
+        `gates: directory not found: ${dir}`,
+        "pass the run's --decider-dir, or add --follow to wait for the run to create it",
+        json,
+      );
+    // --follow stays tolerant: the watcher is usually started before the run creates the directory.
+    log(`[gates] waiting for ${dir} to be created (the run creates it)`);
+  }
+  try {
+    await streamGates(dir, (line) => out(line), { once: !follow });
+  } catch (e) {
+    // A gate request the channel cannot read is the channel failing (`runtime`), not a harness bug. Under
+    // --follow the gate lines already streamed stay on stdout; this error envelope is the terminal line.
+    if (e instanceof GateChannelError) return void fail("gates", "runtime", e.message, undefined, json);
+    throw e;
+  }
 }
 
 /** `answer <dir> --gate <N> (--choose <label> | --answer "<q>=<label>"…)` — write a gate answer
