@@ -60,6 +60,20 @@ export interface JsonEnvelopeOpts {
   extra?: Record<string, unknown>;
 }
 
+/** The published projection of one RunResult: the result plus its derived `verdict`, `provenance` and
+ *  `outcome`. Every envelope that publishes a RunResult goes through this one function, so a consumer
+ *  reading `.verdict.pass` gets the same shape from `run`, `replay`, single-file `record` and each item of
+ *  a `record` batch. */
+export function publishedResult(r: RunResult, lane: "live" | "replay" = "live") {
+  // `provenance` is a DERIVED projection published beside the verdict — "which experiment actually
+  // ran": the marker-filtered model, the four-state skill-offered/invoked answer, and `ablated`.
+  // Every input is already in the result; publishing the derivation means a consumer never re-does
+  // the `<synthetic>`-filter or the evidence-unavailable states, which is where the misreadings came
+  // from. Non-mutating, same as `verdict`/`outcome`.
+  const withV = { ...r, verdict: computeVerdict(r, lane), provenance: runProvenance(r) };
+  return { ...withV, outcome: deriveOutcome(withV) };
+}
+
 /** The standardized machine envelope object (internal: `jsonEnvelope` stringifies it). `ok` is the
  *  same SEAM-B verdict as the process exit code / footer (it cannot diverge). (`record` does not use this
  *  function's `ok`: a recording's `ok` is "exited 0" — a cassette was written — and its verdict is in
@@ -89,20 +103,6 @@ export interface JsonEnvelopeOpts {
  *  than one. One field, one meaning per mode — no parallel `batchVerdict` field, by design (there's no
  *  backward-compat constraint to preserve). `results[]` still holds every raw RunResult either way — across every cell
  *  and every one of its repeat iterations for the composed mode — nothing is hidden from any caller. */
-/** The published projection of one RunResult: the result plus its derived `verdict`, `provenance` and
- *  `outcome`. Every envelope that publishes a RunResult goes through this one function, so a consumer
- *  reading `.verdict.pass` gets the same shape from `run`, `replay`, single-file `record` and each item of
- *  a `record` batch. */
-export function publishedResult(r: RunResult, lane: "live" | "replay" = "live") {
-  // `provenance` is a DERIVED projection published beside the verdict — "which experiment actually
-  // ran": the marker-filtered model, the four-state skill-offered/invoked answer, and `ablated`.
-  // Every input is already in the result; publishing the derivation means a consumer never re-does
-  // the `<synthetic>`-filter or the evidence-unavailable states, which is where the misreadings came
-  // from. Non-mutating, same as `verdict`/`outcome`.
-  const withV = { ...r, verdict: computeVerdict(r, lane), provenance: runProvenance(r) };
-  return { ...withV, outcome: deriveOutcome(withV) };
-}
-
 function jsonEnvelopeObj(command: string, results: RunResult[], opts: JsonEnvelopeOpts = {}): Record<string, unknown> {
   const { rollups, minPassRate, allowBudgetStop, matrix, matrixRepeat, extra } = opts;
   const lane = command === "replay" ? "replay" : "live";

@@ -2252,9 +2252,11 @@ async function cmdSkill(rawArgs: string[]) {
     }),
     process.cwd(),
   );
-  // A plugin folder, marketplace, upload or folder that does not exist is refused HERE — before the
-  // --dry-run return, because a preview of a path that is not there previews nothing — through the same
-  // resolution the run stages from (executeScenario repeats it as the backstop for every other lane).
+  // A plugin folder, marketplace, upload or folder that does not exist, or is the wrong kind, is refused
+  // HERE — before the --dry-run return, because a preview of a path that is not there previews nothing —
+  // through the same resolution the run stages from (executeScenario repeats it as the backstop for every
+  // other lane). This checks existence and kind only: `stageFilters: false` skips the git tracked-set
+  // filter, so a folder with nothing tracked is still refused only by the real run.
   // Contrast the model: an unresolved model is a choice the preview reports as `model: null`, not a
   // missing input, so its refusal stays after the preview.
   try {
