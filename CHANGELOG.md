@@ -6,6 +6,30 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+
+- **`record <dir/> --dry-run` reports each scenario's missing input paths**, as `record <file> --dry-run`
+  does. A scenario whose session names a path that does not exist, or is the wrong kind, is listed under a
+  new `inputErrors[]` key (`{file, message}`) in the JSON payload, with a `⚠ input error:` line on stderr
+  that `--quiet` does not mute. The preview's exit code and `ok` are unchanged: the real `record <dir/>`
+  fails that scenario, so treat an entry there as a failure to come.
+
+### Fixed
+
+- **`run <dir/>` checks every scenario's input paths before the first one runs.** A plugin, skill, upload,
+  folder or marketplace path that did not exist was refused only when its scenario's turn came, after the
+  earlier scenarios had run and been paid for, and their results were not in the JSON output. The refusal
+  (exit 2, `usage`) now comes first and names every scenario with a missing path. A single file's message
+  is unchanged.
+- **A `tool_not_called` / `subagent_tool_absent` that the scenario's tier can never violate is refused
+  before the run directory is created.** It was refused after the run directory and its `status.json`
+  existed; now it leaves nothing behind, and `run <dir/>` refuses it before the first scenario runs.
+- **`chat` no longer leaves a run directory behind when an input path does not exist.** A missing skill
+  folder, `--plugin`, `--upload` or `--folder` was refused (exit 2) only after `chat` had created its run
+  directory; it is now checked first, as `run` and `skill` already do.
+- **`answer --output-format json` prints the standard frame on success**: it now carries `version` and
+  `error: null` beside `gate` and `answers`, like its error output and every payload-shaped command.
+
 ## [4.0.0] — 2026-09-29
 
 ### Breaking changes (requires a major bump; see [SPEC.md §12](./SPEC.md#12-versioning--the-10-compatibility-contract))
