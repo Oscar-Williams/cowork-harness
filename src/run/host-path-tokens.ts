@@ -27,20 +27,50 @@ function decodedForm(text: string): string {
   return decoded.replace(/\\/g, "/");
 }
 
-function tokensIn(text: string, into: string[]): void {
-  for (const m of text.matchAll(HOST_PATH_TOKEN_RE)) into.push(m[2] + m[3]);
+/** One host-path token in a text. `continued`: the token ended at whitespace, `,` or `;`, and the text
+ *  goes on with a run containing `/` (up to the next whitespace) — `/Users/a/My Documents/x`,
+ *  `/Users/a/proj,old/secret`. The token is then probably a TRUNCATED spelling of a longer path, and the
+ *  input-provenance exemption refuses it: an unrelated input can easily carry the same truncated prefix. */
+export interface HostPathTokenOccurrence {
+  token: string;
+  continued: boolean;
+}
+
+function continuesAsPath(text: string, end: number): boolean {
+  const c = text[end];
+  let i: number;
+  if (c === "," || c === ";") i = end + 1;
+  else if (c !== undefined && /\s/.test(c)) {
+    i = end;
+    while (i < text.length && /\s/.test(text[i])) i++;
+  } else return false;
+  let j = i;
+  while (j < text.length && !/\s/.test(text[j])) j++;
+  return text.slice(i, j).includes("/");
+}
+
+function occurrencesIn(text: string, into: HostPathTokenOccurrence[]): void {
+  for (const m of text.matchAll(HOST_PATH_TOKEN_RE)) {
+    const token = m[2] + m[3];
+    into.push({ token, continued: continuesAsPath(text, m.index + m[0].length) });
+  }
+}
+
+/** Every host-path token occurrence in `text`: each root match extended to the full path, from the raw text
+ *  and — when decoding changes it — from its decoded, backslash-normalized form too. */
+export function hostPathTokenOccurrences(text: string): HostPathTokenOccurrence[] {
+  const out: HostPathTokenOccurrence[] = [];
+  occurrencesIn(text, out);
+  const normalized = decodedForm(text);
+  if (normalized !== text) occurrencesIn(normalized, out);
+  return out;
 }
 
 /**
- * Every host-path token in `text`: each root match extended to the full path, from the raw text and — when
- * decoding changes it — from its decoded, backslash-normalized form too. Non-empty exactly when
+ * Every host-path token in `text` (see {@link hostPathTokenOccurrences}). Non-empty exactly when
  * `hostPathLeaked(text)` is true. Tokens are compared verbatim; a symlinked and a realpath spelling of one
  * location are different tokens (so neither exempts the other — the safe side).
  */
 export function hostPathTokens(text: string): string[] {
-  const out: string[] = [];
-  tokensIn(text, out);
-  const normalized = decodedForm(text);
-  if (normalized !== text) tokensIn(normalized, out);
-  return out;
+  return hostPathTokenOccurrences(text).map((o) => o.token);
 }

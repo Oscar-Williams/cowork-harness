@@ -3,7 +3,7 @@ import { BoundaryError, UsageError, LegacyRunDirError, compactSchemaError } from
 import { ZodError } from "zod";
 import { readFileSync, writeFileSync, appendFileSync, mkdirSync, existsSync, rmSync, readdirSync, renameSync, realpathSync } from "node:fs";
 import { currentTurnEventLines, TURN_START_MARKER } from "./turn-events.js";
-import { hostPathTokens } from "./host-path-tokens.js";
+import { hostPathTokens, hostPathTokenOccurrences } from "./host-path-tokens.js";
 import { isInputBorneHostPath, readInputHostPathCorpus, type InputHostPathCorpus } from "./input-host-paths.js";
 import { hasTurnDirs, currentTurnFromDirs, turnWriteDir, classifyRunDir, preLayoutMessage } from "./turn-layout.js";
 import { randomUUID, createHash } from "node:crypto";
@@ -1252,12 +1252,9 @@ export async function executeScenario(scenario: Scenario, opts: ExecuteOptions =
 
     // Detect deletes across every DELETE-DENIED mount, not just outputs — production's denial is a
     // property of the mount class, so a connected `rw` folder is in scope too.
-    // Host paths the user supplied — tokens from the staged input files (captured before the agent ran, on
-    // the first turn) plus this turn's prompt — are not a leak when the agent quotes them back.
-    const inputCorpus: InputHostPathCorpus = {
-      tokens: new Set([...readInputHostPathCorpus(outDir), ...hostPathTokens(String(scenario.prompt ?? ""))]),
-      neverExemptRoots: ownHostRoots(outDir, sessionId, baseline),
-    };
+    // Host paths the user supplied (the staged input files, captured on the first turn, and this turn's
+    // prompt) are not a leak when the agent quotes them back verbatim.
+    const inputCorpus = inputProvenanceCorpus(outDir, sessionId, baseline, scenario.prompt, effectiveFidelity);
     const scan = scanEvents(join(outDir, "events.jsonl"), deleteDeniedRootsFromPlan(plan), inputCorpus);
     // A missing or corrupt events.jsonl means the post-run scan (host-path-leak / delete-in-outputs /
     // self-heal) has no trustworthy evidence — treat it as unavailable, never as a clean scan.
@@ -1865,7 +1862,7 @@ export async function executeScenario(scenario: Scenario, opts: ExecuteOptions =
             hostPathLeaked: scan.hostPathLeaked,
             // Input provenance, omitted when zero (byte-identical result.json for a run with no such inputs):
             // how many host-path tokens the inputs carried, and how many matches that exempted.
-            ...(inputCorpus.tokens.size ? { inputHostPathTokens: inputCorpus.tokens.size } : {}),
+            ...(inputCorpus?.tokens.size ? { inputHostPathTokens: inputCorpus.tokens.size } : {}),
             ...(scan.hostPathsFromInputs ? { hostPathsFromInputs: scan.hostPathsFromInputs } : {}),
             selfHealRan: scan.selfHealRan,
           },
@@ -3505,25 +3502,53 @@ function outputsDeleteSnippet(cmd: string, mount = "outputs"): string {
   return (ops.length ? ops.join("; ") : expanded).split(EMPTY_JOIN_GUARD).join("").trim().slice(0, 160);
 }
 
-/** Host roots the harness created for THIS run: the run dir (which holds the container session tree), the
- *  microvm session dir and the staged agent's dir — raw and realpath spellings both. A host path at or under
- *  one of them in model-visible text is what a sandbox leak looks like, so input provenance never exempts
- *  it. Mount SOURCE paths are deliberately not here: they reach model-visible text only at hostloop, where
- *  the signal is skipped. */
-export function ownHostRoots(outDir: string, sessionId: string, baseline: PlatformBaseline): string[] {
-  const roots = [resolve(outDir), join(VM_WORK_HOST, sessionId)];
+/** Host roots the harness created for THIS run, raw and realpath spellings both. `subtree`: the run dir
+ *  (which holds the container session tree), the microvm session dir, and the staged agents' dir — the
+ *  `claude-code-vm` parent of the pinned version, since a pruned pin falls back to a sibling version, which
+ *  is then the one mounted (plus a `COWORK_AGENT_BINARY` override's dir). A host path at or under one of
+ *  them in model-visible text is what a sandbox leak looks like, so input provenance never exempts it.
+ *  `exact`: the vm-work root and the runs dir — they hold OTHER sessions, which an input may legitimately
+ *  name, so only the root itself is refused. Mount SOURCE paths are deliberately absent: they reach
+ *  model-visible text only at hostloop, where the signal is skipped. */
+export function ownHostRoots(outDir: string, sessionId: string, baseline: PlatformBaseline): { subtree: string[]; exact: string[] } {
+  const subtree = [resolve(outDir), join(VM_WORK_HOST, sessionId)];
   const staged = (baseline.agentBinary?.stagedPath ?? "").replace(/^~(?=$|\/)/, homedir());
-  if (staged) roots.push(dirname(staged));
-  if (process.env.COWORK_AGENT_BINARY) roots.push(dirname(resolve(process.env.COWORK_AGENT_BINARY)));
-  for (const r of [...roots]) {
-    try {
-      const real = realpathSync(r);
-      if (real !== r) roots.push(real);
-    } catch {
-      /* not on disk (e.g. no microvm session dir): the raw spelling is enough */
+  if (staged) subtree.push(dirname(dirname(staged)));
+  if (process.env.COWORK_AGENT_BINARY) subtree.push(dirname(resolve(process.env.COWORK_AGENT_BINARY)));
+  const exact = [VM_WORK_HOST, dirname(resolve(outDir))];
+  const withRealpaths = (roots: string[]): string[] => {
+    const out = [...roots];
+    for (const r of roots) {
+      try {
+        const real = realpathSync(r);
+        if (real !== r) out.push(real);
+      } catch {
+        /* not on disk (e.g. no microvm session dir): the raw spelling is enough */
+      }
     }
-  }
-  return roots;
+    return out;
+  };
+  return { subtree: withRealpaths(subtree), exact: withRealpaths(exact) };
+}
+
+/** The input-provenance corpus the post-run scan exempts against: the host-path tokens the first turn's
+ *  staged inputs carried (persisted by the runtime), plus this turn's prompt, with this run's own roots
+ *  never exempt. Only at container/microvm: those are the tiers that stage inputs and arm the
+ *  `host_path_leak` signal; elsewhere nothing is exempted (and nothing is reported). */
+export function inputProvenanceCorpus(
+  outDir: string,
+  sessionId: string,
+  baseline: PlatformBaseline,
+  prompt: string | undefined,
+  effectiveFidelity: string,
+): InputHostPathCorpus | undefined {
+  if (effectiveFidelity !== "container" && effectiveFidelity !== "microvm") return undefined;
+  const { subtree, exact } = ownHostRoots(outDir, sessionId, baseline);
+  return {
+    tokens: new Set([...readInputHostPathCorpus(outDir), ...hostPathTokens(prompt ?? "")]),
+    neverExemptRoots: subtree,
+    neverExemptExact: exact,
+  };
 }
 
 /** Scan a run's events.jsonl for limitation-fidelity signals (moved from cli.ts). */
@@ -3589,8 +3614,10 @@ export function scanEvents(
   const exempted = new Set<string>();
   const leaks = (text: string): boolean => {
     let leaked = false;
-    for (const t of hostPathTokens(text)) {
-      if (isInputBorneHostPath(t, inputCorpus)) exempted.add(t);
+    // A token cut short at whitespace, `,` or `;` with the path going on after it is never exempt: it is
+    // probably a truncated spelling of a longer path, which an unrelated input can carry too.
+    for (const { token, continued } of hostPathTokenOccurrences(text)) {
+      if (!continued && isInputBorneHostPath(token, inputCorpus)) exempted.add(token);
       else leaked = true;
     }
     return leaked;

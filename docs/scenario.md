@@ -780,18 +780,22 @@ or the fidelity tier. Recognize these before "fixing" a non-bug:
   `transcript_no_host_path`. At `fidelity: cowork` the skip follows the **resolved** tier — a `cowork`
   run that lands on `container` is armed. Author `transcript_no_host_path` to enforce cleanliness where
   it is valid (the assertion is incompatible-by-design with `hostloop`/`protocol`).
-  A host path the **user supplied** is not a leak: before the agent runs, the staged uploads and connected
-  folders (and each turn's prompt) are scanned for host paths, and a path the agent later shows **verbatim**
-  is exempt, so quoting a kept run's `result.json` or a log you connected does not fail the run. The
-  exemption is exact: a sub-path of an input path, a different spelling (`/var/…` vs `/private/var/…`), or
-  a path followed by a sentence-final `.` still counts. It never covers a location the harness created
-  for this run (the run dir, the microvm session dir, the staged agent's dir), and it is captured on the
-  first turn only, so a path the agent writes into a connected folder is not exempt on a later turn.
-  Files over 2 MiB, binary files, `.git/` and `node_modules/` are not scanned (past 5,000 files or 64 MiB
-  the rest are skipped too, with a notice) — their paths still count. A result that relied on the
-  exemption carries `scan.hostPathsFromInputs` (and `scan.inputHostPathTokens`, the corpus size) and
-  prints a `::notice::`; the paths themselves are never written to `result.json`. The same rule applies to
-  `transcript_no_host_path`.
+  A host path the **user supplied** is not a leak (at `container`/`microvm`): before the agent runs, the
+  staged uploads and connected folders (and each turn's prompt) are scanned for host paths, and a path the
+  agent later shows **verbatim** is exempt, so quoting a kept run's `result.json` or a log you connected
+  does not fail the run. A path token ends at whitespace, a quote, `,`, `;`, `)`, `]`, `<`, `>` or a
+  backslash, and the match is by whole token: a sub-path of an input path, a different spelling (`/var/…`
+  vs `/private/var/…`), or a path followed by a sentence-final `.` still counts. A token cut short where
+  the path goes on — whitespace, `,` or `;` followed by more path (`/Users/a/My Documents/x`,
+  `/Users/a/proj,old/x`) — is never exempt, since an unrelated input can carry the same truncated prefix.
+  The exemption never covers a location the harness created for this run — the run dir, the microvm
+  session dir, the staged agent versions' dir, and the vm-work root and runs dir themselves — nor a
+  truncated spelling of one. It is captured on the first turn only, so a path the agent writes into a
+  connected folder is not exempt on a later turn. Files over 2 MiB, binary files, `.git/` and
+  `node_modules/` are not scanned (past 5,000 files or 64 MiB the rest are skipped too, with a notice) —
+  their paths still count. A result that relied on the exemption carries `scan.hostPathsFromInputs` (and
+  `scan.inputHostPathTokens`, the corpus size) and prints a `::notice::`; the paths themselves are never
+  written to `result.json`. The same rule applies to `transcript_no_host_path`.
 
 - **`scan_unavailable`** (**warn**, live lane only) — `events.jsonl` was missing/corrupt, so
   `RunResult.scan` is undefined and the host-path guard and the outputs-delete **text scan did not run**

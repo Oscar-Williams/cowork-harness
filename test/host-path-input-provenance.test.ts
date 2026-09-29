@@ -240,7 +240,113 @@ describe("verdict — a pass that relied on the exemption says so", () => {
   });
 });
 
-// The pieces above are exercised directly; these pin that the runtime actually wires them together.
+describe("ownHostRoots — what the harness created for this run", () => {
+  it("covers the run dir (raw and realpath), the microvm session dir and every staged agent version", async () => {
+    const { VM_WORK_HOST } = await import("../src/runtime/lima.js");
+    const { realpathSync } = await import("node:fs");
+    const { subtree, exact } = (execute as any).ownHostRoots(outDir, "local_sid", {
+      agentBinary: { stagedPath: "/x/claude-code-vm/2.1.0/claude" },
+    });
+    expect(subtree).toContain(outDir);
+    expect(subtree).toContain(realpathSync(outDir)); // /var/folders vs /private/var/folders on macOS
+    expect(subtree).toContain(join(VM_WORK_HOST, "local_sid"));
+    // The parent of the pinned version dir: a pruned pin falls back to a sibling version, which is the
+    // one actually mounted.
+    expect(subtree).toContain("/x/claude-code-vm");
+    // Exact-only: the vm-work root and the runs dir hold OTHER sessions, which an input may legitimately name.
+    expect(exact).toContain(VM_WORK_HOST);
+    expect(exact).toContain(join(outDir, ".."));
+  });
+});
+
+// A token ends at whitespace, `,` or `;`, so a path with a space in it — `Application Support`, `My
+// Documents` — yields a TRUNCATED token that an unrelated input can easily carry too. A truncated spelling
+// must never exempt the path it truncates.
+describe("truncated tokens are never exempt", () => {
+  const AGENT = "/Users/alice/Library/Application Support/Claude/claude-code-vm/2.1.0/claude";
+  const baseline = { agentBinary: { stagedPath: AGENT } };
+
+  it("the staged agent path under `Application Support` leaks, though an input names another path there", () => {
+    put("proj/notes.md", "logs live in /Users/alice/Library/Application Support/Claude/logs/main.log\n");
+    capture({ mounts: [mount("proj", "folder")], resume: false }, mnt, outDir);
+    const { subtree, exact } = (execute as any).ownHostRoots(outDir, "local_sid", baseline);
+    const corpus = { tokens: readCorpus(outDir), neverExemptRoots: subtree, neverExemptExact: exact };
+    expect(corpus.tokens.has("/Users/alice/Library/Application"), "precondition: the input yields the truncated token").toBe(true);
+    const f = events(toolResult(`env: '${AGENT}': No such file or directory`));
+    expect(scanEvents(f, ["outputs"], corpus as any).hostPathLeaked).toBe(true);
+  });
+
+  it("a truncated spelling of an own root is refused even with nothing after it", () => {
+    const corpus = {
+      tokens: new Set(["/Users/alice/Library/Application"]),
+      neverExemptRoots: ["/Users/alice/Library/Application Support/Claude/claude-code-vm"],
+    };
+    const f = events(say("agent under `/Users/alice/Library/Application`"));
+    expect(scanEvents(f, ["outputs"], corpus as any).hostPathLeaked).toBe(true);
+  });
+
+  for (const [name, corpus, text] of [
+    ["a space in the leaked path", "/Users/alice/My", "opened /Users/alice/My Documents/x"],
+    ["a runs dir containing a space", "/Users/alice/my", "wrote /Users/alice/my runs/local_x/work/session/mnt/outputs/r.md"],
+    ["a comma continuing the path", "/Users/alice/proj", "read /Users/alice/proj,old/secret.txt"],
+    ["a semicolon continuing the path", "/Users/alice/proj", "x=/Users/alice/proj;rm/secret"],
+  ] as const)
+    it(`${name} leaks`, () => {
+      expect(scanEvents(events(say(text)), ["outputs"], corpusOf([corpus]) as any).hostPathLeaked).toBe(true);
+    });
+
+  for (const text of ["see /Users/alice/proj then stop", "/Users/alice/proj, and more", "/Users/alice/proj; done", "(/Users/alice/proj)"])
+    it(`control: ${JSON.stringify(text)} is still exempt`, () => {
+      expect(scanEvents(events(say(text)), ["outputs"], corpusOf(["/Users/alice/proj"]) as any).hostPathLeaked).toBe(false);
+    });
+});
+
+describe("exact own roots: the vm-work root and the runs dir", () => {
+  for (const which of ["vm-work root", "runs dir"])
+    it(`the ${which} itself leaks even when an input names it`, async () => {
+      const { VM_WORK_HOST } = await import("../src/runtime/lima.js");
+      const root = which === "runs dir" ? join(outDir, "..") : VM_WORK_HOST;
+      const { subtree, exact } = (execute as any).ownHostRoots(outDir, "local_sid", {});
+      const corpus = { tokens: new Set([root]), neverExemptRoots: subtree, neverExemptExact: exact };
+      expect(scanEvents(events(say(`ls ${root}`)), ["outputs"], corpus as any).hostPathLeaked).toBe(true);
+    });
+  it("control: ANOTHER session under the vm-work root, named by an input, is exempt", async () => {
+    const { VM_WORK_HOST } = await import("../src/runtime/lima.js");
+    const other = join(VM_WORK_HOST, "local_old", "mnt", "outputs", "r.md");
+    const { subtree, exact } = (execute as any).ownHostRoots(outDir, "local_sid", {});
+    const corpus = { tokens: new Set([other]), neverExemptRoots: subtree, neverExemptExact: exact };
+    expect(scanEvents(events(say(`see ${other}`)), ["outputs"], corpus as any).hostPathLeaked).toBe(false);
+  });
+});
+
+// What executeScenario hands scanEvents: the persisted corpus plus this turn's prompt, with the real
+// own-roots — at the sandboxed tiers only.
+describe("inputProvenanceCorpus — the corpus executeScenario scans with", () => {
+  const corpusFor = (prompt: string, fidelity = "container") =>
+    (execute as any).inputProvenanceCorpus(outDir, "local_sid", {}, prompt, fidelity);
+
+  it("a path that appears only in the prompt is exempt", () => {
+    const f = events(say("reading /Users/alice/brief.md as asked"));
+    expect(scanEvents(f, ["outputs"], corpusFor("please summarise /Users/alice/brief.md")).hostPathLeaked).toBe(false);
+  });
+  it("a prompt path under a root the harness created still leaks", () => {
+    const own = join(outDir, "work", "session", "mnt", "outputs", "r.md");
+    expect(scanEvents(events(say(`saved ${own}`)), ["outputs"], corpusFor(`check ${own}`)).hostPathLeaked).toBe(true);
+  });
+  it("includes the corpus the first turn persisted", () => {
+    put("proj/a.txt", "/Users/alice/a");
+    capture({ mounts: [mount("proj", "folder")], resume: false }, mnt, outDir);
+    expect([...corpusFor("hi").tokens]).toEqual(["/Users/alice/a"]);
+  });
+  for (const fidelity of ["hostloop", "protocol"])
+    it(`is undefined at ${fidelity} (the signal is skipped there, and nothing was staged to scan)`, () => {
+      expect(corpusFor("see /Users/alice/brief.md", fidelity)).toBeUndefined();
+    });
+});
+
+// The runtimes' capture call sits between staging and the spawn inside spawnContainer/spawnMicroVm, which
+// need Docker or a VM to run; the call order is pinned on the source. executeScenario's hand-off is pinned
+// the same way — the behaviour of what it hands over is tested above.
 describe("wiring", () => {
   const src = (p: string) => readFileSync(join(import.meta.dirname, "..", "src", p), "utf8");
   for (const tier of ["runtime/container.ts", "runtime/microvm.ts"])
@@ -251,19 +357,9 @@ describe("wiring", () => {
       expect(staged).toBeGreaterThan(-1);
       expect(captured).toBeGreaterThan(staged);
     });
-  it("execute.ts hands the persisted corpus to scanEvents", () => {
-    expect(src("run/execute.ts")).toMatch(/scanEvents\(join\(outDir, "events\.jsonl"\), deleteDeniedRootsFromPlan\(plan\), inputCorpus\)/);
-  });
-});
-
-describe("ownHostRoots — what the harness created for this run", () => {
-  it("covers the run dir (raw and realpath), the microvm session dir and the staged agent dir", async () => {
-    const { VM_WORK_HOST } = await import("../src/runtime/lima.js");
-    const { realpathSync } = await import("node:fs");
-    const roots = execute.ownHostRoots(outDir, "local_sid", { agentBinary: { stagedPath: "/x/claude-code-vm/2.1.0/claude" } } as any);
-    expect(roots).toContain(outDir);
-    expect(roots).toContain(realpathSync(outDir)); // /var/folders vs /private/var/folders on macOS
-    expect(roots).toContain(join(VM_WORK_HOST, "local_sid"));
-    expect(roots).toContain("/x/claude-code-vm/2.1.0");
+  it("execute.ts scans with inputProvenanceCorpus for this run", () => {
+    expect(src("run/execute.ts")).toMatch(
+      /inputProvenanceCorpus\(outDir, sessionId, baseline, scenario\.prompt, effectiveFidelity\)[\s\S]{0,200}scanEvents\(join\(outDir, "events\.jsonl"\), deleteDeniedRootsFromPlan\(plan\), inputCorpus\)/,
+    );
   });
 });

@@ -37,12 +37,27 @@ export interface InputHostPathCorpus {
    *  A token at or under one is exactly what a sandbox leak looks like; an input file naming it can only
    *  be a coincidence, so it is never exempt. */
   neverExemptRoots: readonly string[];
+  /** Roots refused only as themselves (not what is under them): the vm-work root and the runs dir hold
+   *  OTHER sessions, which an input may legitimately name. */
+  neverExemptExact?: readonly string[];
 }
 
-/** Is this host-path token one the user supplied (and not under a root the harness created)? */
+/** Is `token` a string prefix of `root` that does not end at a path boundary — a spelling of the root cut
+ *  short at a space, `,` or `;` (`/Users/a/Library/Application` for `…/Application Support/…`)? */
+function truncates(token: string, root: string): boolean {
+  return root.length > token.length && root.startsWith(token) && root[token.length] !== "/";
+}
+
+/** Is this host-path token one the user supplied — and not at or under a root the harness created, nor a
+ *  truncated spelling of one? */
 export function isInputBorneHostPath(token: string, corpus: InputHostPathCorpus | undefined): boolean {
   if (!corpus || !corpus.tokens.has(token)) return false;
-  return !corpus.neverExemptRoots.some((r) => r !== "" && (token === r || token.startsWith(r.endsWith("/") ? r : `${r}/`)));
+  const bare = token.length > 1 ? token.replace(/\/+$/, "") : token;
+  const underOrTruncates = corpus.neverExemptRoots.some(
+    (r) => r !== "" && (bare === r || token.startsWith(r.endsWith("/") ? r : `${r}/`) || truncates(bare, r)),
+  );
+  const exactOrTruncates = (corpus.neverExemptExact ?? []).some((r) => r !== "" && (bare === r || truncates(bare, r)));
+  return !underOrTruncates && !exactOrTruncates;
 }
 
 function isBinary(path: string): boolean {
