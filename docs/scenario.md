@@ -788,6 +788,8 @@ or the fidelity tier. Recognize these before "fixing" a non-bug:
   vs `/private/var/…`), or a path followed by a sentence-final `.` still counts. A token cut short where
   the path goes on — whitespace, `,` or `;` followed by more path (`/Users/a/My Documents/x`,
   `/Users/a/proj,old/x`) — is never exempt, since an unrelated input can carry the same truncated prefix.
+  After whitespace, a run that itself starts a new path (`/…`) or a URL (`scheme://…`) is the next item,
+  not a continuation, so `cp /Users/a/x /Users/a/y` or one path per line is judged path by path.
   The exemption never covers a location the harness created for this run — the run dir, the microvm
   session dir, the staged agent versions' dir, and the vm-work root, the runs root and the run's scenario dir themselves — nor a
   truncated spelling of one. It is captured on the first turn only, so a path the agent writes into a

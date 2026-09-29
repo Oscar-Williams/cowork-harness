@@ -425,10 +425,11 @@ describe("own roots respelled", () => {
     ["via ..", `${join(outDir, "..")}/../${outDir.split("/").slice(-2).join("/")}/work/x`],
     // Only the part below the host root changes case: the root prefix itself is matched case-sensitively.
     ["another case", `${join(outDir, "..")}/${outDir.split("/").slice(-1)[0].toUpperCase()}/work/x`],
-    ["a zero-width character inside", `${outDir.slice(0, -2)}​${outDir.slice(-2)}/work/x`],
+    ["a zero-width character inside", `${outDir.slice(0, -2)}\u200b${outDir.slice(-2)}/work/x`],
+    ["a soft hyphen inside", `${outDir.slice(0, -2)}\u00ad${outDir.slice(-2)}/work/x`],
   ];
-  for (const i of [0, 1, 2])
-    it(`spelling ${i} (${["via ..", "another case", "a zero-width character inside"][i]}) leaks`, () => {
+  for (const i of [0, 1, 2, 3])
+    it(`spelling ${i} (${["via ..", "another case", "a zero-width character inside", "a soft hyphen inside"][i]}) leaks`, () => {
       const { subtree, exact } = (execute as any).ownHostRoots(outDir, "local_sid", {});
       const [, tok] = spellings()[i];
       const corpus = { tokens: new Set([tok]), neverExemptRoots: subtree, neverExemptExact: exact };

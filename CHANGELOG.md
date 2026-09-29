@@ -17,7 +17,8 @@ All notable changes to this project are documented here. The format is based on
 - **Redaction policy copied by `init-redact`:** the fix below that keeps `/private/var/empty` is in the
   packaged reference policy. A copy made by an earlier `init-redact` keeps redacting it; re-run
   `init-redact --force` (after saving any tailoring) or add the same lookahead to your two `/private/var/`
-  rules. Cassettes already committed are unaffected.
+  rules, and widen the slugged-home-segment rule's lookbehind to also accept `]` and a backtick (so
+  `…]-Users-<name>-…` is redacted). Cassettes already committed are unaffected.
 
 ### Added
 
@@ -62,7 +63,9 @@ All notable changes to this project are documented here. The format is based on
   host paths (on the first turn only; each turn's prompt is added too), and a path the agent shows
   verbatim is exempt. The match is by whole path token, and a token ends at whitespace, a quote, `,`, `;`,
   `)`, `]`, `<`, `>` or a backslash: a sub-path, another spelling or a different path still fails, and so
-  does a token cut short where the path goes on (`/Users/a/My Documents/x`). The exemption never covers a
+  does a token cut short where the path goes on (`/Users/a/My Documents/x`); after whitespace, a run that
+  itself starts a new path (`/…`) or a URL (`scheme://…`) is the next item, not a continuation. The
+  exemption never covers a
   location the harness created for this run, nor a truncated spelling of one. A scenario that failed on
   the default `host_path_leak` signal only because of such an input-borne path now passes, and an
   authored `transcript_no_host_path: true` applies the same rule. A result that relied on the exemption

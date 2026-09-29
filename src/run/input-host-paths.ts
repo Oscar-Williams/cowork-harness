@@ -53,11 +53,11 @@ function truncates(token: string, root: string): boolean {
 export function isInputBorneHostPath(token: string, corpus: InputHostPathCorpus | undefined): boolean {
   if (!corpus || !corpus.tokens.has(token)) return false;
   // The own-root checks compare LOCATIONS, so the token is canonicalized first (membership above stays
-  // exact): invisible format characters dropped, `.`/`..` segments resolved, trailing sentence punctuation
+  // exact): invisible format characters (Unicode `Cf`: zero-width chars, soft hyphen, BOM) dropped, `.`/`..` segments resolved, trailing sentence punctuation
   // and slashes removed (`<run dir>.` names the run dir), and case folded — macOS's default filesystem is
   // case-insensitive, so `/USERS/…` reaches the same place.
   const canon = (p: string): string => {
-    const visible = p.replace(/[\u200b-\u200d\u2060\ufeff]/g, "");
+    const visible = p.replace(/\p{Cf}/gu, "");
     const normalized = posix.normalize(visible).replace(/[.:,;?!/]+$/, "") || visible;
     return normalized.toLowerCase();
   };
