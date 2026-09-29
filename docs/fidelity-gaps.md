@@ -21,12 +21,12 @@ For how the harness *enforces* the limitations it does reproduce (sealed filesys
 
 ## On this page
 
-Every `##` below is one gap (or one scoping note). Grouped, since there are 32 of them.
+Every `##` below is one gap (or one scoping note). Grouped, since there are 33 of them.
 
 - **Read first** — [Which Cowork LANE this harness models](#which-cowork-lane-this-harness-models--read-first-it-scopes-everything-below) · [Fidelity tier differences](#fidelity-tier-differences)
 - **Session & workspace** — [Mid-session skill/plugin re-sync](#mid-session-skillplugin-re-sync) · [Mid-session folder addition](#mid-session-folder-addition) · [Folder access in `chat` sessions](#folder-access-in-chat-sessions) · [No session resume in `chat`](#no-session-resume-in-chat) · [Chat-lane session topology (scratchMode stays false)](#chat-lane-session-topology-scratchmode-stays-false)
 - **Files & delivery** — [Artifacts](#artifacts--two-mechanisms-neither-modeled) · [File delivery](#file-delivery--present_files-here-senduserfile-on-remote-cowork) · [Browser↔webview↔human-interaction boundary (interactive artifacts)](#browserwebviewhuman-interaction-boundary-interactive-artifacts)
-- **Tools, skills & plugins** — [A plugin's declared MCP servers run here; production stubs them conditionally](#a-plugins-declared-mcp-servers-run-here-production-stubs-them-under-conditions-the-harness-cannot-see) · [Skill/plugin discovery SDK-MCP servers](#skillplugin-discovery-sdk-mcp-servers--modeled-on-containerhostloop-microvmprotocol-pending) · [Skill argument collection](#skill-argument-collection--the-elicitation-form-branch-is-not-reachable-here) · [Skill authoring](#skill-authoring--save_skill-and-propose_skills-are-not-modeled) · [Hooks](#hooks--the-harness-installs-one-of-productions-six) · [Browser tools are not served](#browser-tools-are-not-served--and-egress-assertions-say-nothing-about-that-path) · [VM tiers have no workspace tool aliases](#vm-tiers-have-no-workspace-tool-aliases)
+- **Tools, skills & plugins** — [A plugin's declared MCP servers run here; production stubs them conditionally](#a-plugins-declared-mcp-servers-run-here-production-stubs-them-under-conditions-the-harness-cannot-see) · [Skill/plugin discovery SDK-MCP servers](#skillplugin-discovery-sdk-mcp-servers--modeled-on-containerhostloop-microvmprotocol-pending) · [Skill argument collection](#skill-argument-collection--the-elicitation-form-branch-is-not-reachable-here) · [Skill authoring](#skill-authoring--save_skill-and-propose_skills-are-not-modeled) · [Hooks](#hooks--the-harness-installs-one-of-productions-six) · [Browser tools are not served](#browser-tools-are-not-served--and-egress-assertions-say-nothing-about-that-path) · [VM tiers have no workspace tool aliases](#vm-tiers-have-no-workspace-tool-aliases) · [Hostloop: the substituted plugin path shares the VM path's suffix](#hostloop-the-substituted-plugin-path-shares-the-vm-paths-suffix-real-coworks-does-not)
 - **Prompt & model** — [System-prompt reconstruction](#system-prompt-reconstruction) · [Server-driven system-prompt patches (`coworkSyspromptMap`)](#server-driven-system-prompt-patches-coworksyspromptmap) · [Model selection](#model-selection--the-harness-inherits-the-local-cli-default) · [Protocol-tier sub-agents get no Cowork environment append](#protocol-tier-sub-agents-get-no-cowork-environment-append) · [The silent-turn reminder is served by capability, and it lands in the graded corpus](#the-silent-turn-reminder-is-served-by-capability-and-it-lands-in-the-graded-corpus)
 - **Identity & environment** — [Auto-memory: four env-delivered keys the harness never sets](#auto-memory-four-env-delivered-keys-the-harness-never-sets) · [Host-derived identity env vars](#host-derived-identity-env-vars) · [Guest runtime identity](#guest-runtime-identity--per-session-unix-user-uidgid-and-home) · [Session slug shape](#session-slug-shape) · [Path-gate roots are frozen at spawn](#path-gate-roots-are-frozen-at-spawn)
 - **Sandbox & egress** — [`--raw` mode bypasses the egress sandbox](#--raw-mode-bypasses-the-egress-sandbox) · [HIPAA restriction is a process-global latch](#hipaa-restriction-is-a-process-global-latch) · [Booting the real rootfs image under a generic VZ host](#booting-the-real-rootfs-image-under-a-generic-vz-host)
@@ -862,6 +862,30 @@ because the tiers genuinely differ; switching a scenario's `fidelity:` can silen
 assertion into a tautology in either direction. Pair it with a positive assertion that fails if the tool
 set is not what you assumed, or keep the scenario on the tier it was written for. `verify-cassettes` emits a `replaced-builtin` note when a recorded init inventory names a
 built-in absent from the tier's current set.
+
+## Hostloop: the substituted plugin path shares the VM path's suffix; real Cowork's does not
+
+**Real Cowork behaviour (host-loop, observed on Desktop 2.9939.4):** the plugin's base directory the
+agent substitutes into a skill's text (the skill's own base dir, the `${CLAUDE_PLUGIN_ROOT}` it expands)
+is a host staging path of the form `$TMPDIR/claude-hostloop-plugins/<hash>/…`. That path does not exist
+in the VM, and in the VM shell `$CLAUDE_PLUGIN_ROOT` and `$CLAUDE_SKILL_DIR` are empty. The plugin's
+files are reachable in the VM only at `/sessions/<slug>/mnt/.local-plugins/…` or
+`/sessions/<slug>/mnt/.remote-plugins/plugin_<id>/…`.
+
+**Harness behaviour:** the `--plugin-dir` the native agent is given, and so the path it substitutes, is
+the staged copy inside the run dir: `<run-dir>/work/session/mnt/.local-plugins/…` (or
+`…/mnt/.remote-plugins/plugin_<id>/…`) — `src/runtime/hostloop.ts`, `src/runtime/argv.ts`. It is equally
+dead in the VM shell, and both env vars are equally unset, so a shell step that uses the substituted
+path as-is fails the same way in both. (Host-side `Read`/`Grep` of that path works in both.) The
+difference is the suffix: the harness's host path ends in the same `/mnt/.local-plugins/…` or
+`/mnt/.remote-plugins/…` tail as the VM path, and real Cowork's does not.
+
+**Consequence:** a skill that converts the substituted host path into a VM path by keeping its suffix
+(strip everything before `/mnt/`, prepend `/sessions/<slug>`) passes under `hostloop` and fails in real
+Cowork. Discover the mount by searching for the skill's own files instead — the recipe is in
+[plugin-root.md](./plugin-root.md#in-vm-bash--the-token-is-not-reliable).
+
+---
 
 ## Skill/plugin discovery SDK-MCP servers — modeled on container/hostloop; microvm/protocol pending
 

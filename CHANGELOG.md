@@ -393,6 +393,32 @@ All notable changes to this project are documented here. The format is based on
   the session file's pinned model changes. A model supplied by `--model` or `COWORK_HARNESS_MODEL` is not
   in the fingerprint.
 
+### Documentation
+
+- **Finding a plugin's own files from the in-VM shell: the recipe now works for an installed plugin.**
+  The `find … -maxdepth 3 -type d -name '<plugin-name>'` recipe in `docs/plugin-root.md` never matched a
+  plugin installed through Cowork's UI, whose directory is `.remote-plugins/plugin_<id>` (named by id),
+  and for a marketplace plugin it stopped above the version directory. It now searches
+  `.local-plugins` and `.remote-plugins` for the skill's own `skills/<skill-name>/SKILL.md`, with no
+  depth limit. The same search is in the skill's `scenario-schema.md` reference.
+- **Which plugin key to use:** to mirror a plugin installed through Cowork's UI, declare it under
+  `remote_plugins:`; `local_plugins:` mounts it through the local-uploads channel, two directory levels
+  deeper (`docs/plugin-root.md`, `docs/session.md`, the skill's `scenario-schema.md`).
+- **New fidelity gap:** at `hostloop` the plugin path the agent substitutes into a skill's text is the
+  run dir's staged copy, whose `/mnt/.local-plugins/…` suffix matches the VM path; real Cowork
+  substitutes `$TMPDIR/claude-hostloop-plugins/<hash>/…`. Both are dead in the VM shell, but a skill that
+  rewrites the host path into a VM path by its suffix passes in the harness and fails in Cowork
+  (`docs/fidelity-gaps.md`).
+- **Asserting on a `context: fork` skill's answer.** `subagent_output_contains` covers what a run
+  dispatches, not a fork skill invoked through the `Skill` tool, whose answer comes back as the `Skill`
+  tool result; `semantic_matches` does not grade that answer either, even with `include_subagent_text`.
+  Use `tool_result_matches` anchored on `completed (forked execution)` (`docs/scenario.md`, the skill's
+  assertion references).
+- **What a run's cost counts:** `cost.usd` (and the index row's `costUsd`) is the agent session's own
+  spend and leaves out the `semantic_matches` judge and the LLM decider. `max_cost_usd`, `stats` and
+  `--max-budget-usd` inherit that scope (`docs/cli.md`, `docs/scenario.md`, `docs/stats.md`, the skill's
+  `measurement.md`, `debugging.md` and `assertion-catalog.md`).
+
 ## [3.10.0] — 2026-09-27
 
 ### Upgrade notes

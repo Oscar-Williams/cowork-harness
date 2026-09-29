@@ -71,7 +71,7 @@ decide which assertions from *Assertions: two orthogonal axes* in `assertions-gu
 - **`result.json` carries the raw fields** the assertions read: `verdict`, `lane` (which Cowork delivery
   contract the run was held to — see gotcha 24 in `gotchas.md`), `scratchpadEvidenceComplete` (did a COMPLETE scratchpad
   walk observe this run — what distinguishes "nothing was left undelivered" from "cannot tell"), `cost` (`cost.usd` = the SDK's
-  `total_cost_usd` for the run — the authoritative single-run spend; NOT the same source as summing
+  `total_cost_usd` for the run — the authoritative single-run spend of the agent session, which leaves out the `semantic_matches` judge and the LLM decider calls; NOT the same source as summing
   `modelUsage[].costUSD`, which is what `trace --view usage` reports, so the two can differ),
   `usage` (`input_tokens`/`output_tokens`/`turns`), `toolDurations` (with `toolDurationsBasis`), `models`, `toolErrors`,
   `redundantToolCalls`, `modelUsage`, `thinking`, `skillActivity`, `subagents[]` (prompt/`dispatchModel`/

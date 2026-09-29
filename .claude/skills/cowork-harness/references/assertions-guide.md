@@ -43,6 +43,7 @@ them by what you're trying to prove:
 | a skill actually **ran** (or must NOT) | `skill_triggered: <regex>`, `no_skill_triggered: <regex>` |
 | a tool ran **inside** a skill's scope | `skill_tool_used: {skill, tool}` |
 | a sub-agent did the work | `subagent_output_contains: {contains}`, `subagent_dispatched: <regex>`, `dispatch_count_max: <N>` |
+| a `context: fork` skill answered correctly | `tool_result_matches: '^completed \(forked execution\)[\s\S]*<pattern>'` — its answer is the `Skill` tool result, not a sub-agent output, so `subagent_output_contains` and `semantic_matches` never see it |
 | a pre-existing input wasn't mutated (incl. `uploads/**`) | `input_unmodified: <glob>` or `[<glob>, …]` (live/verify-run) |
 | no authored interactive artifact silently loses its Submit under Cowork | `no_lost_write_back: true` (**live-only**; static Tier A over the run's authored `.html`/`.py`/`.js`; per-scenario gate for the same class `analyze-skill` scans) |
 | a resource ceiling held | `max_peak_rss_bytes: <N>` (**live-only**) |
