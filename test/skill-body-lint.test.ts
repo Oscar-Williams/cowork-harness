@@ -341,6 +341,38 @@ describe.skipIf(!havePython)("scenario.py lint-skill — Cowork host-loop footgu
   });
 });
 
+// `plugin-root-in-vm-bash` cannot tell a value the VM shell (or a VM-run program) opens from one that is
+// only forwarded to a host-side file tool: that difference lives in the receiving program, not in the skill
+// text. So an argument-value position is NOT an exemption — these pin that no later syntactic carve-out
+// silently greens the `--data-dir` shape, which is a real host-loop bug.
+describe.skipIf(!havePython)("lint-skill — plugin-root in an argument value is still flagged", () => {
+  it.each([['python3 "$S" --data-dir "${CLAUDE_PLUGIN_ROOT}/data"'], ['python3 "$S" --plugin-root-agent "${CLAUDE_PLUGIN_ROOT}"']])(
+    "%s → WARN plugin-root-in-vm-bash",
+    (cmd) => {
+      const d = mkdtempSync(join(tmpdir(), "cwh-skill-argval-"));
+      writeFileSync(join(d, "SKILL.md"), ["# S", "", "```bash", cmd, "```", ""].join("\n"));
+      const hit = lintSkill(d).findings.find((f) => f.rule === "plugin-root-in-vm-bash");
+      expect(hit?.severity).toBe("WARN");
+      expect(hit?.line).toBe(4);
+    },
+  );
+});
+
+// A finding's JSON shape when no suppression is in play. The `suppressed` record is opt-in: an invocation
+// that uses neither `--ignore-rule` nor a marker must print exactly these six keys, so an existing consumer
+// that parses the array (a jq recipe, an allowlist gate) sees no change.
+describe.skipIf(!havePython)("lint-skill --json — finding shape without suppression", () => {
+  it("every finding carries exactly severity/rule/message/fix/file/line", () => {
+    const d = mkdtempSync(join(tmpdir(), "cwh-skill-shape-"));
+    writeFileSync(join(d, "SKILL.md"), '# S\n\n```bash\nbash "${CLAUDE_PLUGIN_ROOT}/x.sh"\n```\n\n' + "x".repeat(19_001));
+    const { findings } = lintSkill(d);
+    expect(findings.map((f) => f.rule).sort()).toEqual(["plugin-root-in-vm-bash", "skill-body-over-reattach-cap"]);
+    for (const f of findings) {
+      expect(Object.keys(f).sort()).toEqual(["file", "fix", "line", "message", "rule", "severity"]);
+    }
+  });
+});
+
 // Corpus-size proximity to the critique evidence ceiling. Guarding the BEHAVIOUR, not just the
 // constant: a cross-language sync test pins the number, but it stays green with the rule deleted
 // entirely — so without these cases the feature could be gutted and nothing would notice.
