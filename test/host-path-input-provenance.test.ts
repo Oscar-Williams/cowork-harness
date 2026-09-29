@@ -417,3 +417,21 @@ describe("own roots with trailing punctuation, and the runs root itself", () => 
     }
   });
 });
+
+// An own root respelled — through `..`, in another letter case (macOS's default filesystem ignores case),
+// or with an invisible format character inside — still names the same place, so it is still never exempt.
+describe("own roots respelled", () => {
+  const spellings = (): [string, string][] => [
+    ["via ..", `${join(outDir, "..")}/../${outDir.split("/").slice(-2).join("/")}/work/x`],
+    // Only the part below the host root changes case: the root prefix itself is matched case-sensitively.
+    ["another case", `${join(outDir, "..")}/${outDir.split("/").slice(-1)[0].toUpperCase()}/work/x`],
+    ["a zero-width character inside", `${outDir.slice(0, -2)}​${outDir.slice(-2)}/work/x`],
+  ];
+  for (const i of [0, 1, 2])
+    it(`spelling ${i} (${["via ..", "another case", "a zero-width character inside"][i]}) leaks`, () => {
+      const { subtree, exact } = (execute as any).ownHostRoots(outDir, "local_sid", {});
+      const [, tok] = spellings()[i];
+      const corpus = { tokens: new Set([tok]), neverExemptRoots: subtree, neverExemptExact: exact };
+      expect(scanEvents(events(say(`see ${tok}`)), ["outputs"], corpus as any).hostPathLeaked).toBe(true);
+    });
+});

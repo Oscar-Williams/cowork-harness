@@ -1,5 +1,5 @@
 import { closeSync, lstatSync, openSync, readdirSync, readFileSync, readSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, posix } from "node:path";
 import type { LaunchPlan, Mount } from "../session.js";
 import { warn } from "../io.js";
 import { hostPathTokens } from "./host-path-tokens.js";
@@ -52,12 +52,20 @@ function truncates(token: string, root: string): boolean {
  *  truncated spelling of one? */
 export function isInputBorneHostPath(token: string, corpus: InputHostPathCorpus | undefined): boolean {
   if (!corpus || !corpus.tokens.has(token)) return false;
-  // Trailing sentence punctuation and slashes are not part of the location: `<run dir>.` names the run dir.
-  const bare = token.length > 1 ? token.replace(/[.:,;?!/]+$/, "") || token : token;
-  const underOrTruncates = corpus.neverExemptRoots.some(
-    (r) => r !== "" && (bare === r || bare.startsWith(r.endsWith("/") ? r : `${r}/`) || truncates(bare, r)),
-  );
-  const exactOrTruncates = (corpus.neverExemptExact ?? []).some((r) => r !== "" && (bare === r || truncates(bare, r)));
+  // The own-root checks compare LOCATIONS, so the token is canonicalized first (membership above stays
+  // exact): invisible format characters dropped, `.`/`..` segments resolved, trailing sentence punctuation
+  // and slashes removed (`<run dir>.` names the run dir), and case folded — macOS's default filesystem is
+  // case-insensitive, so `/USERS/…` reaches the same place.
+  const canon = (p: string): string => {
+    const visible = p.replace(/[\u200b-\u200d\u2060\ufeff]/g, "");
+    const normalized = posix.normalize(visible).replace(/[.:,;?!/]+$/, "") || visible;
+    return normalized.toLowerCase();
+  };
+  const bare = canon(token);
+  const roots = corpus.neverExemptRoots.filter((r) => r !== "").map(canon);
+  const exact = (corpus.neverExemptExact ?? []).filter((r) => r !== "").map(canon);
+  const underOrTruncates = roots.some((r) => bare === r || bare.startsWith(`${r}/`) || truncates(bare, r));
+  const exactOrTruncates = exact.some((r) => bare === r || truncates(bare, r));
   return !underOrTruncates && !exactOrTruncates;
 }
 
