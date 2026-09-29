@@ -538,11 +538,11 @@ else hits stdout in that mode — the renderer/footer/`[env]`/`[input]` all go t
 **every** command that takes `--output-format`, on its success path and its error path alike; an explicit
 `--output-format text|json` overrides it. (Before 4.0.0 several commands — `doctor`, `status`,
 `verify-run`, `vm`, `analyze-skill`, `replay`, `verify-cassettes`, `critique` — honoured the variable only
-on their error path.) Under json, stdout carries exactly one document in the `{tool, version, command,
-ok, …, error}` frame, or nothing: help (`--help`) always goes to **stderr** with stdout empty, and a
-command's payload — `scaffold`'s scenario YAML, `skill --dry-run`'s preview — rides inside the envelope.
-The two exceptions are the ones named under "Dedicated" below (`list`'s bare array, the `gates` NDJSON
-stream).
+on their error path.) Under json, stdout carries exactly one document — in the shared `{tool, version,
+command, ok, …, error}` frame, or in a command's Dedicated shape (below) — or nothing: help (`--help`)
+always goes to **stderr** with stdout empty, and a command's payload — `scaffold`'s scenario YAML, `skill
+--dry-run`'s preview — rides inside the envelope. (`gates` is the one stream: NDJSON, one line per
+gate.) An error on any command is the shared error envelope.
 
 ```jsonc
 {
@@ -734,12 +734,19 @@ is a usage error (exit `2`); `--follow` waits for a directory that does not exis
 and says so once on stderr. A gate request that cannot be parsed is a `runtime` error (exit `2`): under
 `--follow` after bounded retries, in one pass on the first read. Before 4.0.0 one pass over a missing
 directory, or over a malformed request, exited `0` with nothing printed.
-**A declared input path that does not exist is a usage error.** A plugin folder, `--upload`, `--folder`,
-a session's `uploads`/`folders`/`projects`/`local_plugins`/`local_marketplaces`, or an `enabled` plugin
-missing from its local marketplace is refused as category `usage` (exit `2` on `run`/`skill`; `record`
-keeps its `1` for a refused recording), before the run directory is created, so a refused run leaves no
-run dir. `skill --dry-run` makes the same check, so its preview of a path that does not exist exits `2`;
-an unresolved model is not an input error and the preview reports it as `model: null`.
+**A declared input path that does not exist, or is the wrong kind, is a usage error.** A plugin folder,
+`--upload`, `--folder`, a session's `uploads`/`folders`/`projects`/`skills.local`/`local_plugins`/
+`local_marketplaces` (or a marketplace `entry.source`), an `enabled` plugin missing from its local
+marketplace, a file where a directory is required (or the reverse), two sources mapping to one mount
+destination, a `plugins.config_dir` that is not a directory, and a `--session-id` with characters outside
+`[A-Za-z0-9_-]` are refused as category `usage` (exit `2` on `run`/`skill`; `record` keeps its `1` for a
+refused recording), before the run directory is created, so a refused run leaves no run dir. `skill
+--dry-run` makes the same check, so its preview of such a path exits `2` — `--ablate-skill` included, since
+ablation drops the plugin from the run but the path is still the caller's input; an unresolved model is not
+an input error and the preview reports it as `model: null`. Under `COWORK_HARNESS_SOFT_MISSING` a missing
+source is excluded instead, and the preview prints the same exclusion warning the run prints. `verify-run`
+follows the same rule: a run dir that does not exist, or a scenario file that does not load, is `usage`; a
+directory holding no completed run stays `runtime`.
 **Per-command exceptions:** `critique` **never gates on findings** — it exits `0` for any finding of any classification, and even when the task run it graded ERRORED (that is a finding about the skill, not a broken instrument). It exits `2` only for a usage error or an **instrument failure**: the turn was killed, the reflection protocol broke, or the evaluator was never invoked *or threw* — i.e. no critique was produced. Do not gate CI on `critique`; that inverts its design. `lint` exits `127` when `python3` is missing (spawn error), and `1` — never `0` — when the scenario loader rejected a file but its findings could not be handed to the linter (an unwritable temp directory); `replay` exits
 `2` on a **whole-cassette operational failure** — anything `readCassette` rejects (unreadable, invalid
 shape, unsupported version, unrecognized assertion key) or any per-file throw, plus the batch loop's
@@ -1020,8 +1027,9 @@ Covered-surface changes follow semver as of `1.0.0` — see [RELEASING.md](./REL
 - *CLI surface (an exit-code meaning).* `gates <dir>` without `--follow` exits `2` (usage) on a directory
   that does not exist, and `2` (runtime) on a malformed gate request; both exited `0`. A path that is not
   a directory is a usage error with or without `--follow`.
-- *CLI surface (an exit-code meaning).* `skill <plugin-folder> … --dry-run` exits `2` when a declared path
-  does not exist; it exited `0` with a preview.
+- *CLI surface (an exit-code meaning).* `skill <plugin-folder> … --dry-run` (with or without
+  `--ablate-skill`) exits `2` when a declared path does not exist or is the wrong kind; it exited `0` with
+  a preview.
 - *stdout content under `--output-format json`.* Not strictly a covered envelope, listed so no consumer is
   surprised: `scaffold <run>` prints an envelope carrying the YAML (it printed bare YAML); `skill --dry-run`
   wraps its preview in the standard frame; `lint --help`, `lint-skill --help` and `critique --help` print
