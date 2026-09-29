@@ -99,7 +99,7 @@ care about.
 | Fidelity tier | Resolution mode | Braced `${CLAUDE_PLUGIN_ROOT}` in a plugin skill | Bare `$CLAUDE_PLUGIN_ROOT` in the VM shell |
 |---|---|---|---|
 | `hostloop` | host-loop | replaced at load with a HOST path, which does not exist in the VM | **empty** (observed in real Cowork's local lane) |
-| `container` / `microvm` | VM-loop analog (agent runs in the VM) | replaced at load with the plugin's VM mount path | the harness sets no value; a single live probe of real Cowork's VM-loop saw it set to a `/sessions/…/mnt/.remote-plugins/…` path, not re-verified since |
+| `container` / `microvm` | VM-loop analog (agent runs in the VM) | replaced at load with the plugin's VM mount path | the harness sets no value; a single live probe of real Cowork's VM-loop saw it set to a `/sessions/…/mnt/.remote-plugins/…` path that belonged to ANOTHER plugin in the session, so it is not this plugin's root; not re-verified since |
 
 Because real Cowork runs host-loop by default, and the bare variable's value at VM-loop rests on one
 observation, **author for the mount-discovery pattern unconditionally**: never let a VM shell step open a
