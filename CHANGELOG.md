@@ -109,9 +109,16 @@ All notable changes to this project are documented here. The format is based on
 - **`record`'s `ok` means "exited 0" in every arm.** The recording's own verdict is `results[0].verdict.pass`
   (a single file) or `items[].verdict.pass` (a batch). Two outputs change: a single-file `record
   --allow-failing` of a failing run printed `ok: false` beside exit 0 and now prints `ok: true`; `record
-  <empty dir/> --dry-run` printed `ok: true` beside exit 2 and now prints `ok: false`.
+  <empty dir/> --dry-run` printed `ok: true` beside exit 2 and now prints `ok: false`. Whenever a run
+  completed, its verdict is in the document: when `record` refuses to freeze a failing run (no
+  `--allow-failing`), it still exits 1 with `ok: false`, but the run is now in `results[0]` (a single file)
+  or on its `failed` item's `verdict`/`result` (a batch), and its cost counts against a batch's
+  `--max-budget-usd`. That refusal printed `results: []`, so `.results[0].verdict.pass` raised and the run's
+  cost was lost. A refusal before any run (credentials, model, budget, policy) still has `results: []`.
   - *Who is affected:* a consumer that read `ok` from `record --allow-failing` as the run's verdict,
-    including the packaged Action's `ok` output for `command: record`.
+    including the packaged Action's `ok` output for `command: record`; and one that branched on the
+    verdict refusal's `error.category`, which is now `runtime` instead of `usage` — the scenario loaded
+    and ran, so it is not a usage error.
   - *To keep the old behaviour:* read `.results[0].verdict.pass` instead of `.ok`.
 - **`gates <dir>` without `--follow` refuses a directory that does not exist, and a malformed gate
   request.** Both exited 0 with nothing printed, which is also what a directory with no pending gate

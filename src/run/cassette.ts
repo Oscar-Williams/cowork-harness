@@ -170,6 +170,27 @@ export function recordErrorText(e: unknown): string {
   return msg;
 }
 
+/** `record` refusing to freeze a run whose live verdict failed (no `--allow-failing`). Unlike every other
+ *  record refusal this one comes AFTER the run: the agent ran and was paid for, so the error carries the
+ *  RunResult and each catch site publishes it — `results[0]` on a single file, the item's `verdict`/`result`
+ *  in a batch — and a budgeted batch counts its cost. */
+export class RecordVerdictRefusedError extends Error {
+  constructor(
+    message: string,
+    readonly result: RunResult,
+  ) {
+    super(message);
+    this.name = "RecordVerdictRefusedError";
+  }
+}
+
+/** The run a refused-on-verdict recording ran, as a batch item publishes it (empty for any other failure). */
+function refusedRunFields(e: unknown): Pick<RecordBatchItem, "verdict" | "result"> {
+  if (!(e instanceof RecordVerdictRefusedError)) return {};
+  const published = publishedResult(e.result);
+  return { verdict: published.verdict, result: published };
+}
+
 /**
  * Build the cassette's `environment` provenance block. Pure and exported ONLY so it is unit- and
  * mutation-testable OFFLINE: `recordScenarioObject` needs a live agent spawn, so an inline stamp could be
@@ -3700,7 +3721,7 @@ export const RECORD_USAGE =
   "       (a live decider flags the cassette non-deterministic — re-recording may drift; replay stays deterministic. --rerecord-stale rejects these flags.)\n" +
   "       --quiet: suppress the --dry-run readiness/scenario preview block (✗ broken:/skipped: lines and exit codes are unaffected).\n" +
   "       NOTE: --allow-failing only relaxes the post-run VERDICT gate; it does NOT salvage an unanswered gate (that throws before any cassette is written — use --on-unanswered first / a decider).\n" +
-  "       --output-format json: one document on stdout, last. Its `ok` is the exit code's verdict (ok ⇔ exit 0) on every path; the recorded run's verdict is results[0].verdict.pass (a file) or items[].verdict.pass (a dir/ batch or --rerecord-stale, one item per scenario or cassette: status recorded|failed|skipped-budget). They differ when --allow-failing records a failing run.";
+  "       --output-format json: one document on stdout, last. Its `ok` is the exit code's verdict (ok ⇔ exit 0) on every path; the recorded run's verdict is results[0].verdict.pass (a file) or items[].verdict.pass (a dir/ batch or --rerecord-stale, one item per scenario or cassette: status recorded|failed|skipped-budget). They differ when --allow-failing records a failing run. Whenever a run completed, its verdict is published, including a failing run record refused to freeze (exit 1, ok:false, error.category runtime, the run in results[0] or on its failed item); a refusal before any run (credentials, model, budget, policy) has results: [].";
 
 /** `record <scenario.yaml | dir> [--out <file>] [--rerecord-stale] [--no-redact] [--allow-failing]` —
  *  run live + save a cassette. A single file records one; a dir batches; --rerecord-stale treats
@@ -3732,8 +3753,9 @@ export function hostInventoryFlagHint(command: "record" | "replay" | "verify-cas
 }
 
 /** One entry of a `record <dir/>` / `record --rerecord-stale <dir/>` JSON envelope. `file` is the scenario
- *  (dir batch), `cassette` the cassette written or re-recorded. A recorded item carries the run's
- *  `verdict` and the `result` in the same published projection single-file `record` uses. */
+ *  (dir batch), `cassette` the cassette written or re-recorded. A recorded item — and a failed item whose
+ *  run completed but was refused on its verdict — carries the run's `verdict` and the `result` in the same
+ *  published projection single-file `record` uses. */
 export interface RecordBatchItem {
   file?: string;
   cassette?: string;
@@ -4433,7 +4455,8 @@ export async function cmdRecord(args: string[]) {
         // tier on the next record — a recording-shaping change nobody chose.
         const why = e instanceof FidelityMissingError ? fidelityMissingForCassette(e, cassette.scenario) : recordErrorText(e);
         log(`  ✗ ${tag} ${cp}: ${why}`);
-        staleItems[i] = { cassette: cp, status: "failed", error: why };
+        if (e instanceof RecordVerdictRefusedError) staleBudget.add(budgetFields(e.result).costUsd);
+        staleItems[i] = { cassette: cp, status: "failed", error: why, ...refusedRunFields(e) };
         return false;
       }
     });
@@ -4571,7 +4594,8 @@ export async function cmdRecord(args: string[]) {
       } catch (e) {
         const why = recordErrorText(e);
         log(`  ✗ ${tag} ${why}`);
-        batchItems[i] = { file: f, status: "failed", error: why };
+        if (e instanceof RecordVerdictRefusedError) batchBudget.add(budgetFields(e.result).costUsd);
+        batchItems[i] = { file: f, status: "failed", error: why, ...refusedRunFields(e) };
         return false;
       }
     });
@@ -4650,6 +4674,12 @@ export async function cmdRecord(args: string[]) {
     // A scenario naming no baseline is a usage mistake like any other entry point's: exit 2 with the
     // valid baselines as the hint, not record's general exit 1.
     if (e instanceof UnknownBaselineError) return fail("record", "usage", `record: ${e.message}`, e.hint, asJson);
+    // A failing verdict is refused AFTER a completed, paid run: publish that run in `results` (the same
+    // projection the success path prints) so `results[0].verdict.pass` and the cost stay readable. The
+    // category is `runtime`, not `usage` — the scenario loaded and ran; what refused it is the run's own
+    // evidence. Exit 1 like every refusal of a scenario that loaded.
+    if (e instanceof RecordVerdictRefusedError)
+      return fail("record", "runtime", `record: ${e.message}`, undefined, asJson, 1, [publishedResult(e.result)]);
     return fail("record", "usage", `record: ${recordErrorText(e)}`, undefined, asJson, 1);
   } finally {
     channel?.close?.();
@@ -4864,8 +4894,9 @@ async function recordScenarioObject(
       .filter((s) => s.severity === "fail")
       .map((s) => `${s.code}: ${s.message}`)
       .join("; ");
-    throw new Error(
+    throw new RecordVerdictRefusedError(
       `refusing to freeze a failing run: run result=${result.result}, but the live verdict FAILED — ${why} (re-run, or --allow-failing)`,
+      result,
     );
   }
   // RELOCATABLE session path (relative to the cassette dir) — metadata-only, keeps a moved bundle honest.

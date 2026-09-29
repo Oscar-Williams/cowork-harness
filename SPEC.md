@@ -602,6 +602,13 @@ there are three families:
 `--rerecord-stale`, and `--dry-run`): `ok` ⇔ exit `0`. A recording's own verdict is published beside it —
 `results[0].verdict.pass` for a single file, `items[].verdict.pass` for a batch — and the two differ exactly
 when `--allow-failing` records a failing run on purpose (exit `0`, `ok: true`, `verdict.pass: false`).
+Whenever a run completed, its verdict is published — including a failing run that `record` refused to
+freeze without `--allow-failing`: that refusal exits `1` with `ok: false`, `error.category: "runtime"`, and
+the run in `results[0]` (a single file) or on its `failed` item (`verdict`/`result`, a batch). It is
+`runtime`, not `usage`, because the scenario loaded and ran; the run's own evidence refused it. A refusal
+before any run (credentials, an unresolved model, the budget pre-flight, a policy refusal) has
+`results: []`. Before 4.0.0 the verdict refusal printed `results: []` with category `usage`, so the run it
+refused, and its cost, were not in the document.
 Before 4.0.0 single-file `record` set `ok` from the verdict, so that case printed `ok: false` beside exit
 `0`; and `record <empty dir/> --dry-run` printed `ok: true` beside exit `2`.
 The batch arms (`record <dir/>`, `record --rerecord-stale <dir/>`) print one payload-shaped document, last,
@@ -613,7 +620,7 @@ right before the exit:
   "items": [ { "file?": "<scenario>", "cassette?": "<cassette>",
                "status": "recorded" | "failed" | "skipped-budget",
                "error?": "string",                 // failed only
-               "verdict?": { "pass": bool, ... }, // recorded only: the run's verdict
+               "verdict?": { "pass": bool, ... }, // recorded, or failed on its verdict: the run's verdict
                "result?": { /* RunResult + verdict/provenance/outcome, as single-file record publishes it */ } } ],
   "skipped?": ["<non-scenario file>"],             // <dir/> only: files without a `prompt:`
   "error": null }
@@ -718,6 +725,8 @@ assertions (never user-authored themselves):
   "error": { "category": "usage|unanswered|boundary|runtime|internal", "message": "string", "hint?": "string" } }
 ```
 Categories come from TYPED errors (`UnansweredError`→`unanswered`, `BoundaryError`→`boundary`).
+`results` is `[]` unless a run completed before the refusal: `record` refusing to freeze a failing run
+publishes that run there (category `runtime`, exit `1`; see `record` above).
 
 **Exit codes** (branchable without parsing): `0` all-pass · `1` assertion/agent failure · `2` usage /
 unanswered-under-`fail` / runtime · `3` boundary/integrity. (`--output-format json` writes via `writeSync` so the envelope
