@@ -1234,6 +1234,7 @@ scenario's `assert:` block against an already-kept run dir — **no live agent, 
 a second:
 
 ```bash
+export COWORK_HARNESS_MODEL=claude-sonnet-5   # a run must name its model (or pass --model <id>)
 cowork-harness skill ~/my-plugin "..." --keep            # prints the run dir
 cowork-harness verify-run ~/.cowork-harness/runs/<scenario>/<sessionId>/ my-scenario.yaml
 # ✗ verify-run: 1/3 assertion(s) failed  → fix the assertion, re-run verify-run, repeat
@@ -1294,6 +1295,8 @@ the runtime — reach for it to reproduce a gate/permission flow interactively, 
 skill, or explore before authoring a scenario. It is *not* an asserted test (that's `run`); it's the
 exploratory loop.
 
+- **It needs a model** — `--model <id>` or `COWORK_HARNESS_MODEL`; a session that resolves none is refused
+  (exit 2), with or without `--raw`.
 - **Gates are answered interactively at the TTY** — `chat` carries no scripted `answers:`; an unscripted
   AskUserQuestion / permission request prompts you in the terminal.
 - **It always writes a transcript** under `runs/chat/<sessionId>` (there is no `--keep` flag); inspect it

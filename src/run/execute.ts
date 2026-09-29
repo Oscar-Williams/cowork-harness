@@ -10,9 +10,15 @@ import { homedir } from "node:os";
 import { join, dirname, resolve, basename, isAbsolute, sep } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { Scenario } from "../types.js";
-import type { RunResult, InfraErrorSource, Assertion, OutputsFsDiff } from "../types.js";
+import type { RunResult, InfraErrorSource, Assertion, OutputsFsDiff, PlatformBaseline } from "../types.js";
 import { writeRunningStatus, startStatusTicker, registerRunForCrashSafety, statusLine, type RunStatusMeta } from "./run-status.js";
-import { deriveModelProvenance, unpinnedModelWarning, resolvePinnedModel } from "./model-provenance.js";
+import {
+  deriveModelProvenance,
+  resolvePinnedModel,
+  envModelDefault,
+  ModelUnresolvedError,
+  unresolvedModelRefusal,
+} from "./model-provenance.js";
 // Runtime-only circular import: cassette.ts imports executeScenario from here, and we import buildFingerprint
 // from there. Both bindings are used only inside function bodies (call time), never at module load, so the
 // ESM live-binding cycle is safe. buildFingerprint's deps (skillSourceDirs → parseSessionFile) live here, so
@@ -25,6 +31,7 @@ import {
   loadSession,
   resolveSessionPaths,
   buildLaunchPlan,
+  resolveLaunchSources,
   userVisibleRootsFromPlan,
   readonlyFolderRootsFromPlan,
   deleteDeniedRootsFromPlan,
@@ -391,6 +398,12 @@ export function assertContradiction(scenario: Scenario): string | undefined {
   );
 }
 
+/** The tier a scenario actually runs at: its declared `fidelity`, with `cowork` resolved to hostloop or
+ *  container through the loop-decision gate (the same resolution real Cowork makes). */
+export function effectiveTier(fidelity: Scenario["fidelity"], baseline: PlatformBaseline): Exclude<Scenario["fidelity"], "cowork"> {
+  return fidelity === "cowork" ? (decideLoopFromBaseline(baseline) === "host" ? "hostloop" : "container") : fidelity;
+}
+
 /** Does this scenario need the pre-run baseline captured? Extracted from `executeScenario` so the rule is
  *  ONE named, testable thing rather than an inline predicate — the list of arming keys covers every
  *  assertion that reads the baseline (plus two that no longer do, kept deliberately — see the inline note at
@@ -471,7 +484,12 @@ export async function executeScenario(scenario: Scenario, opts: ExecuteOptions =
   // author stated it for this invocation. `COWORK_HARNESS_MODEL` is a machine-scoped DEFAULT and must only
   // fill a gap — letting it outrank a declared `model:` would make the run's model a property of the shell
   // it was launched from, which is the exact defect this field exists to prevent.
-  const resolvedModel = resolvePinnedModel(opts.modelOverride, loadedSession.model, process.env.COWORK_HARNESS_MODEL || undefined);
+  const resolvedModel = resolvePinnedModel(opts.modelOverride, loadedSession.model, envModelDefault());
+  // A run must state its model (since 4.0.0). Refused HERE, before the run dir is chosen, the status file is
+  // written or the turn begins, so a refused run leaves nothing behind. Every lane funnels through this
+  // function, so it is the backstop; `run <dir/>`, matrix, `record` batches, `skill` and `probe-dispatch`
+  // also check up front (a batch must refuse before its FIRST item spends), with the same text.
+  if (resolvedModel === undefined) throw new ModelUnresolvedError(`scenario "${scenario.name}"`);
   const withModel =
     resolvedModel !== undefined && resolvedModel !== loadedSession.model
       ? applySessionOverrides(loadedSession, { model: resolvedModel })
@@ -484,7 +502,7 @@ export async function executeScenario(scenario: Scenario, opts: ExecuteOptions =
   // reject a --session-id outside the safe charset rather than collapsing it — distinct ids like
   // "a/b" and "a-b" used to map onto the SAME persisted directory (a silent collision).
   if (opts.sessionId !== undefined && !/^[A-Za-z0-9_-]+$/.test(opts.sessionId))
-    throw new Error(
+    throw new UsageError(
       `--session-id "${opts.sessionId}" may contain only letters, digits, "_" or "-" (no path separators or other characters)`,
     );
   const stable = opts.sessionId ? `sess-${opts.sessionId}` : undefined;
@@ -496,6 +514,19 @@ export async function executeScenario(scenario: Scenario, opts: ExecuteOptions =
   // collectArtifacts / file_exists / user_visible_artifact / the trace events.jsonl scan, and untouched
   // by cpSync staging. It MUST stay here; moving it into the staged tree would surface it as an artifact.
   const originPath = join(outDir, ".origin");
+
+  // Resolve the effective tier early — it is needed to resolve the mounts just below (mount naming is
+  // tier-accurate: host-loop folders use hL, VM/container use fy), to stamp the session manifest (so a
+  // --resume at a different tier fails loud; the agent's native conversation store is tier-local), and by
+  // buildLaunchPlan. `cowork` resolves to hostloop|container via the loop-decision gate. Depends only on
+  // scenario.fidelity + baseline (both resolved above). The `[loop]` line announcing it is printed below,
+  // after the status line, where it has always been.
+  const effectiveFidelity = effectiveTier(scenario.fidelity, baseline);
+
+  // Every declared source (plugins, skills, uploads, folders, marketplaces) is resolved and checked HERE,
+  // before the run directory exists: a path that does not exist is a UsageError, and a run refused for it
+  // leaves no run dir, status.json or index row behind. buildLaunchPlan stages from this same resolution.
+  const launchSources = resolveLaunchSources(session, baseline, effectiveFidelity, !!opts.resume);
 
   if (opts.sessionId) {
     // Pinned (`sess-<id>`) run dirs are DETERMINISTIC, so on the shared (flat) runs root two different
@@ -601,13 +632,6 @@ export async function executeScenario(scenario: Scenario, opts: ExecuteOptions =
   // instead of killing the process by the signal, which runs none of them. Every tier.
   installTerminationHandler();
 
-  // Resolve the effective tier early — it is needed BOTH to stamp the session manifest below (so a
-  // --resume at a different tier fails loud; the agent's native conversation store is tier-local) AND,
-  // later, before buildLaunchPlan so mount naming is tier-accurate (host-loop folders use hL, VM/container
-  // use fy). `cowork` resolves to hostloop|container via the loop-decision gate. Depends only on
-  // scenario.fidelity + baseline (both resolved above); nothing between here and its former site read it.
-  const effectiveFidelity =
-    scenario.fidelity === "cowork" ? (decideLoopFromBaseline(baseline) === "host" ? "hostloop" : "container") : scenario.fidelity;
   if (scenario.fidelity === "cowork") process.stderr.write(`[loop] cowork → ${effectiveFidelity} (per gate 1143815894)\n`);
 
   // Refuse a `tool_not_called` naming a tool this tier provably does not serve. Placed HERE, not in the
@@ -682,12 +706,7 @@ export async function executeScenario(scenario: Scenario, opts: ExecuteOptions =
   // deliberately at turn START: the post-run path has already let `foldResources` read.
   const turnNumber = beginTurn(outDir);
 
-  const plan = buildLaunchPlan(session, baseline, outDir, effectiveFidelity, !!opts.resume, scenario.lane);
-  // Ship 1: warn (not fail) on an unpinned model. Placed HERE, at the caller, rather than inside
-  // buildLaunchPlan — that function receives no command identity, so it cannot tell a verdict-bearing
-  // run from an exploratory chat and would have to warn identically for both.
-  if (plan.model === undefined) warn(unpinnedModelWarning("verdict") + "\n");
-
+  const plan = buildLaunchPlan(session, baseline, outDir, effectiveFidelity, !!opts.resume, scenario.lane, launchSources);
   // Same layer, protocol's own hazard: this tier passes --plugin-dir, so a staged plugin's hooks execute
   // as native host processes. Gate only when a plugin actually declares runnable hooks.
   if (effectiveFidelity === "protocol") {
@@ -2174,9 +2193,47 @@ export function ablateSession<T extends { plugins: Record<string, unknown>; skil
  * file's own directory (see {@link resolveSessionPaths}). Exported for the matrix runner — cli.ts loads
  * the base session ONCE per matrix run, then applies per-cell overrides (applySessionOverrides,
  * session.ts) on top of the SAME loaded+resolved object, rather than re-resolving paths per cell. */
+/** The input-path check a preview makes (`record <file> --dry-run`): open the scenario's session, apply the
+ *  model the run would resolve, and run the same write-free source resolution `executeScenario` runs before
+ *  it creates a run dir. Throws that resolution's `UsageError` (a path that does not exist or is the wrong
+ *  kind, an effort the model does not offer). A session that does not load at all is left to the real run,
+ *  as the model pre-flight leaves it. */
+export function launchSourcesPreflight(scenario: Scenario, modelOverride: string | undefined): void {
+  let loaded: ReturnType<typeof loadSession>;
+  try {
+    loaded = loadSessionFromFile(scenario.session);
+  } catch (e) {
+    if (e instanceof UsageError) throw e;
+    return;
+  }
+  const model = resolvePinnedModel(modelOverride, loaded.model, envModelDefault());
+  const session = model !== undefined && model !== loaded.model ? applySessionOverrides(loaded, { model }) : loaded;
+  const baseline = loadBaseline(scenario.baseline);
+  resolveLaunchSources(session, baseline, effectiveTier(scenario.fidelity, baseline), false, { stageFilters: false });
+}
+
 export function loadSessionFromFile(sessionRef: string): ReturnType<typeof loadSession> {
   const baseDir = sessionRef === "(inline)" ? process.cwd() : dirname(resolve(sessionRef));
   return resolveSessionPaths(loadSession(parseSessionFile(sessionRef)), baseDir);
+}
+
+/** The pre-flight form of `executeScenario`'s model refusal, for a caller that must refuse a batch before
+ *  its first item spends (`run <dir/>`, `record <dir/>`, `--rerecord-stale`) or preview it without spending
+ *  (`record --dry-run`). Resolves the same chain — `explicit` (`--model`), the session's `model:`, then
+ *  `COWORK_HARNESS_MODEL` — and returns the refusal text, or `undefined` when a model resolves.
+ *
+ *  A session that does not load returns `undefined`: this check is not the one that reports a broken
+ *  session (the real path does, with its own message), and a dry run over files whose session paths do not
+ *  exist on this machine must not start failing on a model question it cannot answer. */
+export function unresolvedModelPreflight(scenario: Scenario, explicit: string | undefined): string | undefined {
+  if (explicit !== undefined || envModelDefault() !== undefined) return undefined;
+  let sessionModel: string | undefined;
+  try {
+    sessionModel = loadSessionFromFile(scenario.session).model;
+  } catch {
+    return undefined;
+  }
+  return sessionModel === undefined ? unresolvedModelRefusal(`scenario "${scenario.name}"`) : undefined;
 }
 
 /** THIS write's 1-based turn number, derived from how many prior turns are already archived. Pure — no

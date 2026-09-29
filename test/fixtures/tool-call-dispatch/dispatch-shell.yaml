@@ -4,6 +4,7 @@
 # (scope: main / subagent / any) arm on parented tool_use frames the real agent emitted, not only on
 # synthetic streams. Recorded once at container (sealed, committable); replayed token-free by
 # test/tool-call-real-stream.test.ts.
+# The inline session pins no model, so run it with `--model <id>` or COWORK_HARNESS_MODEL set.
 name: tool-call-dispatch-shell
 baseline: latest
 session: (inline)

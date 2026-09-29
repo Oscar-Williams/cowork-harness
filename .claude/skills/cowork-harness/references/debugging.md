@@ -128,7 +128,7 @@ plugin. Each `--plugin <dir>` appends the folder to `local_plugins`. Useful when
 depends on a sibling plugin:
 
 ```bash
-cowork-harness chat ./skills/report-gen --plugin ./skills/shared-utils
+cowork-harness chat ./skills/report-gen --plugin ./skills/shared-utils --model claude-sonnet-5
 ```
 
 **Note:** `--raw` mode (native `docker run -it`) can't honor the harness-managed flags, so `--upload`,

@@ -2911,6 +2911,11 @@ def build_scenario(args):
              + ("sandbox + real default-deny egress." if tier == "container"
                 else "see references/fidelity-and-answers.md.")
              + " on_unanswered: fail keeps this deterministic for CI.")
+    if args.session:
+        L.append(f"# Model: {args.session} must set `model:`, or run with `--model <id>` or COWORK_HARNESS_MODEL set.")
+    else:
+        L.append("# Model: the inline session pins none — add `session:` with a file that sets `model:`, or run")
+        L.append("# with `--model <id>` or COWORK_HARNESS_MODEL set. A run that resolves no model is refused.")
     if args.skill:
         L.append(f"# Mount the skill under test ({args.skill}) via a session: e.g.")
         L.append("#   plugins:")

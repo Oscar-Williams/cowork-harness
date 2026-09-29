@@ -63,7 +63,12 @@ jobs:
           path: scenarios/
           version: "^3"
           anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          model: claude-sonnet-5 # used only where a scenario's session sets no `model:`
 ```
+
+The live lane needs a model: each scenario's session sets `model:`, or the Action's `model` input (exported
+as `COWORK_HARNESS_MODEL`) fills in where a session does not. A `run` that resolves none is refused (exit 2)
+before anything runs.
 
 Why this is a step *you* write, not an Action input the harness provides for you: pulling Anthropic's
 binary is a call about your own relationship with their distribution terms — keeping it in your own
@@ -465,7 +470,9 @@ human rendering — warnings, verdict, `status`'s summary line — to **stderr**
 A wrapper that captures only stdout gets an empty log and, if it greps that for a state, a silent false
 negative. Capture stderr for the human trail (`2> run.stderr.log`), or ask for JSON and parse stdout.
 (Commands whose whole job is to print a value — `--version`, `assertions --list`, `scaffold`, `gates`,
-`skill --dry-run` — write it to stdout by design, with or without the flag.)
+`skill --dry-run` — write it to stdout by design. Under `--output-format json` the value rides inside the
+envelope: `scaffold`'s YAML is `.scenario`, `skill --dry-run`'s preview is the envelope's own fields;
+`gates` stays an NDJSON stream. `--help` always prints to stderr.)
 
 `verify-cassettes` emits its **own** envelope (`{command, ok, coverage, results[]}` with per-file
 `findings`/`staleness`/`unverifiable`/`notes`/`version`/`error`), published as

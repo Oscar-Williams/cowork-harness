@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { buildRepeatRollup, armLabel } from "../src/run/repeat.js";
@@ -72,6 +72,7 @@ describe.skipIf(!can)("the rollup verdict line names the arm", () => {
   // flag and exits 0 without spawning an agent, so a usage-level refusal would surface here.
   it("`--ablate-skill --repeat` is still accepted — the combination was NOT banned", () => {
     const d = mkdtempSync(join(tmpdir(), "arm-"));
+    mkdirSync(join(d, "plugin")); // a dry run refuses a plugin folder that does not exist
     const raw = spawnSync("node", [CLI, "skill", "./plugin", "measure baseline variance", "--dry-run", "--ablate-skill", "--repeat", "3"], {
       encoding: "utf8",
       cwd: d,

@@ -951,6 +951,29 @@ to parse is a **failure**, never a silent skip. Zero scenarios discovered → lo
 also **refuses to freeze a failing live run** into a cassette (`--allow-failing` overrides) — a committed
 red cassette is a latent false-signal.
 
+**Batch JSON.** Under `--output-format json` a directory batch and a `--rerecord-stale` sweep print **one**
+document, last, right before the exit (progress lines stay on stderr):
+
+```jsonc
+{ "tool": "cowork-harness", "version": "…", "command": "record", "ok": false,
+  "target": "scenarios/",                       // "rerecordStale": true on a --rerecord-stale sweep
+  "items": [
+    { "file": "scenarios/a.yaml", "cassette": "cassettes/a.cassette.json", "status": "recorded",
+      "verdict": { "pass": true, … }, "result": { /* the RunResult, as single-file record publishes it */ } },
+    { "file": "scenarios/b.yaml", "status": "failed", "error": "…" },
+    { "file": "scenarios/c.yaml", "status": "skipped-budget" }
+  ],
+  "skipped": ["scenarios/session.yaml"],        // not a scenario (no `prompt:`)
+  "error": null }
+```
+
+`ok` is the exit code's verdict on every `record` path (ok ⇔ exit 0) — a recorded item's own verdict is
+`items[].verdict.pass`, a single file's is `results[0].verdict.pass`, and the two differ when
+`--allow-failing` records a failing run. A file that does not load is a `failed` item. A batch the
+`--max-budget-usd` cap stopped early exits 0, so `ok: true` can come with `skipped-budget` items. A sweep
+with nothing stale prints `ok: true` and `items: []`. A refusal before the first recording (credentials,
+an unresolved model, the budget pre-flight, a slug collision) prints the standard error envelope instead.
+
 ### Parallel re-records (`--concurrency`)
 
 A fleet re-record is sequential by default (one ~7–8 min live run at a time). `--concurrency <N>` records a

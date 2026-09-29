@@ -225,7 +225,7 @@ Hardening a skill is a loop: run → read what it did → fix → run again. Two
 
 1. **Verify before you trust.** A green run is not a correct run, and a skill's self-reported finding (a
    self-critique appendix, "I extracted X") is not real until its cited evidence is found in the run's own
-   output. **Reproduce before acting on a finding:** `cowork-harness skill <folder> "<prompt>" --repeat 5 --label gen-1`
+   output. **Reproduce before acting on a finding:** `cowork-harness skill <folder> "<prompt>" --model <id> --repeat 5 --label gen-1`
    runs the same skill+prompt N times (2-100) and prints a variance rollup instead of a single pass/fail —
    `--repeat` works on the `skill` lane, not just `run`. A single green run proves it passed *once*.
    Companions: `--min-pass-rate`, `--stop-on-diverge`, `--max-budget-usd`, `--allow-budget-stop`.
@@ -265,10 +265,9 @@ Hardening a skill is a loop: run → read what it did → fix → run again. Two
    snapshotting the skill folder next to the run dir. `skillHash` is content-exact but one-way, so an
    edit mid-batch silently splits the dataset into two generations — `stats --group-by skill-hash`
    separates them afterwards, but a hash whose source was never frozen names a generation that is
-   unrecoverable, which makes the comparison uninterpretable rather than merely noisy. And with no `model:` in the session and no
-   `--model` on the command (every lane takes it), each run uses whatever the staged agent binary
-   defaults to, so a before/after can silently straddle two models — the run warns when nothing pinned
-   one. Read `result.json` back to confirm: `modelSource` says whether anything pinned the model at all,
+   unrecoverable, which makes the comparison uninterpretable rather than merely noisy. And pin the model in the session (`model:`), not
+   only through `COWORK_HARNESS_MODEL`: a run that resolves none is refused, but the env var is a property
+   of the machine, so a before/after run from two shells can silently straddle two models. Read `result.json` back to confirm: `modelSource` says whether anything pinned the model at all,
    and `modelPinHonored` whether the pin survived (**absent means unverifiable, not "yes"**). `models`
    lists what served the run — ignore any `<…>`-wrapped entry (`<synthetic>` marks a turn the agent
    fabricated locally, not a model).

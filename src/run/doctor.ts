@@ -643,7 +643,7 @@ export function cmdDoctor(args: string[]): void {
   }
   applyParsedCommandGlobals("doctor", p, isJsonOutput(args));
   const tier = (p.options["--tier"] as Tier) ?? "container";
-  const json = p.options["--output-format"] === "json";
+  const json = isJsonOutput(args);
 
   // reject unexpected positional arguments.
   if (p.positionals.length > 0) {

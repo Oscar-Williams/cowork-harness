@@ -61,6 +61,84 @@ All notable changes to this project are documented here. The format is based on
     Pin `version: "^3"` to defer the change.
   - The ad-hoc lanes keep their defaults: `skill --fidelity` (and `$COWORK_HARNESS_FIDELITY`) still
     default to `container`, and `probe-dispatch` to `hostloop`.
+- **A run that resolves no model is refused.** It warned since 3.1.0 and ran on whatever model the local
+  agent binary defaulted to, which made the run's model, and the part of the system prompt the agent
+  selects by model, a property of the machine. A run's model comes from `--model` (or a `--matrix`
+  `models:` axis), then the session's `model:`, then `COWORK_HARNESS_MODEL`; when none names one, the
+  command refuses before it spends or creates a run dir, and the error names all three. An empty
+  `COWORK_HARNESS_MODEL` counts as unset.
+  - *Exit codes:* `run` (a file, a directory, `--repeat`, `--matrix`), `skill`, `probe-dispatch`, `chat`
+    (with or without `--raw`) and `critique` exit 2 (usage). `record` exits 1, like its other refusals of
+    a scenario that loaded, on every path: a file, a directory, `--rerecord-stale`, and `--dry-run`, which
+    now opens the scenario's session file to answer this. `record <dir/> --dry-run` lists each such file
+    under `refusals[]`. A batch (`run <dir/>`, `--matrix`, `record <dir/>`, `--rerecord-stale`) checks
+    every item before the first one runs and names each offender. A real `record` with no credentials
+    still answers with the credential refusal first (exit 2, `runtime`); `--dry-run` needs none.
+  - *An empty `COWORK_HARNESS_MODEL`* counts as unset, but an exported empty value still blocks one in
+    `.env` or `--dotenv`, since a dotenv file never overrides an exported variable. Unset it instead.
+  - *Not refused:* `skill --dry-run` reports `"model": null` in its preview instead. `critique
+    --corpus-only` runs no turn. `replay`, `verify-cassettes` and `lint` run no agent and are unaffected.
+  - *Who is affected:* any session file without `model:` that is run without `--model` or
+    `COWORK_HARNESS_MODEL`, and every `skill`, `probe-dispatch`, `chat` or `critique` invocation without
+    one (their sessions are built inline and carry no model). `skill --resume` needs the model again: the
+    resumed session does not store it.
+  - *To fix:* set `model:` in the session file, which keeps the model part of the scenario (recommended
+    for anything you re-run or compare). Or pass `--model <id>`, or set `COWORK_HARNESS_MODEL` (for
+    example in `.env`) as a machine default.
+  - *Sessions with committed cassettes:* a session file's `model:` is part of the session fingerprint, so
+    adding it to a session that cassettes were recorded against makes `verify-cassettes` report them stale
+    (exit 1) until you re-record them. To migrate without re-recording, supply the model with `--model` or
+    `COWORK_HARNESS_MODEL`, which the fingerprint does not include; move it into the session when you
+    next re-record.
+  - *Action users:* `command: run` needs a model the same way. Set it in the session, pass the new `model`
+    input, or use `extra-args: --model <id>`. A job-level `env: COWORK_HARNESS_MODEL` also works. Pin
+    `version: "^3"` to defer the change.
+
+- **`COWORK_HARNESS_OUTPUT_FORMAT=json` selects JSON on every command's success path.** `doctor`, `status`,
+  `verify-run`, `vm`, `analyze-skill`, `replay`, `verify-cassettes` and `critique` honoured the variable
+  only when they failed: a failure printed the JSON error envelope, a success printed human text on
+  stderr with stdout empty. They now print the same document the `--output-format json` flag prints.
+  - *Who is affected:* a job that sets `COWORK_HARNESS_OUTPUT_FORMAT=json` and relied on these commands
+    printing text when they succeed.
+  - *To keep the old behaviour:* pass `--output-format text` to those commands; the flag overrides the
+    variable.
+- **`record`'s `ok` means "exited 0" in every arm.** The recording's own verdict is `results[0].verdict.pass`
+  (a single file) or `items[].verdict.pass` (a batch). Two outputs change: a single-file `record
+  --allow-failing` of a failing run printed `ok: false` beside exit 0 and now prints `ok: true`; `record
+  <empty dir/> --dry-run` printed `ok: true` beside exit 2 and now prints `ok: false`.
+  - *Who is affected:* a consumer that read `ok` from `record --allow-failing` as the run's verdict,
+    including the packaged Action's `ok` output for `command: record`.
+  - *To keep the old behaviour:* read `.results[0].verdict.pass` instead of `.ok`.
+- **`gates <dir>` without `--follow` refuses a directory that does not exist, and a malformed gate
+  request.** Both exited 0 with nothing printed, which is also what a directory with no pending gate
+  prints. A missing directory is now a usage error and a request that cannot be parsed is a runtime
+  error, both exit 2. A path that exists but is not a directory is a usage error with or without
+  `--follow`. `--follow` still waits for a directory that does not exist yet, and now says so once on
+  stderr.
+  - *Who is affected:* a script that polls `gates <dir>` before the run has created the directory.
+  - *To keep the old behaviour:* create the directory first, or use `gates <dir> --follow`, which waits
+    for it.
+- **`skill <plugin-folder> … --dry-run` exits 2 when a path it names does not exist or is the wrong
+  kind** (the plugin folder, `--plugin`, `--marketplace`, `--upload`, `--folder`: a file where a folder is
+  required, a folder passed to `--upload`, two uploads with the same file name). It printed a preview and
+  exited 0. A preview of a path that is not there previews nothing. `--ablate-skill` does not skip the
+  check: ablation drops the plugin from the run, but the path is still your input. An unresolved model is
+  not refused: the preview still reports `"model": null`. Under `COWORK_HARNESS_SOFT_MISSING` a missing
+  path is excluded instead, and the dry run now prints the exclusion warning the real run prints.
+  - *`record <file> --dry-run`* makes the same check over the scenario's session (uploads, folders,
+    plugins, marketplaces, skills) and refuses a bad path with record's exit 1; it exited 0.
+  - *Who is affected:* a check that dry-runs `skill` or `record` against a path that is created later.
+  - *To keep the old behaviour:* none; create the path before the dry run.
+- **stdout under `--output-format json` is one framed document or nothing.** Not a covered envelope, listed
+  so no JSON consumer is surprised:
+  - `scaffold <run>` prints `{…, "command": "scaffold", "ok": true, "scenario": "<yaml>", "out": <path or
+    null>, "error": null}` instead of the bare YAML. Text mode still prints the YAML. *To keep the old
+    behaviour:* read `.scenario`, or pass `--output-format text`.
+  - `skill --dry-run` wraps its preview in the standard frame (`tool`, `version`, `command`, `ok`,
+    `dryRun: true`, the preview's fields, `error`). Text mode still prints the bare object.
+  - `lint --help`, `lint-skill --help` and `critique --help` print their help on stderr with stdout empty,
+    in both modes, like every other command. `lint`'s printed a usage-error document under JSON;
+    `critique`'s printed help on stdout.
 
 ### Upgrade notes
 
@@ -114,6 +192,9 @@ All notable changes to this project are documented here. The format is based on
     prompt assets) is byte-identical between the two releases; `verify-cassettes` is clean and all four
     replay green under `--strict`. A real re-record is owed.
 
+- **The packaged Action takes a `model` input** for the live `run` lane. It is exported as
+  `COWORK_HARNESS_MODEL` when set, so it fills in where a scenario's session sets no `model:`. Left empty,
+  it exports nothing, so a job-level `COWORK_HARNESS_MODEL` still applies.
 - **Object form of `tool_called` / `tool_not_called`:** `{tool, input, input_any, result, scope,
   subagent_type, count}`. It asserts what a call carried (top-level input fields, as regexes), where it
   ran (`main` by default, `subagent` at any depth, or `any`), and what its paired result said.
@@ -248,6 +329,37 @@ All notable changes to this project are documented here. The format is based on
   `✗ broken:` / `✗ refused:` lines now also go to stderr whenever a cap is passed. Every other outcome
   (pass, broken, refused, all broken, nothing discovered) still prints one payload with the same exit
   code, and text-mode output is unchanged.
+- **`record <dir/>` and `record --rerecord-stale <dir/>` print one JSON document under `--output-format
+  json`.** Both printed nothing on stdout. The document comes last, right before the exit, and lists every
+  item: `file` and/or `cassette`, `status` (`recorded`, `failed` or `skipped-budget`), `error`, and for a
+  recorded item its `verdict` and `result` in the same shape single-file `record` publishes. A file that
+  did not load is a failed item. `ok` follows the exit code, so a batch the budget cap stopped early is
+  `ok: true` with its `skipped-budget` items listed. With nothing stale, `--rerecord-stale` prints
+  `ok: true` and `items: []`.
+- **`gates <dir> --follow` reports a persistently malformed gate request as a `runtime` error,** not
+  `internal`. Gate lines already streamed stay on stdout; the error envelope is the last line.
+- **`critique`'s usage and pre-flight refusals print the error envelope under `--output-format json`**
+  (no skill folder, a folder that does not exist, a target staging would not deliver, no model). They
+  printed only stderr text. Text mode and the exit code (2) are unchanged.
+- **A path that does not exist, or is the wrong kind, is a usage error, not an internal one, and leaves no
+  run directory.** A plugin folder, `--upload`, `--folder`, a session's `uploads`/`folders`/`projects`/
+  `skills.local`/`local_plugins`/`local_marketplaces` (or a marketplace `entry.source`), an `enabled` plugin
+  missing from its local marketplace, a file where a folder is required (or the reverse), two sources with
+  one mount destination, a `plugins.config_dir` that is not a directory, and a `--session-id` like `a/b`
+  were reported as category `internal`, the category for a harness bug, and `run`/`skill` left a run dir
+  with a `status.json` behind. The sources are now checked before the run dir is created. `record` still
+  exits 1 for a refused recording.
+- **`verify-run` with a run dir that does not exist or is a file, or a scenario file that does not load, is
+  a usage error** (it was `runtime`). A directory that holds no completed run is still `runtime`. Exit 2 either way.
+- **`answer <dir> --gate N --answer "q=a"` on a missing directory or gate is a usage error,** like the
+  `--choose` form, instead of an internal error. A gate request that exists but cannot be read or parsed,
+  or an answer that cannot be written (an unwritable directory), is a `runtime` error, as `gates` reports
+  it; the message names the request file's own error.
+- **A session `effort:` the schema rejects, or that the model does not offer, and an upload whose file name
+  cannot be a mount name (a `:`), are usage errors** with one readable line (the full schema issues in
+  `error.hint`), instead of an internal error carrying a raw issue array.
+- **`lint` under `--output-format json` no longer turns a python exit 0 without JSON into a green:** it is
+  an internal error (exit 2). The only known trigger was `--help`, which no longer reaches that path.
 
 ## [3.10.0] — 2026-09-27
 

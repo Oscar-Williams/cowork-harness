@@ -18,7 +18,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { parseDotenv, DotenvReadError } from "../dotenv.js";
 import { expandUserPath } from "../session.js";
 import type { ArgSpec, ParsedArgs } from "../cli-args.js";
-import { fail } from "./envelope.js";
+import { fail, envOutputFormat } from "./envelope.js";
 import { writeAllSync } from "../io.js";
 
 const log = (s: string) => writeAllSync(2, s + "\n");
@@ -72,7 +72,7 @@ export function applyCommandGlobal(command: string, flag: CommandGlobalFlag, val
   const protectedKeys = state?.protectedKeys ?? new Set(Object.keys(process.env));
   // The env var only ever selects json when it says exactly "json" (isJsonOutput's rule), so compare the
   // EFFECTIVE format: a file that restates what is already in force changes nothing and is not refused.
-  const effective = () => (process.env.COWORK_HARNESS_OUTPUT_FORMAT === "json" ? "json" : "text");
+  const effective = envOutputFormat;
   const before = effective();
   const loaded: string[] = [];
   for (const [key, val] of entries) {

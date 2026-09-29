@@ -23,6 +23,7 @@ function cli(args: string[], cwd: string, env: Record<string, string> = {}) {
 describe.skipIf(!can)("--allow-stall is accepted by the open-ended lanes", () => {
   it("skill --allow-stall --dry-run: exit 0, and the plan carries allow_stall", () => {
     const d = mkdtempSync(join(tmpdir(), "allow-stall-"));
+    mkdirSync(join(d, "plugin")); // a dry run refuses a plugin folder that does not exist
     const r = cli(["skill", "./plugin", "hi", "--allow-stall", "--dry-run"], d);
     expect(r.code).toBe(0);
     expect(JSON.parse(r.stdout).allow_stall).toBe(true);
@@ -30,6 +31,7 @@ describe.skipIf(!can)("--allow-stall is accepted by the open-ended lanes", () =>
 
   it("skill without the flag: the plan does not claim it", () => {
     const d = mkdtempSync(join(tmpdir(), "allow-stall-"));
+    mkdirSync(join(d, "plugin"));
     const r = cli(["skill", "./plugin", "hi", "--dry-run"], d);
     expect(r.code).toBe(0);
     expect(JSON.parse(r.stdout).allow_stall).toBeUndefined();
@@ -46,7 +48,7 @@ describe.skipIf(!can)("--allow-stall is accepted by the open-ended lanes", () =>
     const d = mkdtempSync(join(tmpdir(), "allow-stall-"));
     mkdirSync(join(d, "plugin"));
     writeFileSync(join(d, "plugin", "SKILL.md"), "---\nname: p\ndescription: d\n---\nbody\n");
-    const r = cli(["probe-dispatch", "./plugin", "hi", "--allow-stall", "--fidelity", "container"], d, {
+    const r = cli(["probe-dispatch", "./plugin", "hi", "--allow-stall", "--fidelity", "container", "--model", "claude-sonnet-5"], d, {
       COWORK_HARNESS_FORBID_SPAWN: "1",
     });
     expect(r.out).not.toMatch(/unknown flag/);

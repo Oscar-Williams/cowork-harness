@@ -159,6 +159,7 @@ describe.skipIf(!can)("skill/common flags accept --flag=value identically to --f
 
   it("--fidelity=container (equals form) is honored, not rejected", () => {
     const d = mkdtempSync(join(tmpdir(), "g5-"));
+    mkdirSync(join(d, "plugin")); // a dry run refuses a plugin folder that does not exist
     const raw = spawnSync("node", [CLI, "skill", "./plugin", "hi", "--dry-run", "--fidelity=container"], { encoding: "utf8", cwd: d });
     expect(raw.status).toBe(0);
     expect(JSON.parse(raw.stdout).fidelity).toBe("container");
@@ -187,6 +188,7 @@ describe.skipIf(!can)("skill/common flags accept --flag=value identically to --f
 
   it("--timeout <ms> is parsed onto the scenario (visible in the dry-run plan)", () => {
     const d = mkdtempSync(join(tmpdir(), "g5-"));
+    mkdirSync(join(d, "plugin"));
     const raw = spawnSync("node", [CLI, "skill", "./plugin", "hi", "--dry-run", "--timeout", "5000"], { encoding: "utf8", cwd: d });
     expect(raw.status).toBe(0);
     expect(JSON.parse(raw.stdout).timeout_ms).toBe(5000);
@@ -636,7 +638,7 @@ describe.skipIf(!can)("CLI arg guards — run --repeat (E1)", () => {
       return { code: r.status, out: r.stdout + r.stderr };
     };
     withRuns(["stats", "--reindex"]);
-    const r = withRuns(["run", "pricey.yaml", "--max-budget-usd", "1.0"]);
+    const r = withRuns(["run", "pricey.yaml", "--max-budget-usd", "1.0", "--model", "claude-sonnet-5"]);
     expect(r.out).not.toMatch(/--max-budget-usd requires --repeat/);
     expect(r.out).toMatch(/refused before spending/);
     expect(r.code).toBe(2);
@@ -672,7 +674,7 @@ describe.skipIf(!can)("CLI arg guards — run --matrix (E3)", () => {
     const d = mkdtempSync(join(tmpdir(), "g-matrix-"));
     writeFileSync(join(d, "s.yaml"), "fidelity: container\nprompt: hi\n");
     writeFileSync(join(d, "m.yaml"), "baselines: [a, b]\n");
-    const r = run(["run", "s.yaml", "--matrix", "m.yaml", "--repeat", "2"], d);
+    const r = run(["run", "s.yaml", "--matrix", "m.yaml", "--repeat", "2", "--model", "claude-sonnet-5"], d);
     // The combination passes ARG validation (the former v1 rejection is gone). The fake baselines then
     // fail cell RESOLUTION — a run failure (1), observably distinct from a usage error (2).
     expect(r.code).toBe(1);

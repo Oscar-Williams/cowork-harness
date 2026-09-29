@@ -6,6 +6,7 @@
 # Pinned to a Desktop BEFORE 2.7032.0, where the host-loop agent ran at the outputs dir. From 2.7032.0 it
 # runs at /var/empty and the same relative Write is refused — that contract is probed by
 # subagent-write-refused-probe.scenario.yaml against `latest`.
+# The inline session pins no model, so run it with `--model <id>` or COWORK_HARNESS_MODEL set.
 name: subagent-write-probe
 baseline: desktop-2.2553.1
 session: (inline)

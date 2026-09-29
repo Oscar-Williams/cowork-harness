@@ -43,7 +43,10 @@ import {
   parseSessionFile,
   slugForPath,
   FidelityMissingError,
+  unresolvedModelPreflight,
+  launchSourcesPreflight,
 } from "./execute.js";
+import { unresolvedModelRefusal } from "./model-provenance.js";
 import { UsageError, UnknownBaselineError, compactSchemaError } from "../errors.js";
 import { preflightBudget, preflightBatchBudget, batchBudgetTracker, estimateBatchCost, batchCostEstimateLine } from "./budget.js";
 
@@ -113,7 +116,7 @@ import { toolCallObjectRegexes } from "../tool-call-assert.js";
 import { hasRedactionToken } from "../redactable-literal.js";
 import { extractComputerLinks } from "./computer-links.js";
 import { makeRenderer, renderFooter, type RenderPlan } from "./renderer.js";
-import { jsonEnvelope, jsonPayloadEnvelope, fail, isJsonOutput, pkgVersion } from "./envelope.js";
+import { jsonEnvelope, jsonPayloadEnvelope, fail, isJsonOutput, pkgVersion, publishedResult } from "./envelope.js";
 import { parseArgs } from "../cli-args.js";
 import { resolveInputs } from "./inputs.js";
 import { realProbe } from "./doctor.js";
@@ -3686,7 +3689,7 @@ export const RECORD_ALLOWLIST: readonly UsageAllowlistEntry[] = [
 // textually diverged --margins prose — the cli.ts wording is kept as the single source).
 export const RECORD_USAGE =
   "usage: record <scenario.yaml | dir/> [--out <file>] [--output-format text|json] [--model <id>] [--rerecord-stale] [--from-embedded] [--force] [--no-redact] [--allow-failing] [--max-artifact-bytes <n>] [--dry-run] [--concurrency <N>] [--max-budget-usd <x>] [--allow-host-inventory-fixture] [--allow-host-inventory-findings]\n" +
-  "       --model <id>: pin the model for this recording, overriding the session's `model:` (env COWORK_HARNESS_MODEL sets a default). A cassette freezes whatever model recorded it, so pinning here is what makes the recording's model a stated fact rather than a property of this machine.\n" +
+  "       --model <id>: pin the model for this recording, overriding the session's `model:` (env COWORK_HARNESS_MODEL sets a default). A cassette freezes whatever model recorded it, so pinning here is what makes the recording's model a stated fact rather than a property of this machine. A scenario that resolves no model (this flag, the session's `model:`, or the env var) is refused before spending, exit 1 — on --dry-run and on every batch item before the first spawn.\n" +
   "       --allow-host-inventory-fixture: proceed PAST THE PRE-FLIGHT when recording at protocol/hostloop into a repo-visible path. Those tiers inherit the host env, so the cassette could freeze THIS machine's MCP servers/agents/account into a committed fixture; the record is refused by default. This bypasses that pre-flight only — the finished recording is still scanned, and a real finding still refuses the write and quarantines it.\n" +
   "       --dry-run: resolve and CHECK without recording. A single scenario file runs every pre-spend refusal the real record runs (prompt policy, assert contradictions, host-inventory, slug collision) and refuses identically — same --out, same flags, so the verdict is binding. A DIRECTORY reports the path-dependent ones as advisory 'would-refuse'/'would-warn' notes instead, labelled by verdict kind (a dir target takes no --out, so the destination is a guess), and gates only on the path-independent ones.\n" +
   "       --allow-host-inventory-findings: write a recording the scan DID flag. The separate, louder decision; needed only when the captured inventory is genuinely part of the fixture.\n" +
@@ -3696,7 +3699,8 @@ export const RECORD_USAGE =
   '       answer gates LIVE: [--decider-dir <dir>] (single scenario only) | [--decider-llm [--intent "<one line>"] [--decider-model <id>]] | [--on-unanswered fail|first]\n' +
   "       (a live decider flags the cassette non-deterministic — re-recording may drift; replay stays deterministic. --rerecord-stale rejects these flags.)\n" +
   "       --quiet: suppress the --dry-run readiness/scenario preview block (✗ broken:/skipped: lines and exit codes are unaffected).\n" +
-  "       NOTE: --allow-failing only relaxes the post-run VERDICT gate; it does NOT salvage an unanswered gate (that throws before any cassette is written — use --on-unanswered first / a decider).";
+  "       NOTE: --allow-failing only relaxes the post-run VERDICT gate; it does NOT salvage an unanswered gate (that throws before any cassette is written — use --on-unanswered first / a decider).\n" +
+  "       --output-format json: one document on stdout, last. Its `ok` is the exit code's verdict (ok ⇔ exit 0) on every path; the recorded run's verdict is results[0].verdict.pass (a file) or items[].verdict.pass (a dir/ batch or --rerecord-stale, one item per scenario or cassette: status recorded|failed|skipped-budget). They differ when --allow-failing records a failing run.";
 
 /** `record <scenario.yaml | dir> [--out <file>] [--rerecord-stale] [--no-redact] [--allow-failing]` —
  *  run live + save a cassette. A single file records one; a dir batches; --rerecord-stale treats
@@ -3725,6 +3729,32 @@ export function hostInventoryFlagHint(command: "record" | "replay" | "verify-cas
       "pre-flight refusal and --allow-host-inventory-findings writes a recording the scan flagged."
     );
   return undefined;
+}
+
+/** One entry of a `record <dir/>` / `record --rerecord-stale <dir/>` JSON envelope. `file` is the scenario
+ *  (dir batch), `cassette` the cassette written or re-recorded. A recorded item carries the run's
+ *  `verdict` and the `result` in the same published projection single-file `record` uses. */
+export interface RecordBatchItem {
+  file?: string;
+  cassette?: string;
+  status: "recorded" | "failed" | "skipped-budget";
+  error?: string;
+  verdict?: ReturnType<typeof publishedResult>["verdict"];
+  result?: ReturnType<typeof publishedResult>;
+}
+
+function recordedItem(base: { file?: string; cassette?: string }, result: RunResult, cassettePath: string): RecordBatchItem {
+  const published = publishedResult(result);
+  return { ...base, cassette: cassettePath, status: "recorded", verdict: published.verdict, result: published };
+}
+
+/** The batch arms' single JSON document. `ok` is the exit code's verdict (ok ⇔ exit 0): true when no item
+ *  failed — which includes a batch the budget cap stopped early (`skipped-budget` items, exit 0). */
+function recordBatchEnvelope(
+  ok: boolean,
+  payload: { target: string; rerecordStale?: true; items: RecordBatchItem[]; skipped?: string[] },
+): string {
+  return jsonPayloadEnvelope("record", ok, payload);
 }
 
 export async function cmdRecord(args: string[]) {
@@ -3971,6 +4001,11 @@ export async function cmdRecord(args: string[]) {
         // Path-INDEPENDENT: these are the real verdicts on any path, so they still refuse.
         const why = promptPolicyRejection(sc) ?? assertContradiction(sc);
         if (why) refusals.push({ file: f, message: why });
+        // Also path-independent: whether a model resolves depends on `--model` (applied batch-wide), the
+        // session and the environment, all of which this arm knows exactly as the real batch will. Opening
+        // the session is new I/O on this arm; a session that does not load is skipped, not refused.
+        const noModel = unresolvedModelPreflight(sc, modelOverride);
+        if (noModel) refusals.push({ file: f, message: noModel });
         // Path-dependent: reported, never gating. `preSpendVerdicts` re-runs promptPolicyRejection, which is
         // already covered above — drop that one here rather than reporting it twice.
         for (const v of preSpendVerdicts(sc, defaultCassettePath(sc.name), {
@@ -3998,9 +4033,10 @@ export async function cmdRecord(args: string[]) {
       // still refuse. It used to be written first, and the budget gate below then wrote a second (error)
       // envelope: two documents on stdout, the first usually `ok: true`, a false green for any consumer
       // reading line 1. (The single-file arm below was ordered this way already.)
+      // `ok` is the exit code's verdict (ok ⇔ exit 0): nothing discovered exits 2, so it is not ok either.
       const emitPayload = () =>
         out(
-          jsonPayloadEnvelope("record", refusals.length === 0 && disc.broken.length === 0, {
+          jsonPayloadEnvelope("record", disc.scenarios.length > 0 && refusals.length === 0 && disc.broken.length === 0, {
             dryRun: true,
             target,
             scenarios: disc.scenarios,
@@ -4112,6 +4148,19 @@ export async function cmdRecord(args: string[]) {
     // Exit 1, not the `fail()` default of 2 — see the refusal below for why the preview owes the real
     // command's code.
     if (contradiction) return fail("record", "usage", contradiction, undefined, asJson, 1);
+    // The real record refuses a scenario that resolves no model (executeScenario, and the pre-flight below),
+    // with exit 1. This arm opens the scenario's session to answer it, so the preview agrees.
+    const noModel = unresolvedModelPreflight(scenario, modelOverride);
+    if (noModel) return fail("record", "usage", noModel, undefined, asJson, 1);
+    // The input paths the session declares, checked the way `skill --dry-run` checks its own (existence and
+    // kind; not the git tracked-set filter): a preview of a path that is not there previews nothing. A
+    // scenario that loaded and is refused exits 1, record's rule.
+    try {
+      launchSourcesPreflight(scenario, modelOverride);
+    } catch (e) {
+      if (e instanceof UsageError) return fail("record", "usage", `record: ${e.message}`, e.hint, asJson, 1);
+      throw e;
+    }
     // mirror the EXACT default cassette path recordScenarioObject uses (slugForPath via the shared
     // defaultCassettePath helper) so a name with spaces/separators reports the same path it writes.
     const cassettePath = p.options["--out"] ?? defaultCassettePath(scenario.name);
@@ -4247,6 +4296,7 @@ export async function cmdRecord(args: string[]) {
     const stale = selectStaleCassettes(target);
     if (stale.length === 0) {
       log(`✓ record --rerecord-stale: all cassettes under ${target} are fresh — nothing to re-record`);
+      if (asJson) out(recordBatchEnvelope(true, { target, rerecordStale: true, items: [] }));
       return process.exit(0);
     }
     const staleTotal = stale.length;
@@ -4258,6 +4308,30 @@ export async function cmdRecord(args: string[]) {
       const rc = readCassette(cp);
       if (!("error" in rc)) staleNames.push(rc.cassette.scenario.name);
     }
+    // Every item must resolve a model, checked before the first re-record for the same reason as the budget:
+    // an item refused mid-batch would come after the earlier ones were paid for. Each item is resolved the way
+    // the loop below resolves it (its on-disk source, or the embedded snapshot under --from-embedded); one
+    // that cannot be resolved or loaded here is left to the loop, which reports it.
+    const staleUnpinned: string[] = [];
+    for (const { path: cp } of stale) {
+      const rc = readCassette(cp);
+      if ("error" in rc) continue;
+      const src = _resolveRerecordSource(cp, rc.cassette);
+      let sc: Scenario | undefined;
+      if (src.path) {
+        try {
+          sc = parseScenarioFile(src.path);
+        } catch {
+          continue;
+        }
+      } else if (fromEmbedded) {
+        const sessionRef = rc.cassette.scenario.session === "(inline)" ? "(inline)" : join(dirname(cp), rc.cassette.scenario.session);
+        sc = { ...rc.cassette.scenario, session: sessionRef };
+      }
+      if (sc && unresolvedModelPreflight(sc, modelOverride)) staleUnpinned.push(src.path ?? cp);
+    }
+    if (staleUnpinned.length)
+      return fail("record", "usage", `record: ${unresolvedModelRefusal(staleUnpinned.join(", "))}`, undefined, asJson, 1);
     if (maxBudgetUsd !== undefined) {
       preflightBatchBudget("record", staleNames, maxBudgetUsd, asJson);
       if (concurrency > 1) warn(CONCURRENCY_BUDGET_CAVEAT(concurrency));
@@ -4278,16 +4352,22 @@ export async function cmdRecord(args: string[]) {
     // Each item targets a DISTINCT committed cassette path (`cassettePath: cp`), so a parallel re-record can
     // never collide on output. Runs are fully isolated (unique sidecar networks/proxy per run), so the only
     // bound is --concurrency. Output lines are index-tagged so interleaved completions stay readable.
+    // One entry per stale cassette, in input order, for the --output-format json envelope.
+    const staleItems: RecordBatchItem[] = new Array(staleTotal);
     const outcomes = await pMapBounded(stale, concurrency, async ({ path: cp, staleness }, i) => {
       const tag = `[${i + 1}/${staleTotal}]`;
       if (staleBudget.stopped()) {
         staleSkipped++;
         log(`  · ${tag} ${cp} SKIPPED — --max-budget-usd reached; this cassette was NOT re-recorded and stays stale`);
-        return true; // not a failure: an incomplete batch, same framing as the run --repeat lane
+        staleItems[i] = { cassette: cp, status: "skipped-budget" };
+        // Not a failure: exit 0 with the skip reported. Unlike `run --repeat`, which fails a budget-stopped
+        // batch unless --allow-budget-stop, a record batch stopped by its cap still exits 0.
+        return true;
       }
       const rc = readCassette(cp);
       if ("error" in rc) {
         log(`  ✗ ${tag} ${cp}: ${rc.error} — cannot re-record`);
+        staleItems[i] = { cassette: cp, status: "failed", error: `${rc.error} — cannot re-record` };
         return false;
       }
       const cassette = rc.cassette;
@@ -4319,10 +4399,11 @@ export async function cmdRecord(args: string[]) {
           // to the scenario YAML (the user believes stale cassettes were refreshed from edited YAML, but the
           // old snapshot was replayed into a new cassette) — so this is a HARD FAILURE by default. Pass
           // `--from-embedded` to intentionally re-record standalone cassettes from their embedded snapshot.
-          log(
-            `  ✗ ${tag} no on-disk scenario found for "${cassette.scenario.name}" — refusing to re-record from the embedded snapshot (edits to the scenario YAML would be silently dropped). ` +
-              `Pass the scenario file directly (\`record <scenario.yaml>\`), or --from-embedded to re-record from the embedded snapshot on purpose.`,
-          );
+          const why =
+            `no on-disk scenario found for "${cassette.scenario.name}" — refusing to re-record from the embedded snapshot (edits to the scenario YAML would be silently dropped). ` +
+            `Pass the scenario file directly (\`record <scenario.yaml>\`), or --from-embedded to re-record from the embedded snapshot on purpose.`;
+          log(`  ✗ ${tag} ${why}`);
+          staleItems[i] = { cassette: cp, status: "failed", error: why };
           return false;
         } else {
           // --from-embedded: explicitly re-record from the embedded snapshot (edits to the YAML won't apply).
@@ -4344,6 +4425,7 @@ export async function cmdRecord(args: string[]) {
         }
         staleBudget.add(budgetFields(r.result).costUsd);
         log(`  ✓ ${tag} ${cp} (${r.result.result})`);
+        staleItems[i] = recordedItem({ cassette: cp }, r.result, cp);
         return true;
       } catch (e) {
         // A source without `fidelity:` gets the remedy worded for THIS cassette: add the tier it recorded.
@@ -4351,12 +4433,15 @@ export async function cmdRecord(args: string[]) {
         // tier on the next record — a recording-shaping change nobody chose.
         const why = e instanceof FidelityMissingError ? fidelityMissingForCassette(e, cassette.scenario) : recordErrorText(e);
         log(`  ✗ ${tag} ${cp}: ${why}`);
+        staleItems[i] = { cassette: cp, status: "failed", error: why };
         return false;
       }
     });
     const failures = outcomes.filter((ok) => !ok).length;
     const staleSummary = staleBudget.summary(staleTotal - staleSkipped, staleTotal);
     if (staleSummary) warn(staleSummary + "\n");
+    // The one JSON document, written last — after every gate that can still refuse — right before the exit.
+    if (asJson) out(recordBatchEnvelope(failures === 0, { target, rerecordStale: true, items: staleItems }));
     return process.exit(failures > 0 ? 1 : 0);
   }
 
@@ -4405,6 +4490,18 @@ export async function cmdRecord(args: string[]) {
       );
     }
 
+    // Every scenario must resolve a model (`--model`, its session's `model:`, or COWORK_HARNESS_MODEL). Checked
+    // for the whole batch before the first spawn, as the budget is below; each offender is named. Exit 1, like
+    // the other refusals of a scenario that loaded. An unparseable file is already listed as broken.
+    const unpinned = disc.scenarios.filter((f) => {
+      try {
+        return unresolvedModelPreflight(parseScenarioFile(f), modelOverride) !== undefined;
+      } catch {
+        return false;
+      }
+    });
+    if (unpinned.length) return fail("record", "usage", `record: ${unresolvedModelRefusal(unpinned.join(", "))}`, undefined, asJson, 1);
+
     const total = disc.scenarios.length;
     // Budget pre-flight for the whole batch, BEFORE the first spawn — same rationale as the redaction
     // preflight below and as `run`'s dir sweep: a refusal that spends money before refusing is not one.
@@ -4441,12 +4538,17 @@ export async function cmdRecord(args: string[]) {
     // Runs are fully isolated (unique sidecar networks/proxy per run, per-session run dir), so concurrency is
     // safe; --concurrency only bounds it (Docker address pool + API rate limits). Index-tag the lines so
     // interleaved completions stay readable.
+    // One entry per scenario, in discovery order, for the --output-format json envelope.
+    const batchItems: RecordBatchItem[] = new Array(total);
     const outcomes = await pMapBounded(disc.scenarios, concurrency, async (f, i) => {
       const tag = `[${i + 1}/${total}]`;
       if (batchBudget.stopped()) {
         batchSkipped++;
         log(`  · ${tag} ${f} SKIPPED — --max-budget-usd reached; no cassette was written for it`);
-        return true; // not a failure: an incomplete batch, same framing as the run --repeat lane
+        batchItems[i] = { file: f, status: "skipped-budget" };
+        // Not a failure: exit 0 with the skip reported. Unlike `run --repeat`, which fails a budget-stopped
+        // batch unless --allow-budget-stop, a record batch stopped by its cap still exits 0.
+        return true;
       }
       log(`${tag} recording ${f}…`);
       try {
@@ -4464,9 +4566,12 @@ export async function cmdRecord(args: string[]) {
         log(`  ✓ ${tag} → ${r.cassettePath} (${r.result.result})`);
         // the re-record delta (only present when this overwrote a prior cassette) — see describeBehaviourDelta
         if (r.delta) log(`    ${r.delta}`);
+        batchItems[i] = recordedItem({ file: f }, r.result, r.cassettePath);
         return true;
       } catch (e) {
-        log(`  ✗ ${tag} ${recordErrorText(e)}`);
+        const why = recordErrorText(e);
+        log(`  ✗ ${tag} ${why}`);
+        batchItems[i] = { file: f, status: "failed", error: why };
         return false;
       }
     });
@@ -4480,6 +4585,16 @@ export async function cmdRecord(args: string[]) {
           ? `✓ record: ${total - batchSkipped} cassette(s), ${batchSkipped} skipped on budget`
           : `✓ record: ${disc.scenarios.length} cassette(s)`,
     );
+    // The one JSON document, written last — after every gate that can still refuse — right before the exit.
+    // A file that did not load is a failed item too (it counts in `failures` above).
+    if (asJson)
+      out(
+        recordBatchEnvelope(failures === 0, {
+          target,
+          items: [...batchItems, ...disc.broken.map((b): RecordBatchItem => ({ file: b.file, status: "failed", error: b.error }))],
+          skipped: disc.skipped,
+        }),
+      );
     return process.exit(failures > 0 ? 1 : 0);
   }
 
@@ -4487,6 +4602,10 @@ export async function cmdRecord(args: string[]) {
   // gate (worst observed cost from this scenario's own history; loud degradation when it has none).
   // Reads the scenario parsed above — the second parse (and its divergent catch, which is why this flag
   // used to change a broken file's exit code) is gone. `preflightBudget` never throws; it `fail()`s.
+  // The same model check executeScenario makes, made here so the refusal comes before the recording's own
+  // pre-flight warnings and matches `record --dry-run` exactly. Exit 1, the record split's pre-spend code.
+  const noModel = unresolvedModelPreflight(scenario!, modelOverride);
+  if (noModel) return fail("record", "usage", `record: ${noModel}`, undefined, asJson, 1);
   if (maxBudgetUsd !== undefined) preflightBudget("record", scenario!.name, maxBudgetUsd, asJson);
   // `--decider-dir` opens an in-band file rendezvous for the driving agent; close it after the run
   // (mirrors `run`'s one-channel lifecycle).
@@ -4512,7 +4631,17 @@ export async function cmdRecord(args: string[]) {
       },
       [dirname(target)],
     );
-    if (asJson) out(jsonEnvelope("record", [r.result], { extra: { artifacts: r.artifacts, cassette: r.cassettePath } }));
+    // `ok` is "the recording exited 0" (a cassette was written), the same rule as the batch arms. The run's
+    // own verdict is `results[0].verdict.pass` — they differ exactly when --allow-failing records a failing
+    // run on purpose, which exits 0.
+    if (asJson)
+      out(
+        jsonPayloadEnvelope("record", true, {
+          results: [publishedResult(r.result)],
+          artifacts: r.artifacts,
+          cassette: r.cassettePath,
+        }),
+      );
     else {
       log(`✓ recorded ${r.result.result} · ${r.artifacts} artifact(s) → ${r.cassettePath}`);
       if (r.delta) log(`  vs the cassette it replaced: ${r.delta}`);
@@ -5661,7 +5790,7 @@ export async function cmdReplay(args: string[]) {
   if (p.positionals.length > 1) {
     return fail("replay", "usage", `replay takes one target (got ${p.positionals.length}: ${p.positionals.join(", ")})`, undefined, asJson);
   }
-  const json = p.options["--output-format"] === "json";
+  const json = asJson; // flag, else COWORK_HARNESS_OUTPUT_FORMAT — the success path follows the same rule as the errors
   const strict = p.flags["--strict"] ?? false; // escalate ALL staleness findings to failures (release gate)
   const bestEffortFutureCassette = p.flags["--best-effort-future-cassette"] ?? false; // opt into warn-and-replay for a future-version cassette
   // `--assert-from <file>` (explicit path) / `--reassert` (auto-resolve the sibling) opt INTO re-checking against
@@ -6204,7 +6333,7 @@ export async function cmdVerifyCassettes(args: string[]) {
     return fail("verify-cassettes", "usage", msg, hostInventoryFlagHint("verify-cassettes", msg), asJson);
   }
   applyParsedCommandGlobals("verify-cassettes", p, asJson);
-  const json = p.options["--output-format"] === "json";
+  const json = asJson; // flag, else COWORK_HARNESS_OUTPUT_FORMAT — the success path follows the same rule as the errors
   // Ship A escape hatch, same contract as `replay --session`: supplies a SESSION (so `staleness.hash_ignore`
   // and the rest of the boundary survive) for ONE relocated cassette. Refused for a batch — each cassette in a
   // directory may have been recorded against a different source, and silently pinning the wrong tree would

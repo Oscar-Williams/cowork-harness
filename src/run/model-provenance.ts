@@ -1,5 +1,6 @@
 import type { RunResult } from "../types.js";
 import { isLiveModelId } from "../types.js";
+import { UsageError } from "../errors.js";
 
 /** The model a run was ASKED to use, and where that request came from.
  *
@@ -7,10 +8,10 @@ import { isLiveModelId } from "../types.js";
  *  `source: "user_setting" | "global_default"` on its resolved model — reused here so the harness names
  *  the concept the way the thing it emulates does. Production's `global_default` has no harness analogue
  *  and is deliberately not mirrored: it names an account-resolved default this harness never observes.
- *  `unresolved` is the state only the harness can reach:
- *  nothing pinned the model, so the agent binary picked its own default and the run's model is a property
- *  of the machine rather than of the scenario. Cowork never occupies it — its own resolver always yields a
- *  concrete id (the first entry of the account's model list). */
+ *  `unresolved` is the state only the harness can reach: nothing pinned the model. A run that would reach
+ *  it is refused (`ModelUnresolvedError`), so it is stamped only where no agent ran (a replay, an error
+ *  result) or read back from a result recorded before 4.0.0. Cowork never occupies it — its own resolver
+ *  always yields a concrete id (the first entry of the account's model list). */
 export type ModelSource = NonNullable<RunResult["modelSource"]>;
 
 export interface ModelProvenance {
@@ -90,27 +91,39 @@ export function noModelProvenance(): ModelProvenance {
   return { modelSource: "unresolved", modelPinHonored: undefined, modelFallbacks: undefined };
 }
 
-/** The unpinned-model warning, shared by every lane so the wording cannot drift between them.
+/** The refusal for a run that resolves no model, shared by every lane so the wording cannot drift between
+ *  them. `subject` names what was refused (`scenario "x"`, "this `skill` run"), so a batch refusal can list
+ *  the files it applies to.
  *
- *  **Why a warning and not an error.** `Scenario.fidelity` had a default with a LARGER blast radius than
- *  this one — an omitted `fidelity:` measured the scenario against a lane most users are not on — and the
- *  repo's answer there was a deprecation window (a warning from 2.4.0, REQUIRED in 4.0.0), not an immediate
- *  hard fail. A harder gate for a lesser field would be incoherent with that. The next major makes this one
- *  required too.
+ *  **Why a refusal.** With nothing pinned, the agent binary picks its own default, so the run's model is a
+ *  property of the machine it ran on rather than of the scenario. The agent selects part of its system prompt
+ *  by model capability, so that changes the instructions the agent is given, not just answer quality — and
+ *  Cowork itself never runs without a concrete model id. `fidelity:` is required on the same reasoning.
  *
- *  The text names the KEY and the FLAG, never "the file to edit": the `skill` lane builds its session
- *  inline and has no file, and house style throughout `session.ts` names keys and flags. */
-export function unpinnedModelWarning(lane: "verdict" | "chat"): string {
-  const consequence =
-    lane === "verdict"
-      ? "so this run's model — and the verdict built on it — is a property of THIS MACHINE, not of the scenario"
-      : "so this session's model is whatever the local CLI defaults to";
+ *  The text names the KEY, the FLAG and the ENV VAR, never "the file to edit": the `skill` lane builds its
+ *  session inline and has no file, and house style throughout `session.ts` names keys and flags. */
+export function unresolvedModelRefusal(subject: string): string {
   return (
-    `::warning:: no model is pinned, ${consequence}. The agent selects part of its system prompt by model ` +
-    `capability, so an unpinned model changes the INSTRUCTIONS the agent is given, not just answer quality. ` +
-    `Set \`model:\` in the session, or pass \`--model <id>\` — every lane takes it. ` +
-    `Omitting it is deprecated and becomes an error in the next major.`
+    `no model is pinned for ${subject}. Set \`model:\` in the session (reproducible), pass \`--model <id>\`, ` +
+    `or set COWORK_HARNESS_MODEL (for example in .env). A run must state its model: the agent selects part of ` +
+    `its system prompt by model capability, so an unpinned model changes the INSTRUCTIONS the agent is given, ` +
+    `and the verdict would be a property of this machine rather than of the scenario.`
   );
+}
+
+/** Thrown by `executeScenario` when nothing pins the model. A `UsageError`, so every lane maps it to its
+ *  usage exit (`run`/`skill`/`probe-dispatch`: 2) or, on `record`, to the pre-spend refusal code (1). */
+export class ModelUnresolvedError extends UsageError {
+  constructor(subject: string) {
+    super(unresolvedModelRefusal(subject));
+    this.name = "ModelUnresolvedError";
+  }
+}
+
+/** The machine-scoped default, `COWORK_HARNESS_MODEL`. An empty value counts as unset: an empty model
+ *  string must never reach argv (SPEC §CB-2), and must not satisfy the refusal above either. */
+export function envModelDefault(env: NodeJS.ProcessEnv = process.env): string | undefined {
+  return env.COWORK_HARNESS_MODEL || undefined;
 }
 
 /** Resolve which model a run should pin, given the three channels that can supply one.
@@ -124,7 +137,8 @@ export function unpinnedModelWarning(lane: "verdict" | "chat"): string {
  *  clone's runs while `modelSource` still read `user_setting`.
  *
  *  `explicit` is `--model` or a matrix axis: a per-invocation act by the author, so it outranks the file.
- *  `envDefault` only fills a gap. Returns `undefined` when nothing pins the model — the state that warns. */
+ *  `envDefault` only fills a gap. Returns `undefined` when nothing pins the model — the state that is refused
+ *  (`ModelUnresolvedError`). */
 export function resolvePinnedModel(
   explicit: string | undefined,
   sessionModel: string | undefined,

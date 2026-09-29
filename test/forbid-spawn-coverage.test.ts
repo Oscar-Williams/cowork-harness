@@ -42,7 +42,7 @@ describe("the spawn guard covers every model launch", () => {
   it("chat --raw refuses under the flag, before the docker run", async () => {
     const { cmdChat } = await import("../src/run/chat.js");
     const dir = mkdtempSync(join(tmpdir(), "cwh-fs-chat-"));
-    await expect(cmdChat([dir, "--raw"])).rejects.toThrow(/COWORK_HARNESS_FORBID_SPAWN/);
+    await expect(cmdChat([dir, "--raw", "--model", "claude-sonnet-5"])).rejects.toThrow(/COWORK_HARNESS_FORBID_SPAWN/);
     expect(spawned).toEqual([]);
   });
 
@@ -50,7 +50,7 @@ describe("the spawn guard covers every model launch", () => {
     const { cmdChat } = await import("../src/run/chat.js");
     for (const tier of ["protocol", "hostloop"]) {
       const dir = mkdtempSync(join(tmpdir(), "cwh-fs-chat-"));
-      await expect(cmdChat([dir, "--fidelity", tier])).rejects.toThrow(/COWORK_HARNESS_FORBID_SPAWN/);
+      await expect(cmdChat([dir, "--fidelity", tier, "--model", "claude-sonnet-5"])).rejects.toThrow(/COWORK_HARNESS_FORBID_SPAWN/);
     }
     expect(spawned).toEqual([]);
   });

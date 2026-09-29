@@ -11,6 +11,7 @@
 # in production, and never exercises the refusal (observed live). Model-dependent by construction: a child
 # that writes an absolute path anyway fails `tool_result_contains` and `file_absent` — a loud red, never a
 # silent green.
+# The inline session pins no model, so run it with `--model <id>` or COWORK_HARNESS_MODEL set.
 name: subagent-write-refused-probe
 baseline: latest
 session: (inline)

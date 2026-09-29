@@ -6,6 +6,7 @@
 # correct) pure functions around them, and only observable once a real agent reports its init manifest.
 # Deliberately a no-tool prompt: the assertion is about the DECLARED surface (system/init.tools), not
 # about the model choosing to call anything.
+# The inline session pins no model, so run it with `--model <id>` or COWORK_HARNESS_MODEL set.
 name: a2-discovery-probe-hostloop
 baseline: latest
 session: (inline)

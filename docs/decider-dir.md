@@ -40,7 +40,22 @@ For a **question** gate you do not hand-write those files — two CLI subcommand
   so the driving agent points **one** Monitor at this instead of hand-rolling a `find`/seen-set/poll loop.
   Note: `gates` streams these **raw protocol lines** — it does *not* wrap them in the standard
   `{tool, version, command, ok}` result envelope (that's the in-band contract a Monitor consumes line by
-  line); `--output-format json` is accepted but does not change the shape.
+  line). The one exception is an error: under `--output-format json` (or `COWORK_HARNESS_OUTPUT_FORMAT=json`)
+  a failure prints the standard error envelope, so the stream's last line is either `{"done":true}` or that
+  envelope. Gate lines already streamed stay on stdout before it.
+
+  Exit codes:
+
+  | Case | Exit | Category |
+  |---|---|---|
+  | The run finished (`done.json`), or one pass found nothing more | `0` | — |
+  | One pass (no `--follow`) over a directory that does not exist | `2` | `usage` |
+  | The path exists but is not a directory (with or without `--follow`) | `2` | `usage` |
+  | A gate request that cannot be parsed — under `--follow` after three reads, in one pass on the first | `2` | `runtime` |
+
+  With `--follow`, a directory that does not exist yet is not an error: the run creates it, so start the
+  watcher first. `gates` says so once on stderr (`[gates] waiting for <dir> to be created …`) and streams
+  from the moment it appears.
 - **`cowork-harness answer <dir> --gate <N> (--choose <label> | --answer "<q>=<label>")`** — write the
   answer for gate `N` with the correct wire shape (the atomic temp+rename and the `{id, answers}`
   envelope are handled for you). `--choose <label>` answers the gate's first question by option label;
@@ -76,6 +91,7 @@ prior run's answers can never leak into this one. Run the harness in the backgro
 work the gate stream while it's live:
 
 ```bash
+export COWORK_HARNESS_MODEL=claude-sonnet-5   # a run must name its model (or pass --model <id>)
 GATES=$(mktemp -d)
 cowork-harness skill ~/my-plugin "Render the report" \
   --decider-dir "$GATES" \
@@ -136,6 +152,7 @@ Two terminals (or a driving agent issuing the same commands):
 
 ```bash
 # Terminal 1 — the session under test
+export COWORK_HARNESS_MODEL=claude-sonnet-5   # a run must name its model (or pass --model <id>)
 GATES=$(mktemp -d)
 cowork-harness skill ~/my-plugin "Export the deck" --decider-dir "$GATES"
 

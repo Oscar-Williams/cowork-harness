@@ -1578,8 +1578,9 @@ export interface RunResult {
    *  model here — a session `model:`, `--model`, a matrix axis or `COWORK_HARNESS_MODEL`; the harness
    *  does not distinguish those, because the distinction production draws is user-chose vs system-chose,
    *  not which surface carried it. `unresolved` is the state only the harness can occupy: nothing pinned
-   *  the model, so the agent binary chose its own default and the run's model is a property of the
-   *  machine rather than of the scenario.
+   *  the model. A run that would reach it is refused before it starts, so it appears only where no agent
+   *  ran (a replay, an error result) or on a result recorded by a harness older than 4.0.0, where the agent
+   *  binary chose its own default.
    *
    *  Production's `global_default` is deliberately NOT mirrored: it names an account-resolved default the
    *  harness never observes — when nothing is pinned here the agent resolves privately and reports only

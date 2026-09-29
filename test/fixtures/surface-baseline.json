@@ -4386,6 +4386,10 @@
         "required": false,
         "default": "false"
       },
+      "model": {
+        "required": false,
+        "default": ""
+      },
       "path": {
         "required": true,
         "default": null

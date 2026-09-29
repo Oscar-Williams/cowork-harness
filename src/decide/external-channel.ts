@@ -1,5 +1,5 @@
 import { warn, envPositiveNumber } from "../io.js";
-import { UnansweredError, DeciderTimeoutError } from "../errors.js";
+import { UnansweredError, DeciderTimeoutError, UsageError } from "../errors.js";
 import { installTerminationHandler, registerTerminationStep } from "../termination.js";
 import { mkdirSync, readdirSync, existsSync, readFileSync, writeFileSync, renameSync, rmSync } from "node:fs";
 import { join } from "node:path";
@@ -65,6 +65,15 @@ export function writeDoneMarker(dir: string): void {
   }
 }
 
+/** A gate request the decider channel cannot read — the channel failed, not the harness. `gates` reports
+ *  it as a `runtime` error. */
+export class GateChannelError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "GateChannelError";
+  }
+}
+
 /**
  * The gate stream behind `cowork-harness gates <dir> --follow` — the harness OWNS the watcher so the
  * driving agent points ONE Monitor at this instead of hand-writing a zsh-safe find/seen-set/poll loop.
@@ -95,13 +104,16 @@ export function streamGates(dir: string, write: (line: string) => void, opts: { 
           // FAIL the decider channel, not be dropped: dropping it leaves the agent blocked forever on a
           // gate the decider can never answer. (Gate files are written temp+rename atomically, so a torn
           // write can't reach here — a persistent parse failure means genuine corruption.)
+          // One pass (`once`) has no next tick to retry on, so its first failed read is the verdict: it
+          // used to swallow the file and resolve, and `gates <dir>` exited 0 as though no gate were pending.
           const n = (tries.get(f) ?? 0) + 1;
           tries.set(f, n);
-          if (n >= 3) {
-            warn(`::warning:: [gates] ${f} is unreadable/malformed after ${n} tries — failing the decider channel\n`);
+          if (n >= 3 || opts.once) {
+            const after = opts.once ? "" : ` after ${n} tries`;
+            warn(`::warning:: [gates] ${f} is unreadable/malformed${after} — failing the decider channel\n`);
             return reject(
-              new Error(
-                `[gates] decider channel failed: ${join(dir, f)} is unreadable/malformed after ${n} tries (the agent is waiting on a gate this file was meant to answer)`,
+              new GateChannelError(
+                `[gates] decider channel failed: ${join(dir, f)} is unreadable/malformed${after} (the agent is waiting on a gate this file was meant to answer)`,
               ),
             );
           }
@@ -127,23 +139,35 @@ export function answerGate(dir: string, seq: number, answers: Record<string, str
   // can answer the WRONG gate if a stale or mis-sequenced response file lands. Recover the id from the gate
   // request (the live `req-N.json`, or its consumed `.done` rename) and FAIL LOUD if it can't be read,
   // rather than writing an id-less response that could satisfy a different gate by question-key coincidence.
+  //
+  // Which failure is whose: a directory or gate that is not there (ENOENT on the live request AND on its
+  // `.done` rename) is the caller's input — a UsageError. A request that exists but cannot be read (EACCES)
+  // or parsed, or carries no id, is the channel failing — a plain error, reported as runtime, as `gates`
+  // reports it. The message names the FIRST (live request) error, not the fallback's ENOENT.
   let id: unknown;
-  let readErr: unknown;
+  let firstErr: unknown;
+  let found = false;
   for (const name of [`req-${seq}.json`, `req-${seq}.json.done`]) {
+    let body: string;
     try {
-      id = JSON.parse(readFileSync(join(dir, name), "utf8")).id;
-      readErr = undefined;
-      break;
+      body = readFileSync(join(dir, name), "utf8");
     } catch (e) {
-      readErr = e;
+      firstErr ??= e;
+      if ((e as NodeJS.ErrnoException)?.code === "ENOENT") continue;
+      break; // readable-in-principle but not by us: the channel failed; do not mask it with the fallback
     }
+    found = true;
+    try {
+      id = JSON.parse(body).id;
+    } catch (e) {
+      firstErr ??= e;
+    }
+    break;
   }
-  if (typeof id !== "string" || id === "")
-    throw new Error(
-      `answerGate: cannot recover the request id for seq ${seq} in ${dir} — refusing to write an id-less response ` +
-        `(a response must carry its gate's id so it cannot answer the wrong gate)` +
-        (readErr ? `: ${String((readErr as Error)?.message ?? readErr)}` : id === undefined ? "" : `: req file had no string "id"`),
-    );
+  const why = firstErr !== undefined ? `: ${String((firstErr as Error)?.message ?? firstErr)}` : `: req file had no string "id"`;
+  const lead = `answerGate: cannot recover the request id for seq ${seq} in ${dir} — refusing to write an id-less response (a response must carry its gate's id so it cannot answer the wrong gate)`;
+  if (!found && (firstErr as NodeJS.ErrnoException | undefined)?.code === "ENOENT") throw new UsageError(lead + why);
+  if (typeof id !== "string" || id === "") throw new Error(lead + why);
   const tmp = join(dir, `.resp-${seq}.json.tmp`);
   writeFileSync(tmp, JSON.stringify({ id, answers }), { mode: 0o600 });
   renameSync(tmp, join(dir, `resp-${seq}.json`));

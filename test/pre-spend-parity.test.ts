@@ -4,7 +4,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { preSpendVerdicts } from "../src/run/cassette.js";
-import { parseScenarioFile } from "../src/run/execute.js";
+import { parseScenarioFile, executeScenario } from "../src/run/execute.js";
 
 // WHY THIS FILE EXISTS. `record --dry-run` is the token-free rehearsal for a PAID command, and it used to
 // re-implement the pre-spend checks by hand. `hostInventoryPreflight` shipped 2026-08-04; bbd5bf5
@@ -16,8 +16,15 @@ import { parseScenarioFile } from "../src/run/execute.js";
 // happened. The fix is one function (`preSpendVerdicts`) plus the source scan at the bottom of this file,
 // which is what actually keeps it the only site. The parity tests alone would not.
 
-const cli = (args: string[], cwd: string) => {
-  const r = spawnSync(process.execPath, [join(process.cwd(), "dist", "cli.js"), ...args], { cwd, encoding: "utf8" });
+// A run must resolve a model (4.0.0), and on `record` that refusal comes before these checks, so the helper
+// pins one through the env channel by default. The model check's own parity case passes `{}` to clear it.
+const PINNED = { COWORK_HARNESS_MODEL: "claude-sonnet-5" };
+const cli = (args: string[], cwd: string, env: Record<string, string> = PINNED) => {
+  const r = spawnSync(process.execPath, [join(process.cwd(), "dist", "cli.js"), ...args], {
+    cwd,
+    encoding: "utf8",
+    env: { ...process.env, COWORK_HARNESS_MODEL: "", ...env },
+  });
   return { code: r.status ?? 1, text: (r.stdout ?? "") + (r.stderr ?? "") };
 };
 
@@ -85,6 +92,32 @@ describe("preSpendVerdicts — every check refuses on the real path AND in the s
     const EXEMPT = new Set(["portability"]);
     const missing = emitted.map((n) => MAP[n] ?? `UNMAPPED:${n}`).filter((id) => !ids.has(id) && !EXEMPT.has(id));
     expect(missing, `preSpendVerdicts emits checks with no fixture in this file: ${missing.join(", ")}`).toEqual([]);
+  });
+});
+
+// The model check is not in preSpendVerdicts: on the real path it fires inside executeScenario, which every
+// lane funnels through, and `record` mirrors it with `unresolvedModelPreflight`. This pins the preview to the
+// real path's text, the way the pairs above pin theirs, so the two cannot drift apart.
+describe("the unresolved-model refusal: the preview carries the real path's message", () => {
+  it("executeScenario and `record <file> --dry-run` refuse with the same text", async () => {
+    const w = repo();
+    writeFileSync(join(w, "s.yaml"), `name: probe\nprompt: go\nfidelity: protocol\nassert:\n  - result: success\n`);
+    const sc = parseScenarioFile(join(w, "s.yaml"));
+    const prev = { model: process.env.COWORK_HARNESS_MODEL, runs: process.env.COWORK_HARNESS_RUNS_DIR };
+    delete process.env.COWORK_HARNESS_MODEL;
+    process.env.COWORK_HARNESS_RUNS_DIR = mkdtempSync(join(tmpdir(), "cwh-ps-runs-"));
+    let real = "";
+    try {
+      real = ((await executeScenario(sc).catch((e: unknown) => e)) as Error).message;
+    } finally {
+      if (prev.model !== undefined) process.env.COWORK_HARNESS_MODEL = prev.model;
+      if (prev.runs === undefined) delete process.env.COWORK_HARNESS_RUNS_DIR;
+      else process.env.COWORK_HARNESS_RUNS_DIR = prev.runs;
+    }
+    expect(real).toMatch(/no model is pinned/);
+    const dry = cli(["record", join(w, "s.yaml"), "--dry-run"], w, {});
+    expect(dry.code).toBe(1);
+    expect(dry.text).toContain(real);
   });
 });
 
