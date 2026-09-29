@@ -1,4 +1,4 @@
-import { warn } from "./io.js";
+import { warn as warnToStderr } from "./io.js";
 import { z } from "zod";
 import { mkdirSync, writeFileSync, readFileSync, readdirSync, cpSync, existsSync, statSync, realpathSync } from "node:fs";
 import { createHash } from "node:crypto";
@@ -665,9 +665,12 @@ export function resolveLaunchSources(
   // and the staged-set notices must not run — the sources may legitimately be gone.
   resume = false,
   /** `stageFilters: false` skips the git tracked-set inspection (its notices and its empty-set refusal):
-   *  for a caller that only needs the input checks — a `--dry-run` preview — and will not stage. */
-  opts: { stageFilters?: boolean } = {},
+   *  for a caller that only needs the input checks — a `--dry-run` preview — and will not stage.
+   *  `quiet: true` prints none of the resolution's warnings — for a pre-check whose run resolves again
+   *  and would otherwise print each warning twice. */
+  opts: { stageFilters?: boolean; quiet?: boolean } = {},
 ): LaunchSources {
+  const warn = opts.quiet ? () => {} : warnToStderr;
   // Fail loud before any staging side effect: an `effort:` the resolved model doesn't offer (or an
   // explicit `effort:` on a no-picker model) is a load-time config error, not a silent coercion.
   validateEffort(session.effort, session.model, baseline);

@@ -2259,7 +2259,10 @@ async function cmdSkill(rawArgs: string[]) {
   // missing input, so its refusal stays after the preview.
   try {
     const previewBaseline = loadBaseline("latest");
-    resolveLaunchSources(session, previewBaseline, effectiveTier(fidelity, previewBaseline), resume, { stageFilters: false });
+    resolveLaunchSources(session, previewBaseline, effectiveTier(fidelity, previewBaseline), resume, {
+      stageFilters: false,
+      quiet: true, // executeScenario resolves again and prints any warning then; a preview prints none, as before
+    });
   } catch (e) {
     if (e instanceof UsageError) return void fail("skill", "usage", e.message, e.hint, isJson);
     throw e;
