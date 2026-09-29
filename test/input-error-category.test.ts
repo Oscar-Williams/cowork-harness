@@ -251,4 +251,101 @@ describe.skipIf(!can)("a missing input path is a usage error and leaves no run d
       chmodSync(d, 0o700);
     }
   });
+
+  // answer: the caller's input is "which dir, which gate". A gate request that exists but cannot be read or
+  // parsed is the channel failing — runtime, as `gates` reports it.
+  for (const form of [
+    ["--answer", "q=a"],
+    ["--choose", "A"],
+  ]) {
+    it(`answer ${form[0]}: a malformed gate request is runtime`, () => {
+      const runs = mkdtempSync(join(tmpdir(), "iec-runs-"));
+      const d = mkdtempSync(join(tmpdir(), "iec-answer-"));
+      writeFileSync(join(d, "req-1.json"), "{not json");
+      const r = cli(["answer", d, "--gate", "1", ...form], runs);
+      expect(r.code, r.stderr).toBe(2);
+      expect(r.doc.error.category).toBe("runtime");
+      expect(r.doc.error.message).toMatch(/req-1\.json|JSON/);
+    });
+
+    it(`answer ${form[0]}: an existing dir with no such gate is usage`, () => {
+      const runs = mkdtempSync(join(tmpdir(), "iec-runs-"));
+      const r = cli(["answer", mkdtempSync(join(tmpdir(), "iec-answer-")), "--gate", "1", ...form], runs);
+      expect(r.code, r.stderr).toBe(2);
+      expect(r.doc.error.category).toBe("usage");
+    });
+
+    it.skipIf(process.getuid?.() === 0)(`answer ${form[0]}: an unreadable gate request is runtime, and says why`, () => {
+      const runs = mkdtempSync(join(tmpdir(), "iec-runs-"));
+      const d = mkdtempSync(join(tmpdir(), "iec-answer-"));
+      writeFileSync(join(d, "req-1.json"), JSON.stringify({ id: "g1", questions: [{ question: "q", options: [{ label: "A" }] }] }));
+      chmodSync(join(d, "req-1.json"), 0o000);
+      try {
+        const r = cli(["answer", d, "--gate", "1", ...form], runs);
+        expect(r.code, r.stderr).toBe(2);
+        expect(r.doc.error.category).toBe("runtime");
+        // The FIRST read's error (the live request), not the `.done` fallback's ENOENT.
+        expect(r.doc.error.message).toMatch(/EACCES/);
+      } finally {
+        chmodSync(join(d, "req-1.json"), 0o600);
+      }
+    });
+  }
+
+  it("verify-run <a regular file> <scenario> → usage", () => {
+    const runs = mkdtempSync(join(tmpdir(), "iec-runs-"));
+    const d = mkdtempSync(join(tmpdir(), "iec-vr-"));
+    writeFileSync(join(d, "s.yaml"), "name: smoke\nprompt: x\nfidelity: container\nassert:\n  - result: success\n");
+    const r = cli(["verify-run", join(d, "s.yaml"), join(d, "s.yaml")], runs);
+    expect(r.code, r.stderr).toBe(2);
+    expect(r.doc.error.category).toBe("usage");
+  });
+
+  // record --dry-run previews the same input paths skill --dry-run does; a scenario that loaded but names a
+  // path that is not there is a refused recording (record's exit 1).
+  it("record <scenario whose session uploads a missing file> --dry-run → usage, exit 1", () => {
+    const runs = mkdtempSync(join(tmpdir(), "iec-runs-"));
+    const work = mkdtempSync(join(tmpdir(), "iec-rec-"));
+    writeFileSync(join(work, "session.yaml"), `uploads:\n  - ./nope.pdf\n`);
+    writeFileSync(
+      join(work, "s.yaml"),
+      `name: rec-missing-upload\nprompt: "x"\nfidelity: protocol\nsession: ./session.yaml\nassert:\n  - result: success\n`,
+    );
+    const r = cli(["record", join(work, "s.yaml"), "--model", "claude-test-model", "--dry-run"], runs, work);
+    expect(r.code, r.stderr).toBe(1);
+    expect(r.doc.ok).toBe(false);
+    expect(r.doc.error.category).toBe("usage");
+    expect(r.doc.error.message).toMatch(/not found/);
+  });
+
+  it('skill <plugin> hi --upload "a:b.pdf" --dry-run → usage (an unsafe mount name)', () => {
+    const runs = mkdtempSync(join(tmpdir(), "iec-runs-"));
+    const plugin = mkdtempSync(join(tmpdir(), "iec-plugin-"));
+    writeFileSync(join(plugin, "SKILL.md"), "---\nname: p\ndescription: d\n---\nbody\n");
+    writeFileSync(join(plugin, "a:b.pdf"), "x");
+    const r = cli(["skill", plugin, "hi", "--upload", join(plugin, "a:b.pdf"), "--dry-run"], runs);
+    expect(r.code, r.stderr).toBe(2);
+    expect(r.doc.error.category).toBe("usage");
+  });
+
+  for (const [label, session, expectMsg] of [
+    ["an effort the model does not offer", "effort: max\nmodel: claude-haiku-4-5\n", /effort/],
+    ["an effort value the schema rejects", "effort: bogus\n", /effort/],
+  ] as const) {
+    it(`run <scenario whose session has ${label}> → usage, readable, no run dir`, () => {
+      const runs = mkdtempSync(join(tmpdir(), "iec-runs-"));
+      const work = mkdtempSync(join(tmpdir(), "iec-eff-"));
+      writeFileSync(join(work, "session.yaml"), session);
+      writeFileSync(
+        join(work, "s.yaml"),
+        `name: bad-effort\nprompt: "x"\nfidelity: protocol\nsession: ./session.yaml\nassert:\n  - result: success\n`,
+      );
+      const r = cli(["run", join(work, "s.yaml"), "--model", "claude-haiku-4-5"], runs, work);
+      expect(r.code, r.stderr).toBe(2);
+      expect(r.doc.error.category).toBe("usage");
+      expect(r.doc.error.message).toMatch(expectMsg);
+      expect(r.doc.error.message.startsWith("["), "a raw schema issue array").toBe(false);
+      expect(runsContent(runs)).toEqual([]);
+    });
+  }
 });

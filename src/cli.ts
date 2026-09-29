@@ -4034,7 +4034,10 @@ function cmdAnswer(args: string[]) {
     try {
       g = readGate(dir, seq);
     } catch (e) {
-      return void fail("answer", "usage", `cannot read gate ${seq} in ${dir}: ${String((e as Error).message)}`, undefined, json);
+      // A gate that is not there is the caller's input; one that exists but cannot be read or parsed is the
+      // channel failing (runtime, as `gates` reports it).
+      const category = (e as NodeJS.ErrnoException)?.code === "ENOENT" ? "usage" : "runtime";
+      return void fail("answer", category, `cannot read gate ${seq} in ${dir}: ${String((e as Error).message)}`, undefined, json);
     }
     const q0 = g.questions?.[0];
     // A multi --choose answers a multiSelect gate; on a single-select gate it's the old "only one
@@ -4286,6 +4289,7 @@ async function cmdVerifyRun(args: string[]) {
   // A path the caller named that does not exist is their input (usage); a directory that exists but holds
   // no completed run is the prior run's state (runtime, below).
   if (!existsSync(runDir)) return fail("verify-run", "usage", `verify-run: run dir not found: ${runDir}`, undefined, json);
+  if (!statSync(runDir).isDirectory()) return fail("verify-run", "usage", `verify-run: not a run dir (a file): ${runDir}`, undefined, json);
   let turns: number[];
   try {
     turns = requireTurns(runDir, "verify-run");

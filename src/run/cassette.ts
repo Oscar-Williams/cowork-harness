@@ -44,6 +44,7 @@ import {
   slugForPath,
   FidelityMissingError,
   unresolvedModelPreflight,
+  launchSourcesPreflight,
 } from "./execute.js";
 import { unresolvedModelRefusal } from "./model-provenance.js";
 import { UsageError, UnknownBaselineError, compactSchemaError } from "../errors.js";
@@ -4151,6 +4152,15 @@ export async function cmdRecord(args: string[]) {
     // with exit 1. This arm opens the scenario's session to answer it, so the preview agrees.
     const noModel = unresolvedModelPreflight(scenario, modelOverride);
     if (noModel) return fail("record", "usage", noModel, undefined, asJson, 1);
+    // The input paths the session declares, checked the way `skill --dry-run` checks its own (existence and
+    // kind; not the git tracked-set filter): a preview of a path that is not there previews nothing. A
+    // scenario that loaded and is refused exits 1, record's rule.
+    try {
+      launchSourcesPreflight(scenario, modelOverride);
+    } catch (e) {
+      if (e instanceof UsageError) return fail("record", "usage", `record: ${e.message}`, e.hint, asJson, 1);
+      throw e;
+    }
     // mirror the EXACT default cassette path recordScenarioObject uses (slugForPath via the shared
     // defaultCassettePath helper) so a name with spaces/separators reports the same path it writes.
     const cassettePath = p.options["--out"] ?? defaultCassettePath(scenario.name);

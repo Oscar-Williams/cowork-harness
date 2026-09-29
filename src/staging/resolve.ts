@@ -80,7 +80,7 @@ export function safePathSegment(s: string, what: string): string {
   // Reject separators/NUL/empty/dot-dirs AND ":" + control chars: a ":" breaks a Docker `-v src:dst:ro`
   // overlay and control chars are never valid in a path component (both Docker-hostile / unsafe).
   if (!s || s === "." || s === ".." || /[/\\:\x00-\x1f]/.test(s))
-    throw new Error(`unsafe ${what} "${s}" — must be a single path segment (no "/", "\\", ":", control chars, "..", or empty)`);
+    throw new UsageError(`unsafe ${what} "${s}" — must be a single path segment (no "/", "\\", ":", control chars, "..", or empty)`);
   return s;
 }
 
@@ -112,7 +112,7 @@ export function noTraversal(s: string, what: string): string {
     s.startsWith("\\") ||
     s.split(/[/\\]/).some((seg) => seg === ".." || seg === "." || seg === "")
   )
-    throw new Error(`unsafe ${what} "${s}" — must not be empty, absolute, or contain "." / ".." / empty path segments`);
+    throw new UsageError(`unsafe ${what} "${s}" — must not be empty, absolute, or contain "." / ".." / empty path segments`);
   return s;
 }
 
@@ -126,7 +126,7 @@ export function noTraversal(s: string, what: string): string {
 export function safeMountSegment(s: string, what: string): string {
   noTraversal(s, what);
   if (!/^[A-Za-z0-9._@/+-]+$/.test(s))
-    throw new Error(
+    throw new UsageError(
       `unsafe ${what} "${s}" — only [A-Za-z0-9._@/+-] are allowed (no ":", spaces, or control characters; they break the Docker -v overlay)`,
     );
   return s;

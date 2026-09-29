@@ -139,25 +139,35 @@ export function answerGate(dir: string, seq: number, answers: Record<string, str
   // can answer the WRONG gate if a stale or mis-sequenced response file lands. Recover the id from the gate
   // request (the live `req-N.json`, or its consumed `.done` rename) and FAIL LOUD if it can't be read,
   // rather than writing an id-less response that could satisfy a different gate by question-key coincidence.
+  //
+  // Which failure is whose: a directory or gate that is not there (ENOENT on the live request AND on its
+  // `.done` rename) is the caller's input — a UsageError. A request that exists but cannot be read (EACCES)
+  // or parsed, or carries no id, is the channel failing — a plain error, reported as runtime, as `gates`
+  // reports it. The message names the FIRST (live request) error, not the fallback's ENOENT.
   let id: unknown;
-  let readErr: unknown;
+  let firstErr: unknown;
+  let found = false;
   for (const name of [`req-${seq}.json`, `req-${seq}.json.done`]) {
+    let body: string;
     try {
-      id = JSON.parse(readFileSync(join(dir, name), "utf8")).id;
-      readErr = undefined;
-      break;
+      body = readFileSync(join(dir, name), "utf8");
     } catch (e) {
-      readErr = e;
+      firstErr ??= e;
+      if ((e as NodeJS.ErrnoException)?.code === "ENOENT") continue;
+      break; // readable-in-principle but not by us: the channel failed; do not mask it with the fallback
     }
+    found = true;
+    try {
+      id = JSON.parse(body).id;
+    } catch (e) {
+      firstErr ??= e;
+    }
+    break;
   }
-  // The gate the caller named is not there (or not a gate): their input, so a UsageError. A failure to WRITE
-  // the answer below is the environment and propagates as a plain error.
-  if (typeof id !== "string" || id === "")
-    throw new UsageError(
-      `answerGate: cannot recover the request id for seq ${seq} in ${dir} — refusing to write an id-less response ` +
-        `(a response must carry its gate's id so it cannot answer the wrong gate)` +
-        (readErr ? `: ${String((readErr as Error)?.message ?? readErr)}` : id === undefined ? "" : `: req file had no string "id"`),
-    );
+  const why = firstErr !== undefined ? `: ${String((firstErr as Error)?.message ?? firstErr)}` : `: req file had no string "id"`;
+  const lead = `answerGate: cannot recover the request id for seq ${seq} in ${dir} — refusing to write an id-less response (a response must carry its gate's id so it cannot answer the wrong gate)`;
+  if (!found && (firstErr as NodeJS.ErrnoException | undefined)?.code === "ENOENT") throw new UsageError(lead + why);
+  if (typeof id !== "string" || id === "") throw new Error(lead + why);
   const tmp = join(dir, `.resp-${seq}.json.tmp`);
   writeFileSync(tmp, JSON.stringify({ id, answers }), { mode: 0o600 });
   renameSync(tmp, join(dir, `resp-${seq}.json`));

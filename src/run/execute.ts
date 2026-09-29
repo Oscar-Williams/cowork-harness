@@ -2193,6 +2193,25 @@ export function ablateSession<T extends { plugins: Record<string, unknown>; skil
  * file's own directory (see {@link resolveSessionPaths}). Exported for the matrix runner — cli.ts loads
  * the base session ONCE per matrix run, then applies per-cell overrides (applySessionOverrides,
  * session.ts) on top of the SAME loaded+resolved object, rather than re-resolving paths per cell. */
+/** The input-path check a preview makes (`record <file> --dry-run`): open the scenario's session, apply the
+ *  model the run would resolve, and run the same write-free source resolution `executeScenario` runs before
+ *  it creates a run dir. Throws that resolution's `UsageError` (a path that does not exist or is the wrong
+ *  kind, an effort the model does not offer). A session that does not load at all is left to the real run,
+ *  as the model pre-flight leaves it. */
+export function launchSourcesPreflight(scenario: Scenario, modelOverride: string | undefined): void {
+  let loaded: ReturnType<typeof loadSession>;
+  try {
+    loaded = loadSessionFromFile(scenario.session);
+  } catch (e) {
+    if (e instanceof UsageError) throw e;
+    return;
+  }
+  const model = resolvePinnedModel(modelOverride, loaded.model, envModelDefault());
+  const session = model !== undefined && model !== loaded.model ? applySessionOverrides(loaded, { model }) : loaded;
+  const baseline = loadBaseline(scenario.baseline);
+  resolveLaunchSources(session, baseline, effectiveTier(scenario.fidelity, baseline), false, { stageFilters: false });
+}
+
 export function loadSessionFromFile(sessionRef: string): ReturnType<typeof loadSession> {
   const baseDir = sessionRef === "(inline)" ? process.cwd() : dirname(resolve(sessionRef));
   return resolveSessionPaths(loadSession(parseSessionFile(sessionRef)), baseDir);

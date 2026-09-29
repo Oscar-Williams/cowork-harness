@@ -10,7 +10,7 @@ import { assignFolderMountNames, RESERVED_MOUNT_NAMES, type MountTier } from "./
 import { MOUNT_BARE_NAME_MIN_VERSION, cmpVersionStrings } from "./baseline.js";
 import { containedRealPath } from "./boundary-paths.js";
 import { gitModeEnabled, gitFilterFromSet, gitStageStats, gitCpFilter } from "./run/skill-files.js";
-import { BoundaryError, UsageError } from "./errors.js";
+import { BoundaryError, UsageError, compactSchemaError } from "./errors.js";
 import { readSkillDescription, type PluginSkillRoot } from "./run/skill-metadata.js";
 import { pluginRootsWithRunnableHooks } from "./run/hook-events.js";
 
@@ -611,9 +611,9 @@ function validateEffort(effort: string | undefined, model: string | undefined, b
   if (entry) {
     if (entry.effortLevels) {
       if (effort !== undefined && !entry.effortLevels.includes(effort))
-        throw new Error(`effort "${effort}" is not offered by model "${model}" — supported levels: ${entry.effortLevels.join(", ")}`);
+        throw new UsageError(`effort "${effort}" is not offered by model "${model}" — supported levels: ${entry.effortLevels.join(", ")}`);
     } else if (effort !== undefined) {
-      throw new Error(
+      throw new UsageError(
         `model "${model}" has no effort selector — omit \`effort:\` (real Cowork always runs it at the medium fallback, with no UI picker)`,
       );
     }
@@ -622,7 +622,9 @@ function validateEffort(effort: string | undefined, model: string | undefined, b
   const regexDefault = spawn?.effortRegexDefault;
   if (model !== undefined && regexDefault && new RegExp(regexDefault.pattern).test(model)) {
     if (effort !== undefined && !regexDefault.effortLevels.includes(effort))
-      throw new Error(`effort "${effort}" is not offered by model "${model}" — supported levels: ${regexDefault.effortLevels.join(", ")}`);
+      throw new UsageError(
+        `effort "${effort}" is not offered by model "${model}" — supported levels: ${regexDefault.effortLevels.join(", ")}`,
+      );
   }
   // else: class 4 (unknown model id, or no model declared) — accept any of the six tokens, no throw.
 }
@@ -1177,13 +1179,17 @@ export function loadSession(parsed: unknown): SessionConfig {
   // an opaque generic error for a session YAML authored against an older schema. Give it a targeted,
   // actionable hint instead of letting the bare Zod error stand alone.
   if (parsed !== null && typeof parsed === "object" && !Array.isArray(parsed) && "max_thinking_tokens" in parsed) {
-    throw new Error(
+    throw new UsageError(
       "`max_thinking_tokens` removed — use `extended_thinking` (boolean; default true/ON) for the real Cowork " +
         "toggle, or the fenced `debug.max_thinking_tokens` escape hatch for a raw numeric override (not reachable " +
         "via Cowork's UI; a run authored with it does not represent a real Cowork config).",
     );
   }
-  const session = SessionConfig.parse(parsed);
+  // A session the schema rejects is the author's input: a UsageError with one readable line (the full issue
+  // list in the hint), not a raw issue array reported as a harness bug.
+  const r = SessionConfig.safeParse(parsed);
+  if (!r.success) throw new UsageError(`invalid session: ${compactSchemaError(r.error.issues)}`, JSON.stringify(r.error.issues));
+  const session = r.data;
   if ((session.effort as string | undefined) === "extra") return { ...session, effort: "xhigh" };
   return session;
 }
