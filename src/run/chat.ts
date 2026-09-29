@@ -9,7 +9,7 @@ import { mkdirSync, existsSync, readdirSync, writeFileSync } from "node:fs";
 import { writeTextAtomic, warn } from "../io.js";
 import type { InfraErrorSource } from "../types.js";
 import { loadBaseline, resolveAgentBinary } from "../baseline.js";
-import { loadSession, buildLaunchPlan, userVisibleRootsFromPlan, readonlyFolderRootsFromPlan } from "../session.js";
+import { loadSession, buildLaunchPlan, resolveLaunchSources, userVisibleRootsFromPlan, readonlyFolderRootsFromPlan } from "../session.js";
 import { spawnContainer } from "../runtime/container.js";
 import { spawnHostLoop, WORKSPACE_TOOL_ALIASES } from "../runtime/hostloop.js";
 import { spawnProtocol } from "../runtime/protocol.js";
@@ -265,6 +265,10 @@ export async function cmdChat(args: string[]) {
     logHostHookNotice(hookRoots, warn);
   }
   const baseline = loadBaseline("latest");
+  // Every declared source (the skill folder, plugins, uploads, folders) is resolved and checked HERE,
+  // before the run dir exists, as executeScenario does: a path that does not exist is a UsageError and a
+  // chat refused for it leaves no run dir behind. buildLaunchPlan stages from this same resolution.
+  const launchSources = resolveLaunchSources(session, baseline, fidelity, false);
   const sessionId = `local_${process.hrtime.bigint().toString(36)}`;
   const outDir = join(runsWriteRoot(), "chat", sessionId);
   mkdirSync(outDir, { recursive: true });
@@ -276,7 +280,7 @@ export async function cmdChat(args: string[]) {
   // this is always turn 1; going through `beginTurn` rather than a hardcoded `turnWriteDir(outDir, 1)`
   // keeps ONE turn-start ritual instead of two.
   const turnNumber = beginTurn(outDir);
-  const plan = buildLaunchPlan(session, baseline, outDir, fidelity, false); // chat has no resume concept
+  const plan = buildLaunchPlan(session, baseline, outDir, fidelity, false, "local", launchSources); // chat has no resume concept
   // mounts.json (see vm-path-ctx-file.ts's header): mirror execute.ts's unconditional write.
   // Chat's `fidelity` is fixed at CLI-parse time (no "cowork" gate resolution here, unlike execute.ts's
   // effectiveFidelity), so it IS the effective tier this session actually runs at. Best-effort; never

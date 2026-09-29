@@ -3,6 +3,8 @@ import { BoundaryError, UsageError, LegacyRunDirError, compactSchemaError } from
 import { ZodError } from "zod";
 import { readFileSync, writeFileSync, appendFileSync, mkdirSync, existsSync, rmSync, readdirSync, renameSync, realpathSync } from "node:fs";
 import { currentTurnEventLines, TURN_START_MARKER } from "./turn-events.js";
+import { hostPathTokens, hostPathTokenOccurrences } from "./host-path-tokens.js";
+import { isInputBorneHostPath, readInputHostPathCorpus, type InputHostPathCorpus } from "./input-host-paths.js";
 import { hasTurnDirs, currentTurnFromDirs, turnWriteDir, classifyRunDir, preLayoutMessage } from "./turn-layout.js";
 import { randomUUID, createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
@@ -523,6 +525,13 @@ export async function executeScenario(scenario: Scenario, opts: ExecuteOptions =
   // after the status line, where it has always been.
   const effectiveFidelity = effectiveTier(scenario.fidelity, baseline);
 
+  // A `tool_not_called` naming a tool this tier provably does not serve is an authoring error: refused
+  // HERE, before the run dir exists (and before a same-origin `--session-id` re-run clears its prior dir),
+  // ahead of every spawn, staging and image pull. UsageError, not a plain throw: a bare Error would be
+  // categorized `internal` — an authoring mistake reported as a harness bug.
+  const vacuous = tierVacuityRefusal(scenario, baseline);
+  if (vacuous) throw new UsageError(vacuous);
+
   // Every declared source (plugins, skills, uploads, folders, marketplaces) is resolved and checked HERE,
   // before the run directory exists: a path that does not exist is a UsageError, and a run refused for it
   // leaves no run dir, status.json or index row behind. buildLaunchPlan stages from this same resolution.
@@ -633,33 +642,6 @@ export async function executeScenario(scenario: Scenario, opts: ExecuteOptions =
   installTerminationHandler();
 
   if (scenario.fidelity === "cowork") process.stderr.write(`[loop] cowork → ${effectiveFidelity} (per gate 1143815894)\n`);
-
-  // Refuse a `tool_not_called` naming a tool this tier provably does not serve. Placed HERE, not in the
-  // schema or validateScenarioRegexes, because both run before the baseline and the tier exist — and a
-  // `fidelity: cowork` scenario has no tier at all until the line above resolves it, which is the tier
-  // most authors actually write. Still ahead of every spawn, staging and image pull, so no model spend is
-  // wasted on an assertion that could never have been violated. (A same-origin `--session-id` re-run has
-  // already cleared the prior outDir by this point — pre-spend for tokens, not for that.)
-  //
-  // UsageError, not a plain throw: parseScenarioFile wraps only ZodError, so a bare Error here would be
-  // categorized `internal` — an authoring mistake reported as a harness bug.
-  const viaApiForVacuity = readGateFlag(baseline, "1978029737", "coworkWebFetchViaApi", false);
-  for (const a of scenario.assert) {
-    // BOTH negative tool keys. `subagent_tool_absent` reads the tools sub-agents actually USED
-    // (assert.ts's `ctx.subagentTools`), not a per-dispatch declared list, so the same tier table applies
-    // — covering one and not the other would refuse `tool_not_called: "Bash"` at hostloop while silently
-    // greening the sub-agent form of the identical claim.
-    for (const key of ["tool_not_called", "subagent_tool_absent"] as const) {
-      const pattern = a[key];
-      if (pattern === undefined) continue;
-      // The object form of tool_not_called is refused only when EVERY listed tool is unserved.
-      const finding =
-        typeof pattern === "string"
-          ? tierVacuousTool(pattern, effectiveFidelity, viaApiForVacuity)
-          : objectFormTierVacuous(pattern, effectiveFidelity, viaApiForVacuity);
-      if (finding) throw new UsageError(tierVacuousMessage(finding, key, scenario.name));
-    }
-  }
 
   let agentSessionId: string | undefined;
   if (opts.sessionId || opts.resume) {
@@ -1250,7 +1232,10 @@ export async function executeScenario(scenario: Scenario, opts: ExecuteOptions =
 
     // Detect deletes across every DELETE-DENIED mount, not just outputs — production's denial is a
     // property of the mount class, so a connected `rw` folder is in scope too.
-    const scan = scanEvents(join(outDir, "events.jsonl"), deleteDeniedRootsFromPlan(plan));
+    // Host paths the user supplied (the staged input files, captured on the first turn, and this turn's
+    // prompt) are not a leak when the agent quotes them back verbatim.
+    const inputCorpus = inputProvenanceCorpus(outDir, sessionId, baseline, scenario.prompt, effectiveFidelity);
+    const scan = scanEvents(join(outDir, "events.jsonl"), deleteDeniedRootsFromPlan(plan), inputCorpus);
     // A missing or corrupt events.jsonl means the post-run scan (host-path-leak / delete-in-outputs /
     // self-heal) has no trustworthy evidence — treat it as unavailable, never as a clean scan.
     const scanUnavailable = scan.sidecarMissing || scan.malformedLines > 0;
@@ -1855,6 +1840,10 @@ export async function executeScenario(scenario: Scenario, opts: ExecuteOptions =
             // Omitted when empty so an unchanged run's result.json is byte-identical to before.
             ...(scan.mountDeletes.length ? { mountDeletes: scan.mountDeletes } : {}),
             hostPathLeaked: scan.hostPathLeaked,
+            // Input provenance, omitted when zero (byte-identical result.json for a run with no such inputs):
+            // how many host-path tokens the inputs carried, and how many matches that exempted.
+            ...(inputCorpus?.tokens.size ? { inputHostPathTokens: inputCorpus.tokens.size } : {}),
+            ...(scan.hostPathsFromInputs ? { hostPathsFromInputs: scan.hostPathsFromInputs } : {}),
             selfHealRan: scan.selfHealRan,
           },
       // The outputs filesystem diff — a sibling of `scan`, so a proven delete survives a missing events.jsonl.
@@ -2193,12 +2182,19 @@ export function ablateSession<T extends { plugins: Record<string, unknown>; skil
  * file's own directory (see {@link resolveSessionPaths}). Exported for the matrix runner — cli.ts loads
  * the base session ONCE per matrix run, then applies per-cell overrides (applySessionOverrides,
  * session.ts) on top of the SAME loaded+resolved object, rather than re-resolving paths per cell. */
-/** The input-path check a preview makes (`record <file> --dry-run`): open the scenario's session, apply the
- *  model the run would resolve, and run the same write-free source resolution `executeScenario` runs before
- *  it creates a run dir. Throws that resolution's `UsageError` (a path that does not exist or is the wrong
- *  kind, an effort the model does not offer). A session that does not load at all is left to the real run,
- *  as the model pre-flight leaves it. */
-export function launchSourcesPreflight(scenario: Scenario, modelOverride: string | undefined): void {
+/** The input-path check a preview or batch pre-flight makes (`record --dry-run`, `run <dir/>`): open the
+ *  scenario's session, apply the model the run would resolve (and `ablateSkill`, as the run applies it), and
+ *  run the same write-free source resolution `executeScenario` runs before it creates a run dir. Throws that
+ *  resolution's `UsageError` (a path that does not exist or is the wrong kind, an effort the model does not
+ *  offer, a baseline name that resolves nowhere). A session that does not load at all is left to the real
+ *  run, as the model pre-flight leaves it; a baseline file that does not load throws what the run would.
+ *  `quiet` mutes the resolution's warnings, for a caller whose run resolves again and prints them itself;
+ *  `baseline` passes one the caller already loaded. */
+export function launchSourcesPreflight(
+  scenario: Scenario,
+  modelOverride: string | undefined,
+  opts: { quiet?: boolean; ablateSkill?: boolean; baseline?: PlatformBaseline } = {},
+): void {
   let loaded: ReturnType<typeof loadSession>;
   try {
     loaded = loadSessionFromFile(scenario.session);
@@ -2207,9 +2203,86 @@ export function launchSourcesPreflight(scenario: Scenario, modelOverride: string
     return;
   }
   const model = resolvePinnedModel(modelOverride, loaded.model, envModelDefault());
-  const session = model !== undefined && model !== loaded.model ? applySessionOverrides(loaded, { model }) : loaded;
-  const baseline = loadBaseline(scenario.baseline);
-  resolveLaunchSources(session, baseline, effectiveTier(scenario.fidelity, baseline), false, { stageFilters: false });
+  const withModel = model !== undefined && model !== loaded.model ? applySessionOverrides(loaded, { model }) : loaded;
+  const session = opts.ablateSkill ? ablateSession(withModel) : withModel;
+  const baseline = opts.baseline ?? loadBaseline(scenario.baseline);
+  resolveLaunchSources(session, baseline, effectiveTier(scenario.fidelity, baseline), false, {
+    stageFilters: false,
+    quiet: opts.quiet,
+  });
+}
+
+/** Every input check `executeScenario` makes before it creates a run dir, in its order, for a caller that
+ *  must answer before that (a batch pre-flight, a dry run): the baseline name, a tier-vacuous negative tool
+ *  assertion, then every declared input path. Returns the first refusal as the `UsageError` the run would
+ *  throw (message and hint), or `undefined`. Anything else that is not an input error is thrown.
+ *
+ *  A baseline FILE that does not load (malformed JSON, a shape the schema rejects) is the caller's choice,
+ *  `unloadableBaseline`: `"throw"` (the default) fails as the run would; `"skip"` leaves it to the run
+ *  (a batch pre-flight, where that scenario still fails on its turn); `"report"` returns the load error as
+ *  the refusal (a directory dry run, whose real record fails that item). */
+export function scenarioInputRefusal(
+  scenario: Scenario,
+  modelOverride: string | undefined,
+  opts: ScenarioInputCheckOptions = {},
+): UsageError | undefined {
+  const f = scenarioInputFindings(scenario, modelOverride, opts);
+  return f.vacuity ?? f.inputs;
+}
+
+export type ScenarioInputCheckOptions = { quiet?: boolean; ablateSkill?: boolean; unloadableBaseline?: "throw" | "skip" | "report" };
+
+/** The two halves of {@link scenarioInputRefusal}, from ONE resolution, for a caller that treats them
+ *  differently (`record <file> --dry-run` reports vacuity but refuses a bad input): `vacuity`, the
+ *  tier-vacuous refusal; `inputs`, the baseline-name or input-path refusal. The run throws `vacuity` first. */
+export function scenarioInputFindings(
+  scenario: Scenario,
+  modelOverride: string | undefined,
+  opts: ScenarioInputCheckOptions = {},
+): { vacuity?: UsageError; inputs?: UsageError } {
+  let baseline: PlatformBaseline;
+  try {
+    baseline = loadBaseline(scenario.baseline);
+  } catch (e) {
+    if (e instanceof UsageError) return { inputs: e };
+    if ((opts.unloadableBaseline ?? "throw") === "throw") throw e;
+    if (opts.unloadableBaseline === "skip") return {};
+    return { inputs: new UsageError(`baseline "${scenario.baseline}" does not load: ${(e as Error).message}`) };
+  }
+  const vacuous = tierVacuityRefusal(scenario, baseline);
+  let inputs: UsageError | undefined;
+  try {
+    launchSourcesPreflight(scenario, modelOverride, { quiet: opts.quiet, ablateSkill: opts.ablateSkill, baseline });
+  } catch (e) {
+    if (!(e instanceof UsageError)) throw e;
+    inputs = e;
+  }
+  return { ...(vacuous ? { vacuity: new UsageError(vacuous) } : {}), ...(inputs ? { inputs } : {}) };
+}
+
+/** Refuse a `tool_not_called` / `subagent_tool_absent` naming a tool the scenario's tier provably does not
+ *  serve: the assertion could never be violated, so it verifies nothing. Returns the refusal text, or
+ *  `undefined`. Depends only on the scenario and the baseline (which resolves a `cowork` fidelity to its
+ *  tier), so `executeScenario` checks it before the run dir exists and `run <dir/>` before the first
+ *  scenario runs. Not in the schema or validateScenarioRegexes: both run before the baseline and the tier
+ *  exist, and `fidelity: cowork` — the tier most authors write — has no tier until then. */
+export function tierVacuityRefusal(scenario: Scenario, baseline: PlatformBaseline): string | undefined {
+  const tier = effectiveTier(scenario.fidelity, baseline);
+  const viaApi = readGateFlag(baseline, "1978029737", "coworkWebFetchViaApi", false);
+  for (const a of scenario.assert) {
+    // BOTH negative tool keys. `subagent_tool_absent` reads the tools sub-agents actually USED
+    // (assert.ts's `ctx.subagentTools`), not a per-dispatch declared list, so the same tier table applies
+    // — covering one and not the other would refuse `tool_not_called: "Bash"` at hostloop while silently
+    // greening the sub-agent form of the identical claim.
+    for (const key of ["tool_not_called", "subagent_tool_absent"] as const) {
+      const pattern = a[key];
+      if (pattern === undefined) continue;
+      // The object form of tool_not_called is refused only when EVERY listed tool is unserved.
+      const finding = typeof pattern === "string" ? tierVacuousTool(pattern, tier, viaApi) : objectFormTierVacuous(pattern, tier, viaApi);
+      if (finding) return tierVacuousMessage(finding, key, scenario.name);
+    }
+  }
+  return undefined;
 }
 
 export function loadSessionFromFile(sessionRef: string): ReturnType<typeof loadSession> {
@@ -2627,7 +2700,7 @@ export function scrubRawRunLogs(outDir: string, secrets: string[]): void {
  * `file:///Users/alice` the char before `/Users/` is the path's own `/`, which is NOT in the class,
  * so the bare anchor would miss it. `file:\/\/[^\s\/]*` consumes the optional authority (empty or a
  * host like `localhost`) and lets the path root match. URL-encoded (`%2FUsers`) and backslash
- * (`file:\\host\Users`) forms ARE now covered (see the decode+normalize pass in the body); the Windows
+ * (`file:\\host\Users`) forms ARE now covered (the decode+normalize pass in host-path-tokens.ts); the Windows
  * `file:///C:/Users/` form is caught incidentally via the drive-letter `:` boundary.
  */
 export function hostPathLeaked(text: string): boolean {
@@ -2638,24 +2711,17 @@ export function hostPathLeaked(text: string): boolean {
   // `computer://` is accepted beside `file://`: a delivered-file link to a host path
   // (`computer:///Users/…`) is exactly how a host path reaches the model's own reply, and so is a
   // backtick-quoted one ("Saved to `/Users/…`").
-  const re =
-    /(^|[\s"'(=:`]|(?:file|computer):\/\/[^\s\/]*)(\/Users\/|\/opt\/cowork\/|\/home\/|\/root\/|\/private\/var\/|\/private\/tmp\/|\/var\/folders\/|\/Volumes\/)/;
-  if (re.test(text)) return true;
-  // also catch URL-encoded (%2FUsers%2F) and backslash (file:\\host\Users) forms by testing a
-  // decoded + backslash-normalized copy. Decode each `%`-escape RUN independently rather than the
+  // URL-encoded (%2FUsers%2F) and backslash (file:\\host\Users) forms are caught by also tokenizing a
+  // decoded + backslash-normalized copy. Each `%`-escape RUN is decoded independently rather than the
   // whole string: decodeURIComponent over the entire text throws on ANY stray `%` (e.g. `build 100%
   // done`), which would silently disable the encoded re-test even when a genuine `%2Fhome%2Fvictim`
-  // is also present. An undecodable run is left verbatim.
-  const decoded = text.replace(/(?:%[0-9A-Fa-f]{2})+/g, (m) => {
-    try {
-      return decodeURIComponent(m);
-    } catch {
-      return m;
-    }
-  });
-  const normalized = decoded.replace(/\\/g, "/");
-  return normalized !== text && re.test(normalized);
+  // is also present. An undecodable run is left verbatim. The pattern and the decoding live in
+  // host-path-tokens.ts, shared with the input-provenance exemption (input-host-paths.ts), so the two can
+  // never disagree about what a host path is.
+  return hostPathTokens(text).length > 0;
 }
+
+export { hostPathTokens };
 
 // Operations that UNLINK a name. Scoped to match the real product's enforcement, which was measured
 // directly against the outputs mount with raw syscalls (not shell commands, which mask the syscall
@@ -3500,12 +3566,64 @@ function outputsDeleteSnippet(cmd: string, mount = "outputs"): string {
   return (ops.length ? ops.join("; ") : expanded).split(EMPTY_JOIN_GUARD).join("").trim().slice(0, 160);
 }
 
+/** Host roots the harness created for THIS run, raw and realpath spellings both. `subtree`: the run dir
+ *  (which holds the container session tree), the microvm session dir, and the staged agents' dir — the
+ *  `claude-code-vm` parent of the pinned version, since a pruned pin falls back to a sibling version, which
+ *  is then the one mounted (plus a `COWORK_AGENT_BINARY` override's dir). A host path at or under one of
+ *  them in model-visible text is what a sandbox leak looks like, so input provenance never exempts it.
+ *  `exact`: the vm-work root, the runs root and the run's own parent dir — they hold OTHER sessions, which an input may legitimately
+ *  name, so only the root itself is refused. Mount SOURCE paths are deliberately absent: they reach
+ *  model-visible text only at hostloop, where the signal is skipped. */
+export function ownHostRoots(outDir: string, sessionId: string, baseline: PlatformBaseline): { subtree: string[]; exact: string[] } {
+  const subtree = [resolve(outDir), join(VM_WORK_HOST, sessionId)];
+  const staged = (baseline.agentBinary?.stagedPath ?? "").replace(/^~(?=$|\/)/, homedir());
+  if (staged) subtree.push(dirname(dirname(staged)));
+  if (process.env.COWORK_AGENT_BINARY) subtree.push(dirname(resolve(process.env.COWORK_AGENT_BINARY)));
+  const exact = [VM_WORK_HOST, dirname(resolve(outDir)), resolve(runsWriteRoot())];
+  const withRealpaths = (roots: string[]): string[] => {
+    const out = [...roots];
+    for (const r of roots) {
+      try {
+        const real = realpathSync(r);
+        if (real !== r) out.push(real);
+      } catch {
+        /* not on disk (e.g. no microvm session dir): the raw spelling is enough */
+      }
+    }
+    return out;
+  };
+  return { subtree: withRealpaths(subtree), exact: withRealpaths(exact) };
+}
+
+/** The input-provenance corpus the post-run scan exempts against: the host-path tokens the first turn's
+ *  staged inputs carried (persisted by the runtime), plus this turn's prompt, with this run's own roots
+ *  never exempt. Only at container/microvm: those are the tiers that stage inputs and arm the
+ *  `host_path_leak` signal; elsewhere nothing is exempted (and nothing is reported). */
+export function inputProvenanceCorpus(
+  outDir: string,
+  sessionId: string,
+  baseline: PlatformBaseline,
+  prompt: string | undefined,
+  effectiveFidelity: string,
+): InputHostPathCorpus | undefined {
+  if (effectiveFidelity !== "container" && effectiveFidelity !== "microvm") return undefined;
+  const { subtree, exact } = ownHostRoots(outDir, sessionId, baseline);
+  return {
+    tokens: new Set([...readInputHostPathCorpus(outDir), ...hostPathTokens(prompt ?? "")]),
+    neverExemptRoots: subtree,
+    neverExemptExact: exact,
+  };
+}
+
 /** Scan a run's events.jsonl for limitation-fidelity signals (moved from cli.ts). */
 export function scanEvents(
   file: string,
   /** Writable (`rw`) user-visible mount names to attribute deletes to. Production denies unlink/rmdir on
    *  EVERY such mount, not just `outputs`. Defaults to outputs-only so existing callers are unchanged. */
   rwMounts: string[] = ["outputs"],
+  /** Host-path tokens the USER supplied (captured from the staged inputs before the agent ran). A matched
+   *  token found here verbatim is not a leak; omitted ⇒ every match leaks, as before. */
+  inputCorpus?: InputHostPathCorpus,
 ): {
   outputsDeletes: string[];
   /** POSITIONAL companion of `outputsDeletes` — same length, same order — saying why each entry was
@@ -3517,6 +3635,9 @@ export function scanEvents(
    *  and every committed cassette are defined in terms of it. */
   mountDeletes: { mount: string; command: string }[];
   hostPathLeaked: boolean;
+  /** Distinct host-path tokens in model-visible text that were exempted because they came verbatim from
+   *  the scenario's inputs (`inputCorpus`). A pass that relied on the exemption is visible through this. */
+  hostPathsFromInputs: number;
   selfHealRan: boolean;
   // events.jsonl was absent/unreadable — the scan produced NO evidence. Distinct from a clean scan:
   // callers must NOT persist an all-false scan for this case (that reads as "scanned, found nothing").
@@ -3531,6 +3652,7 @@ export function scanEvents(
     outputsDeleteBasis: [] as ("fs-diff" | "named" | "inferred")[],
     mountDeletes: [] as { mount: string; command: string }[],
     hostPathLeaked: false,
+    hostPathsFromInputs: 0,
     selfHealRan: false,
     sidecarMissing: false,
     malformedLines: 0,
@@ -3552,6 +3674,18 @@ export function scanEvents(
     return out;
   }
   const selfHealRe = /\/sessions\/[^\s"]*\/mnt\/\.local-plugins/;
+  // A text leaks iff it carries a host-path token that did NOT come from the user's inputs.
+  const exempted = new Set<string>();
+  const leaks = (text: string): boolean => {
+    let leaked = false;
+    // A token cut short at whitespace, `,` or `;` with the path going on after it is never exempt: it is
+    // probably a truncated spelling of a longer path, which an unrelated input can carry too.
+    for (const { token, continued } of hostPathTokenOccurrences(text)) {
+      if (!continued && isInputBorneHostPath(token, inputCorpus)) exempted.add(token);
+      else leaked = true;
+    }
+    return leaked;
+  };
   for (const l of lines) {
     let msg: any;
     try {
@@ -3565,12 +3699,12 @@ export function scanEvents(
     // detection assistant-only (those are tool_use blocks the agent emits).
     if (msg.type !== "assistant" && msg.type !== "user" && msg.type !== "system") continue;
     // A standalone `system` message carries top-level string content (no message.content array).
-    if (msg.type === "system" && typeof msg.content === "string" && hostPathLeaked(msg.content)) out.hostPathLeaked = true;
+    if (msg.type === "system" && typeof msg.content === "string" && leaks(msg.content)) out.hostPathLeaked = true;
     for (const block of msg.message?.content ?? []) {
       // A `thinking` block can leak a host path in the reasoning text (e.g. quoting an absolute path).
       if (block.type === "thinking") {
         const t = block.thinking ?? block.text;
-        if (typeof t === "string" && hostPathLeaked(t)) out.hostPathLeaked = true;
+        if (typeof t === "string" && leaks(t)) out.hostPathLeaked = true;
       }
       // delete/self-heal detection must cover BOTH bash surfaces — native `Bash` (container/microvm
       // tiers) AND `mcp__workspace__bash` (host-loop, where native Bash is disabled). Same `command`
@@ -3589,18 +3723,19 @@ export function scanEvents(
         }
         if (selfHealRe.test(cmd)) out.selfHealRan = true;
       }
-      if (block.type === "text" && typeof block.text === "string" && hostPathLeaked(block.text)) out.hostPathLeaked = true;
+      if (block.type === "text" && typeof block.text === "string" && leaks(block.text)) out.hostPathLeaked = true;
       if (block.type === "tool_result") {
         // tool_result.content is a string or an array of {type:"text", text} blocks (Bash output, etc.)
         const c = block.content;
         if (typeof c === "string") {
-          if (hostPathLeaked(c)) out.hostPathLeaked = true;
+          if (leaks(c)) out.hostPathLeaked = true;
         } else if (Array.isArray(c)) {
-          for (const sub of c) if (typeof sub?.text === "string" && hostPathLeaked(sub.text)) out.hostPathLeaked = true;
+          for (const sub of c) if (typeof sub?.text === "string" && leaks(sub.text)) out.hostPathLeaked = true;
         }
       }
     }
   }
+  out.hostPathsFromInputs = exempted.size;
   return out;
 }
 

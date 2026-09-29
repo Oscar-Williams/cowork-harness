@@ -67,14 +67,11 @@ CI-grade scenario, and the post-hoc debug loop; the rest are narrower tools that
   no scenario file.
 - **Repeatable, asserted regression** → author a `scenarios/*.yaml` and run `cowork-harness run`.
   This is the CI-grade path and most of this skill.
-- **A run failed — or greened and you don't trust it** (the debugging loop) → don't re-run and hope.
-  The run already wrote its evidence to a **kept run dir** (`~/.cowork-harness/runs/…`; `--keep` prints
-  the path, `trace <run-id>` finds it). **Localize the failure post-hoc** from that evidence:
-  `cowork-harness trace <run-dir>`'s views + the emitted `result.json` to see what the run actually did,
-  then `verify-run` to re-check a suspect assertion — all token-free, no Docker, no re-record. This is
-  the loop 0.32.0's observability is built for; the *Triage* and *Inspecting a run's observability
-  output* sections in [`references/debugging.md`](references/debugging.md) are the detail (the fuller human-facing map lives in
-  [`docs/debugging.md`](https://github.com/yaniv-golan/cowork-harness/blob/main/docs/debugging.md) — repo-only, not shipped with the installed skill).
+- **A run failed — or greened and you don't trust it** (the debugging loop) → **Read
+  [`references/debugging.md`](references/debugging.md) before touching the run.** Its *Triage* table first
+  splits "the skill misbehaved" from "a green you don't trust" — they need different tools — then names the
+  tool for each, all token-free over the **kept run dir** (`~/.cowork-harness/runs/…`; `--keep` prints the
+  path, `trace <run-id>` finds it). Don't re-run and hope.
   **"Evidence" here means the RUN's own record** — events, trace, transcript. `critique`'s evaluator
   grades against a different artifact, `critique-evidence-package.txt`, which none of these tools
   surface; see `references/critique.md`.
@@ -136,8 +133,8 @@ behind each, is [`references/gotchas.md`](references/gotchas.md).
   (a cassette cannot be moved) → `replay` on the PR gate.
 - **Fix answers without paying:** `--keep` one run → `trace <run-dir> --view questions` → edit
   `answers:` → `verify-run <run-dir> <scenario.yaml>` → record once.
-- **Debug:** the triage table in `references/debugging.md` → `inspect`, `trace --view …`,
-  `verify-run`, `diff`. For a green you don't trust: `replay --explain`, then the gotchas.
+- **Debug:** Read `references/debugging.md` first — its triage table picks the tool (`inspect`,
+  `trace --view …`, `verify-run`, `diff`, `replay --explain`).
 - **Measure:** `--repeat N` for flakiness. `--ablate-skill` runs the control arm only; run the treatment
   arm yourself, with the model pinned and a recoverable source frozen.
 

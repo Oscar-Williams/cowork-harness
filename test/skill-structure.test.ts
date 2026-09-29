@@ -60,6 +60,31 @@ describe("cowork-harness SKILL.md structural tripwire", () => {
     expect(router).toMatch(/use `skill`/i);
   });
 
+  it("the debug routes tell the agent to READ references/debugging.md first, not a summary of it", () => {
+    // A wording tripwire, not proof of behaviour: whether an agent actually opens the reference needs a
+    // live run. It exists because a router bullet that carried its own inline procedure was acted on
+    // without the reference ever being read, which skipped the triage split between "the skill misbehaved"
+    // and "a green you don't trust". The "no verify-run before the Read" clause guards against someone
+    // re-inlining the procedure ahead of the instruction.
+    const start = doc.indexOf("## Orient — the three loops");
+    const end = doc.indexOf("\n## ", start + 1);
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    const router = doc.slice(start, end);
+    const bulletStart = router.indexOf("- **A run failed");
+    expect(bulletStart, "the debug bullet is gone from the Orient router").toBeGreaterThan(-1);
+    const nextBullet = router.indexOf("\n- ", bulletStart + 1);
+    const bullet = router.slice(bulletStart, nextBullet === -1 ? undefined : nextBullet);
+    const read = bullet.search(/\*\*Read\s+\[`references\/debugging\.md`\]\(references\/debugging\.md\)/);
+    expect(read, "the debug bullet does not tell the agent to Read references/debugging.md").toBeGreaterThan(-1);
+    const verifyRun = bullet.indexOf("verify-run");
+    expect(verifyRun === -1 || verifyRun > read, "verify-run is named before the Read instruction").toBe(true);
+
+    const debugLine = doc.split("\n").find((l) => l.startsWith("- **Debug:**"));
+    expect(debugLine, "the Debug short workflow is gone").toBeDefined();
+    expect(debugLine).toMatch(/^- \*\*Debug:\*\* Read `references\/debugging\.md` first/);
+  });
+
   it("retains the two-axes assertions model marker (in references/assertions-guide.md)", () => {
     expect(read("references/assertions-guide.md")).toContain("Assertions: two orthogonal axes");
   });

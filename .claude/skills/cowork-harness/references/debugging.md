@@ -7,7 +7,9 @@ Tracks `cowork-harness 4.0.0` (baseline `desktop-2.9939.4`). Read it when a run 
 A run misbehaved, or greened when you don't trust it. Debugging is a first-class loop, not an
 afterthought: the run already wrote its evidence, so you **localize the failure post-hoc** rather than
 re-run and hope. Start at the triage below, then use the observability output and, when you need to
-reproduce interactively, `chat`.
+reproduce interactively, `chat`. (The fuller human-facing map is
+[`docs/debugging.md`](https://github.com/yaniv-golan/cowork-harness/blob/main/docs/debugging.md) — repo-only,
+not shipped with the installed skill.)
 
 > **"Evidence" below means the run's own record** — events, trace, transcript; what `trace` / `inspect` /
 > `diff` / `verify-run` / `replay --explain` read. `critique`'s **evaluator** grades against a separate,
@@ -31,6 +33,11 @@ A failed run also records `errorSource` (where the failure originated) and `stde
 agent stderr) — read those before re-running; a re-record rarely tells you more than the captured stderr
 already does.
 <!-- END triage-canonical -->
+
+**microvm: "control-protocol write failed" with `env: 'claude': No such file or directory` in the agent
+stderr** usually means the VM never finished provisioning (the agent never reached PATH). Check
+`cowork-harness vm status` — a `provisioning` other than `ready` confirms it — and if a run does not
+recover it on its own, `cowork-harness vm delete` and retry.
 
 **Is it your skill's bug, or a known harness gap?** Before deep-debugging a wrong behavior, rule out a
 **deliberate fidelity gap** — the harness intentionally does *not* reproduce a few real-Cowork behaviors,

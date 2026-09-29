@@ -2746,6 +2746,12 @@
       ".scan.hostPathLeaked": {
         "type": "boolean"
       },
+      ".scan.hostPathsFromInputs": {
+        "type": "integer"
+      },
+      ".scan.inputHostPathTokens": {
+        "type": "integer"
+      },
       ".scan.mountDeletes": {
         "type": "array"
       },
@@ -4466,6 +4472,7 @@
       "COWORK_PROXY_IMAGE",
       "COWORK_SKIP_CAPABILITY_PROBE",
       "COWORK_VM_GATEWAY",
+      "COWORK_VM_PROVISION_TIMEOUT_S",
       "COWORK_VM_PROXY_PORT"
     ]
   }

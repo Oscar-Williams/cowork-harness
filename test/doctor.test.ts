@@ -21,6 +21,7 @@ const OK_PROBE: DoctorProbe = {
   runtimeDaemonUp: () => true,
   limaAvailable: () => true,
   vmInstanceStatus: () => "Running",
+  vmProvisioning: () => "ready",
   imageName: () => "cowork-agent-base:2",
   imagePresent: () => true,
   proxyImageName: () => "cowork-egress-proxy:3",
@@ -119,6 +120,26 @@ describe("doctor — runDoctorChecks", () => {
       expect(vm.status).toBe("ok");
       expect(blocking(cs)).not.toContain("vm-instance");
     }
+  });
+
+  // Running only means the guest booted. A first boot cut off mid-provisioning is Running too, and doctor
+  // used to call it "provisioned".
+  it("microvm vm-instance check warns (not fails) when a Running instance is not provisioned", () => {
+    for (const state of ["pending", "sealed", "failed"]) {
+      const cs = runDoctorChecks("microvm", probe({ vmInstanceStatus: () => "Running", vmProvisioning: () => state }));
+      const vm = get(cs, "vm-instance");
+      expect(vm.status).toBe("warn");
+      expect(vm.detail).toContain(state === "pending" ? "still provisioning" : state === "sealed" ? "firewalled" : "without the agent");
+      expect(blocking(cs)).not.toContain("vm-instance");
+    }
+    const failed = get(runDoctorChecks("microvm", probe({ vmProvisioning: () => "failed" })), "vm-instance");
+    expect(failed.remedy).toMatch(/vm delete/);
+  });
+
+  it("a Running + provisioned instance says so", () => {
+    const vm = get(runDoctorChecks("microvm", OK_PROBE), "vm-instance");
+    expect(vm.status).toBe("ok");
+    expect(vm.detail).toMatch(/running — provisioned/);
   });
 
   it("microvm vm-instance check warns (not fails) when the Lima instance is Absent — self-provisions on first run", () => {

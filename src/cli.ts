@@ -22,6 +22,7 @@ import {
   parseScenarioFile,
   loadSessionFromFile,
   unresolvedModelPreflight,
+  scenarioInputRefusal,
   UnansweredError,
   BoundaryError,
   UsageError,
@@ -41,7 +42,7 @@ import {
 } from "./decide/decider.js";
 import { claudeCliComplete } from "./decide/llm-transport.js";
 import { toDecisionRequest, questionLabel, type DecisionRequest } from "./agent/session.js";
-import { vmInit, vmDelete, vmStatus, vmPrune, instanceName } from "./runtime/lima.js";
+import { vmInit, vmDelete, vmStatus, vmPrune, instanceName, vmProvisioned, type VmProvisioning } from "./runtime/lima.js";
 import { resolveVmBaselineArg } from "./runtime/vm-baseline-arg.js";
 import { sync, canonicalizeEnv, syncedNetworkBlock } from "./sync/cowork-sync.js";
 import { diffBaselines, formatDiffLines, renderChangelog } from "./sync/baseline-diff.js";
@@ -276,6 +277,7 @@ const HELP = `cowork-harness <command>   (v${"$VERSION"})
       NOTE: exit 127 means python3 itself is missing — treat any non-zero exit as a CI failure, do not swallow it.
   lint-skill <SKILL.md | skill-dir/>…  lint a skill body (and any sibling hooks.json) for Cowork host-loop footguns (bundled scenario.py; needs python3)
       [--strict]               fail on WARN too, not just ERROR (never INFO)
+      [--ignore-rule <id>[=<glob>]]  suppress a reviewed WARN/INFO rule (repeatable; still reported, no longer gates); see also the ignore-start/ignore-end markers
   analyze-skill <SKILL.md | skill-dir/ | glob>…  ADVISORY token-free scan: warns on a /sessions/... path handed to a file tool or dispatch/sub-agent output (denied on host-loop) AND on interactive-artifact write-backs lost under Cowork — reuses the ported /sessions path-gate predicate; only the extraction is heuristic
       A directory target scans the UNION of every contract-bearing markdown file present, not just SKILL.md: top-level SKILL.md + references/**, a plugin root's agents/** + references/** + commands/** + skills/*/SKILL.md(+references/**), and (for a skill dir inside a plugin) the enclosing plugin's agents/**, references/** and commands/** (every one of these walked RECURSIVELY). Multiple positionals are accepted (matches lint-skill's nargs="+"), incl. a simple hand-rolled '*' glob — "dir/*.md" (shallow) or "dir/**/*.md" (recursive) — with the results of ALL positionals UNIONed + deduped by resolved path. Zero scannable files across every positional is a usage error (exit 2), never a silent clean pass.
       [--strict]               fail (exit 1) on any finding instead of just warning (mirrors lint-skill's --strict)
@@ -1901,6 +1903,35 @@ async function cmdRun(rawArgs: string[]) {
       undefined,
       o.json,
     );
+  // Every scenario's inputs, before any runs: its baseline name, a `tool_not_called` its tier can never
+  // violate, then every declared input path (plugins, skills, uploads, folders, marketplaces).
+  // executeScenario checks the same, in the same order, but on a directory only when that file's turn came
+  // — after the earlier ones had been paid for, and with their results lost to the refusal. After the model
+  // refusal, which this resolution needs (an `effort:` is checked against the model). The pre-check is
+  // quiet: the run resolves again and prints any warning (a COWORK_HARNESS_SOFT_MISSING exclusion) itself.
+  // Not under --repeat: there a scenario that throws is reported in its rollup (`stoppedEarly: "error"`),
+  // and that envelope and exit code are the invocation's contract.
+  if (repeatN === undefined) {
+    const badInputs: { file: string; message: string; hint?: string }[] = [];
+    for (let i = 0; i < files.length; i++) {
+      const refusal = scenarioInputRefusal(loaded[i], modelFlag, {
+        quiet: true,
+        ablateSkill: flags.ablateSkill,
+        unloadableBaseline: "skip",
+      });
+      if (refusal) badInputs.push({ file: files[i], message: refusal.message, hint: refusal.hint });
+    }
+    // One file keeps the message (and hint) executeScenario would have thrown, unprefixed; a batch names
+    // every offender, one per line, without hints.
+    if (badInputs.length)
+      fail(
+        "run",
+        "usage",
+        files.length === 1 ? badInputs[0].message : badInputs.map((b) => `${b.file}: ${b.message}`).join("\n"),
+        files.length === 1 ? badInputs[0].hint : undefined,
+        o.json,
+      );
+  }
   if (maxBudgetUsd !== undefined && repeatN === undefined)
     for (const scenario of loaded) preflightBudget("run", scenario.name, maxBudgetUsd, o.json);
 
@@ -2619,12 +2650,20 @@ function vmEnvelopeBase(subcommand: string, baselineName: string, baseline: Plat
   };
 }
 
-function vmStatusEnvelope(baselineName: string, baseline: PlatformBaseline, instance: string, status: string) {
+function vmStatusEnvelope(
+  baselineName: string,
+  baseline: PlatformBaseline,
+  instance: string,
+  status: string,
+  provisioning: VmProvisioning | null,
+) {
   const warnings: string[] = [];
   // vmStatus returns "Absent" when no Lima VM exists for this config hash (see lima.ts) — surface that
   // as a warning so a JSON caller doesn't read "Absent" as a running VM.
   if (status === "Absent") warnings.push(`no VM exists for ${instance} (run \`vm init\` to create it)`);
-  return { ...vmEnvelopeBase("status", baselineName, baseline, instance, warnings), status };
+  // `provisioning` (additive): how far a Running guest's provisioning got — Running alone does not mean
+  // usable. null when the VM is not Running (nothing to ask).
+  return { ...vmEnvelopeBase("status", baselineName, baseline, instance, warnings), status, provisioning };
 }
 
 const VM_SUB_HELP: Record<string, string> = {
@@ -2706,9 +2745,10 @@ function cmdVm(args: string[]) {
   const instance = instanceName(baseline);
   if (sub === "status") {
     const status = vmStatus(instance);
+    const provisioning = status === "Running" ? vmProvisioned(instance) : null;
     // honor --output-format json (the flag was advertised but every branch printed text).
-    if (vmJson) out(JSON.stringify(vmStatusEnvelope(baselineName, baseline, instance, status)));
-    else log(`${instance}: ${status}`);
+    if (vmJson) out(JSON.stringify(vmStatusEnvelope(baselineName, baseline, instance, status, provisioning)));
+    else log(`${instance}: ${status}${provisioning && provisioning !== "ready" ? ` (provisioning: ${provisioning})` : ""}`);
   } else if (sub === "init") {
     const { status } = vmInit(baseline);
     // honor --output-format json (init/delete/prune printed text unconditionally; only status did).
@@ -4082,7 +4122,7 @@ function cmdAnswer(args: string[]) {
     const category = e instanceof UsageError ? "usage" : "runtime";
     return void fail("answer", category, `cannot answer gate ${seq} in ${dir}: ${String((e as Error).message)}`, undefined, json);
   }
-  if (json) out(JSON.stringify({ tool: "cowork-harness", command: "answer", ok: true, gate: seq, answers }));
+  if (json) out(jsonPayloadEnvelope("answer", true, { gate: seq, answers }));
   else log(`✓ answered gate ${seq}: ${JSON.stringify(answers)}`);
 }
 

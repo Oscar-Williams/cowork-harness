@@ -29,8 +29,11 @@ one a paid run would give. On a **directory** the path-dependent verdicts (host-
 portability) are reported as `⚠ would-refuse (advisory)` / `⚠ would-warn (advisory)` notes — the label follows
 the verdict kind, and portability can only ever warn — that do NOT affect the exit code — a dir target
 takes no `--out`, so the destination is a guess — and only the path-independent ones (prompt policy, assert
-contradiction, duplicate cassette target) gate the batch. So a directory dry-run CAN exit 0 on a scenario the
-real `record` would refuse; re-run that one file with its real flags for a binding answer. A directory also
+contradiction, duplicate cassette target) gate the batch. An input the real record would refuse — a missing
+path, an unknown baseline name, a `tool_not_called` the tier can never violate — is listed under
+`inputErrors[]` with a `⚠ input error:` line, also at exit 0. So a directory dry-run CAN exit 0 on a scenario the
+real `record` would refuse; re-run that one file with its real flags for a binding answer, or gate on
+`.ok and (.inputErrors == [])` in the JSON payload (4.1.0 and later). A directory also
 reports every offender and the batch cost estimate. `lint` checks the assertion invariants AND that each file loads (the same loader, plus a named `baseline:`), but not the pre-spend refusals.
 
 **Which arm to reach for.** They answer different questions, and picking the wrong one is why a consumer
@@ -249,7 +252,9 @@ Recognize these before "fixing" a non-bug:
   `container`/`microvm`, but only *fires* on an actual scanned leak with no authored
   `transcript_no_host_path`. At `fidelity: cowork` the skip follows the **resolved** tier, so a `cowork`
   run that lands on `container` is armed. Author `transcript_no_host_path` to enforce cleanliness where
-  it's valid.
+  it's valid. A host path that came verbatim from the scenario's own uploads, connected folders or prompt
+  is not a leak (whole-token match; a token cut short where the path goes on, or one naming a location the
+  harness created for the run, is never exempt); `scan.hostPathsFromInputs` counts the paths exempted.
 - **`exec_infra_error`** (`WARN`, host-loop) — one or more container `exec` calls failed for
   infrastructure reasons (daemon/container-level), so those tool calls returned an error to the agent
   rather than the command's own output. Warn-severity because the run's other evidence is intact — unlike

@@ -21,14 +21,23 @@ function shellProbeResult(presentFamilies: string[]) {
   return { status: 0, stdout: `COWORK_PRESENT: ${presentFamilies.join(" ")}\n`, stderr: "" };
 }
 
-/** Route a spawnSync call: argv[0]==='list' → vmStatus; argv[0]==='shell' → probe. */
-function router(listCb: () => any, shellCb: () => any) {
+/** Build a spawnSync return for the provisioning-readiness `limactl shell` probe. */
+function readinessResult(state: string) {
+  return { status: 0, stdout: `COWORK_PROVISIONING=${state}\n`, stderr: "" };
+}
+const isReadinessProbe = (args: string[]) => args[0] === "shell" && args.join(" ").includes("lima-boot-done");
+
+/** Route a spawnSync call: argv[0]==='list' → vmStatus; the readiness `shell` → `readiness` (default
+ *  ready); any other `shell` → the capability probe. */
+function router(listCb: () => any, shellCb: () => any, readiness: () => any = () => readinessResult("ready")) {
   return (_cmd: string, args: string[]) => {
     if (args[0] === "list") return listCb();
+    if (isReadinessProbe(args)) return readiness();
     if (args[0] === "shell") return shellCb();
     return { status: 1, stdout: "", stderr: "unexpected" };
   };
 }
+const capabilityShellCalls = () => spawnSync.mock.calls.filter((c: any) => c[1][0] === "shell" && !isReadinessProbe(c[1]));
 
 let runsDir: string;
 let warnSpy: ReturnType<typeof vi.spyOn>;
@@ -55,7 +64,7 @@ describe("probeMicrovmOmitted — silent vmStatus gate", () => {
     const result = probeMicrovmOmitted(INSTANCE);
     expect(result).toBeNull();
     // The shell probe must NOT have been issued.
-    const shellCalls = spawnSync.mock.calls.filter((c: any) => c[1][0] === "shell");
+    const shellCalls = capabilityShellCalls();
     expect(shellCalls).toHaveLength(0);
     // No ::warning:: must be emitted for the not-Running case.
     const written = warnSpy.mock.calls.map((c: any) => String(c[0])).join("");
@@ -71,7 +80,7 @@ describe("probeMicrovmOmitted — silent vmStatus gate", () => {
     );
     const result = probeMicrovmOmitted(INSTANCE);
     expect(result).toBeNull();
-    const shellCalls = spawnSync.mock.calls.filter((c: any) => c[1][0] === "shell");
+    const shellCalls = capabilityShellCalls();
     expect(shellCalls).toHaveLength(0);
     const written = warnSpy.mock.calls.map((c: any) => String(c[0])).join("");
     expect(written).not.toMatch(/::warning::/);
@@ -90,8 +99,52 @@ describe("probeMicrovmOmitted — silent vmStatus gate", () => {
     expect(result).not.toContain("ocr");
     expect(result).not.toContain("cv");
     // The shell probe was issued.
-    const shellCalls = spawnSync.mock.calls.filter((c: any) => c[1][0] === "shell");
+    const shellCalls = capabilityShellCalls();
     expect(shellCalls).toHaveLength(1);
+  });
+
+  // The probe runs BEFORE vmInit and its result is cached per instance forever. A Running guest whose
+  // provisioning has not finished (or never will) lacks the toolchain, so probing it would cache "everything
+  // omitted" for an instance that later becomes healthy. Only a READY guest may be probed.
+  for (const state of ["pending", "sealed", "failed"]) {
+    it(`returns null and caches nothing when the Running guest is not provisioned (${state})`, () => {
+      spawnSync.mockImplementation(
+        router(
+          () => listResult("Running"),
+          () => shellProbeResult(["ocr"]),
+          () => readinessResult(state),
+        ),
+      );
+      expect(probeMicrovmOmitted(INSTANCE)).toBeNull();
+      expect(capabilityShellCalls()).toHaveLength(0);
+      // Nothing was cached: once the guest is ready, the next call probes for real.
+      spawnSync.mockImplementation(
+        router(
+          () => listResult("Running"),
+          () => shellProbeResult(["ocr"]),
+        ),
+      );
+      expect(probeMicrovmOmitted(INSTANCE)).not.toBeNull();
+      expect(capabilityShellCalls()).toHaveLength(1);
+    });
+  }
+
+  it("runs the capability probe through the configured limactl (COWORK_LIMACTL), like every other Lima call", () => {
+    process.env.COWORK_LIMACTL = "/fake/bin/limactl";
+    try {
+      spawnSync.mockImplementation(
+        router(
+          () => listResult("Running"),
+          () => shellProbeResult(["ocr"]),
+        ),
+      );
+      probeMicrovmOmitted(INSTANCE);
+      const cmds = spawnSync.mock.calls.map((c: any) => c[0]);
+      expect(cmds.length).toBeGreaterThan(0);
+      expect(new Set(cmds)).toEqual(new Set(["/fake/bin/limactl"]));
+    } finally {
+      delete process.env.COWORK_LIMACTL;
+    }
   });
 
   // execute.ts's pre-flight (finding 2 in the observability sweep) feeds probeMicrovmOmitted's result

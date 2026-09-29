@@ -93,7 +93,10 @@ GitHub-hosted runners, no token/Docker/agent:
                                                     # 3.x CLI bare `--strict` also fails on INFO, so keep
                                                     # the pair explicit. `--min-severity INFO` gates on
                                                     # INFO as well. (`lint-skill --strict` never fails
-                                                    # on INFO and has no floor to widen.)
+                                                    # on INFO and has no floor to widen; to accept a
+                                                    # reviewed lint-skill WARN, keep --strict and add
+                                                    # `--ignore-rule <rule>[=<skill-dir>/<path>]` or an
+                                                    # ignore-start/ignore-end marker in the SKILL.md.)
 - run: cowork-harness lint scenarios/*.yaml --strict --min-severity INFO --cassette-dir cassettes/
                                                     # committed *.cassette.json evidence suppresses only
                                                     # replay advisories proven by every matching cassette;
@@ -338,7 +341,16 @@ A typical skill repo runs four stages, fastest/cheapest first:
 
    This is the shape a CI step wants: **silent on success (no output, exit 0), loud and specific on
    failure** — `--quiet` suppresses the readiness preview but never the `✗ broken:` lines, which name the
-   offending file *and* the rejected key, one line per file, and the step still exits 1. Point `lint`
+   offending file *and* the rejected key, one line per file, and the step still exits 1. It exits 0,
+   though, on an input the real record would refuse (a missing path, an unknown baseline name, a
+   tier-vacuous `tool_not_called`): that prints a `⚠ input error:` line and lands in `inputErrors[]`. To
+   gate on those too, use the JSON form (4.1.0 and later):
+
+   ```bash
+   cowork-harness record scenarios/ --dry-run --output-format json | jq -e '.ok and (.inputErrors == [])'
+   ```
+
+   Point `lint`
    at scenarios only: a session or matrix YAML in the linted set is reported as a file that does not
    load.
 

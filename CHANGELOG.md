@@ -6,6 +6,148 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Upgrade notes
+
+- **microvm: if runs failed with "control-protocol write failed" and `env: 'claude': No such file or
+  directory`**, the VM was sealed mid-provisioning (see Fixed). The next run now recovers or names the
+  problem on its own, but the capability probe may have cached an empty toolchain for that VM: delete
+  `capability-cache.json` from the runs root (`~/.cowork-harness/runs/` unless you set
+  `COWORK_HARNESS_RUNS_DIR`) so it is probed again. (`vm delete` and `vm prune` now drop that entry
+  themselves.)
+- **Redaction policy copied by `init-redact`:** the fix below that keeps `/private/var/empty` is in the
+  packaged reference policy. A copy made by an earlier `init-redact` keeps redacting it; re-run
+  `init-redact --force` (after saving any tailoring) or add the same lookahead to your two `/private/var/`
+  rules, and widen the slugged-home-segment rule's lookbehind to also accept `]` and a backtick (so
+  `…]-Users-<name>-…` is redacted). Cassettes already committed are unaffected.
+
+### Added
+
+- **`COWORK_VM_PROVISION_TIMEOUT_S`** (default `900`): how long a microvm run waits for an already-Running
+  VM to finish provisioning before failing with a named error (see Fixed).
+- **`vm status` reports `provisioning`**: a new field in its JSON output — `ready`, `pending`, `sealed`,
+  `failed`, or `null` when the VM is not Running. The text output appends it when a Running VM is not
+  ready.
+- **`result.json` `scan.inputHostPathTokens` and `scan.hostPathsFromInputs`**: optional counts of the
+  host-path tokens a container/microvm run's inputs carried and of how many matches in model-visible text
+  they exempted from `host_path_leak` (see Fixed). Omitted when zero; the paths themselves are kept only
+  in a private file in the run dir.
+
+- **`lint-skill` per-rule suppression, so `--strict` can stay the gate over a reviewed finding.**
+  `--ignore-rule <rule>[=<glob>]` (repeatable) applies to the whole run, or only to files matching the glob
+  (as printed, or relative to the parent of the skill directory, so the glob names the skill:
+  `deck-review/SKILL.md`; a bare `SKILL.md` matches no skill passed as `<dir>/`). It is the only form for a
+  finding with no line, such as the size caps. Unscoped, it also hides the next new finding of that rule in
+  any file, so scope it when you lint more than one skill. In a `SKILL.md`,
+  `<!-- lint-skill: ignore-start <rule>[,<rule>…]: <reason> -->` … `<!-- lint-skill: ignore-end -->`
+  suppresses the named rules on the lines in between, in that file only; a marker inside a fenced block, or
+  indented 4 or more spaces, is ignored, so wrap the whole fence. A suppressed finding is still reported: text mode prints it with `⊘` and
+  counts it in the summary, and `--json` keeps its severity and adds a `suppressed` record (how, the marker
+  line, the reason). The key appears only on a suppressed finding, so output without suppression is
+  unchanged; the `--output-format json` envelope adds `suppressedCount` when it is non-zero. Only judgement-call
+  WARN and INFO rules can be suppressed: an ERROR, `hooks-json-misplaced` or
+  `subagent-type-not-found-in-plugin`, or an unknown rule, is refused (exit 2 for the flag, WARN
+  `lint-skill-ignore-invalid` for a marker). An unclosed marker is WARN `lint-skill-ignore-unclosed`, and a
+  marker rule or flag that suppressed nothing is INFO `lint-skill-ignore-unused`. `lint --ignore-rule` is
+  rejected by name.
+
+- **`record --dry-run` reports the inputs a real record would refuse under a new `inputErrors[]` key.**
+  On a directory: an input path, effort or baseline name that the real `record` would refuse, a baseline
+  file that does not load, and a `tool_not_called` / `subagent_tool_absent` the scenario's tier can never
+  violate. On a single file, which already refuses a bad input path (exit 1): the tier-vacuous assertion,
+  and when a file has both, the refusal names the vacuity, as the real `record` does. Each entry is
+  `{file, message, hint?}`, with a `⚠ input error:` line on stderr that `--quiet` does not mute. The
+  preview's exit code and `ok` are unchanged: the real `record` fails that scenario, so treat an entry as a
+  failure to come (`jq -e '.ok and (.inputErrors == [])'` gates on both).
+
+### Changed
+
+- **`lint-skill`'s `plugin-root-in-vm-bash` message now states the mechanism for the form you wrote.** In a
+  plugin skill the agent replaces the braced `${CLAUDE_PLUGIN_ROOT}` with a path when the skill loads, and at
+  host-loop that path is on the host: a VM shell step or VM-run program that opens it fails, while a value
+  passed through only to a host-side file tool (for example, a path embedded in a sub-agent's prompt for its
+  `Read`) is correct. A bare `$CLAUDE_PLUGIN_ROOT` is not replaced, and the VM shell reads it as an
+  environment variable, which is empty at host-loop. The rule still warns on every braced use, because the
+  difference is in the receiving program, not in the skill text; the fix text now says which case is which
+  and how to suppress a reviewed site. A braced form with an operator, such as `${CLAUDE_PLUGIN_ROOT:-…}`, is
+  not replaced either, and the message quotes it as written. `docs/plugin-root.md`, `docs/subagents.md` and
+  `docs/session.md` are corrected to match: they no longer say the token is unset in the VM shell on every
+  tier.
+- **The `csv-metrics` and `csv-fx-normalize` example skills find their bundled script inside the VM** when
+  the path written in for `${CLAUDE_PLUGIN_ROOT}` is a host path, as it is at host-loop, instead of failing
+  there. At `container` they run exactly as before.
+- **The companion skill now tells the agent to read its debugging reference first** when a run failed or a
+  green looks wrong, instead of summarising part of it inline. The reference's triage separates a
+  misbehaving skill from a green you don't trust, which the summary skipped.
+
+### Fixed
+
+- **microvm: a VM that was Running but not yet provisioned is no longer used and sealed.** A first boot
+  that outlasted `limactl start` left the VM Running with its apt/toolchain install unfinished. The next
+  run reused it and applied the guest egress firewall, so provisioning could never complete, the agent
+  never reached PATH, and every later run failed with an opaque control-protocol error until the VM was
+  deleted by hand. Before using a Running VM, a run now checks that Lima's boot scripts finished and the
+  agent is on PATH. A VM still provisioning is waited for (up to `COWORK_VM_PROVISION_TIMEOUT_S`); one
+  whose egress firewall is in place while the agent is missing — whether its provisioning is still stuck
+  or has since given up — is restarted once, which clears the firewall and lets provisioning run again.
+  A VM that `limactl start` returns before it has finished provisioning fails with a message to re-run
+  (the next run waits for it). Anything else, including a restart that fails or does not help, fails with `microvm <instance> never
+  finished provisioning (<reason>). Delete it and retry: cowork-harness vm delete [<baseline>]`. The
+  harness never deletes a VM itself. `limactl start` now gets `--timeout 20m`, so a slow first boot is not
+  cut off in the first place. The capability probe skips a VM that is not provisioned instead of caching
+  its missing toolchain, and runs through `COWORK_LIMACTL` like every other Lima call. `doctor --tier
+  microvm` no longer calls a Running VM "provisioned" until it is.
+- **The reference redaction policy keeps `/private/var/empty`.** From Desktop 2.7032.0 the host-loop agent
+  runs at `/var/empty` and reports its realpath, a system path that identifies no one. `verify-cassettes`
+  already called it clean, but the policy `init-redact` copies rewrote it, so a cassette lost the evidence
+  of where the agent ran. The policy now keeps it (and any path under it with no `..` segment and no `%`)
+  only where the scanner also calls it clean (the policy stays at least as strict); the scanner in turn
+  now matches it case-insensitively and when it is quoted in backticks, as the policy does, and both still
+  flag a slugged home segment glued on after it.
+- **A host path the user supplied no longer fails `host_path_leak`.** At `container`/`microvm` a run
+  failed the moment the agent read or quoted an uploaded or connected file that itself contains host paths
+  (a kept run's `result.json`, a log, a config) — though nothing leaked from the harness, and real Cowork
+  shows the same bytes. Before the agent runs, the staged uploads and connected folders are now scanned for
+  host paths (on the first turn only; each turn's prompt is added too), and a path the agent shows
+  verbatim is exempt. The match is by whole path token, and a token ends at whitespace, a quote, `,`, `;`,
+  `)`, `]`, `<`, `>` or a backslash: a sub-path, another spelling or a different path still fails, and so
+  does a token cut short where the path goes on (`/Users/a/My Documents/x`); after whitespace, a run that
+  itself starts a new path (`/…`) or a URL (`scheme://…`) is the next item, not a continuation. The
+  exemption never covers a
+  location the harness created for this run, nor a truncated spelling of one. A scenario that failed on
+  the default `host_path_leak` signal only because of such an input-borne path now passes, and an
+  authored `transcript_no_host_path: true` applies the same rule. A result that relied on the exemption
+  prints a `::notice::`.
+
+- **`lint-skill` no longer flags `${CLAUDE_PLUGIN_ROOT}` in a hook command.** A plugin hook gets a path valid
+  where it runs (the agent substitutes the token when it runs the hook, and sets the variable), so the
+  `plugin-root-in-vm-bash` WARN there was a false positive. The exemption covers every `"command"` value the
+  linter reads as a hook command: in a `hooks.json`, and in any ```` ```json ```` fence in a `SKILL.md` (so a
+  JSON example of a Bash tool input there is not checked for it either). `hook-host-side-write` still checks
+  the same command.
+- **The example scenarios and the scenario docs no longer deny a harmless command in their Bash `allow_if`.**
+  `!command.includes('rm')` also matched "normalize", "format" or "confirm", so `csv-fx-normalize` denied
+  its own producer; they now use a word match, `!/\brm\b/.test(command)`, in single-quoted YAML so the
+  `\b` survives.
+
+- **`run <dir/>` checks every scenario's input paths before the first one runs.** A plugin, skill, upload,
+  folder or marketplace path that did not exist was refused only when its scenario's turn came, after the
+  earlier scenarios had run and been paid for, and their results were not in the JSON output. The refusal
+  (exit 2, `usage`) now comes first and names every scenario with a missing path, an `effort:` its model
+  does not offer, or a baseline name that resolves nowhere. A single file's message is unchanged. `run
+  --repeat` is unchanged: a scenario with a missing path is still reported in its rollup. Two batches
+  change outcome: one whose earlier scenario creates (on the host) a path a later scenario names is now
+  refused up front, and one whose earlier scenario would have thrown now exits 2 before anything runs.
+- **A `tool_not_called` / `subagent_tool_absent` that the scenario's tier can never violate is refused
+  before the run directory is created.** It was refused after the run directory and its `status.json`
+  existed; now it leaves nothing behind, and `run <dir/>` (without `--repeat`) refuses it before the first
+  scenario runs.
+- **`chat` no longer leaves a run directory behind when an input path does not exist.** A missing skill
+  folder, `--plugin`, `--upload` or `--folder` was refused (exit 2) only after `chat` had created its run
+  directory; it is now checked first, as `run` and `skill` already do.
+- **`answer --output-format json` prints the standard frame on success**: it now carries `version` and
+  `error: null` beside `gate` and `answers`, like its error output and every payload-shaped command.
+
+
 ## [4.0.0] — 2026-09-29
 
 ### Breaking changes (requires a major bump; see [SPEC.md §12](./SPEC.md#12-versioning--the-10-compatibility-contract))

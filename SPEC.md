@@ -489,7 +489,10 @@ nothing to verify — and keeps replaying green.
   absent both halves fail evidence-unavailable rather than passing, and the denial keys are
   hostloop-only so a wrong tier fails both too — no combination produces a both-pass.
 - **A `tool_not_called` / `subagent_tool_absent` naming a tool the tier does not serve is REFUSED**, by
-  `run` / `skill` / `record`, before spawning (exit 2 on `run`/`skill`). `hostloop` replaces `Bash` and
+  `run` / `skill` / `record`, before spawning and before the run directory is created (exit 2 on
+  `run`/`skill`; `run <dir/>` without `--repeat` checks every scenario before the first one runs). The
+  `record --dry-run` previews REPORT it under `inputErrors[]` rather than refusing it (exit code and `ok`
+  unchanged, §11). `hostloop` replaces `Bash` and
   `WebFetch` with `mcp__workspace__*` and removes `NotebookEdit`; `container` and `microvm` serve no
   workspace shell. A negative assertion naming one of those can never be violated, so it passes vacuously
   and verifies nothing. Like the contradiction refusals above this is a **command-level** refusal, not a
@@ -590,9 +593,9 @@ there are three families:
   payload, the `record <dir/>` / `record --rerecord-stale` batch payload (below), `scaffold <run>`
   (`scenario`: the YAML, `out`: the file written or `null`), `skill --dry-run` (`dryRun: true` plus the
   preview's fields), `critique --corpus-only`'s corpus payload, `verify-cassettes` (§11.1), `doctor`
-  (§11.2), and `rehash`.
+  (§11.2), `rehash`, and `answer` (`gate`, `answers`).
 - **Dedicated (hand-shaped, no shared helper)** — its own bespoke shape: **`list`** (a raw JSON
-  array, no wrapper object), **`boundary-check`**, **`init-redact`**, **`decide`**, **`answer`**,
+  array, no wrapper object), **`boundary-check`**, **`init-redact`**, **`decide`**,
   **`gates`** (an NDJSON stream, not a single object — one line per pending gate; a terminal
   `{"done":true}` only once the run has written `done.json`, so one pass over a run still in progress
   ends on its last gate line with no terminal line; when the channel fails, the standard error envelope
@@ -710,7 +713,7 @@ abridged to the fields most consumers branch on. The complete field list is
   "toolResults?": [{ "toolUseId?","isError","text","assertText?" }], // tool-result text at assertion-fidelity cap (10 KB); backs tool_result_contains/tool_result_not_contains and their regex siblings tool_result_matches/tool_result_not_matches
   "skillsInvoked?": ["string"],                  // Wave 1: skill/plugin ids invoked via the Skill tool_use event, call order, duplicates kept. Backs skill_triggered/no_skill_triggered.
   "skillToolAvailable?": bool,                    // Wave 1: whether the agent's init tool list included "Skill" — false ⇒ skill_triggered/no_skill_triggered fail as evidence-unavailable (agent-version drift)
-  "scan?": { "outputsDeletes": ["string"], "outputsDeleteBasis?": ["fs-diff|named|inferred"], "hostPathLeaked": bool, "selfHealRan?": bool, … }, // post-run scan signals (live lane only). outputsDeleteBasis is positional with outputsDeletes: fs-diff = proven by the filesystem diff; named = a delete in command/call position has an outputs path as its own operand; inferred = flagged by the detector's inference
+  "scan?": { "outputsDeletes": ["string"], "outputsDeleteBasis?": ["fs-diff|named|inferred"], "hostPathLeaked": bool, "inputHostPathTokens?": number, "hostPathsFromInputs?": number, "selfHealRan?": bool, … }, // post-run scan signals (live lane only). outputsDeleteBasis is positional with outputsDeletes: fs-diff = proven by the filesystem diff; named = a delete in command/call position has an outputs path as its own operand; inferred = flagged by the detector's inference. hostPathLeaked excludes host paths that came verbatim from the scenario's inputs (container/microvm): inputHostPathTokens = how many distinct host-path tokens those inputs carried, hostPathsFromInputs = how many matches they exempted (both omitted when zero)
   "fsDiff?": { "status": "clean|findings|unavailable", "reason?": "baseline-incomplete|post-walk-incomplete", "findings": ["string"] }, // the outputs-delete filesystem diff for this turn (live lane only): outputs/ at turn start vs. after the turn. clean = no path present at turn start was deleted; unavailable = it could not verify. A sibling of scan so a filesystem-proven delete survives a missing events.jsonl
   "evidenceErrors?": { "taskTracking?": number, "webSearchParse?": number, "presentFilesMalformed?": number, "egressParse?": number } // dropped/malformed telemetry lines per stream; a >0 taskTracking/presentFilesMalformed count fails the dependent assertion "malformed" rather than silently dropping bad entries; webSearchParse/egressParse are observability-only
 }
@@ -758,13 +761,24 @@ marketplace, a file where a directory is required (or the reverse), two sources 
 destination, a `plugins.config_dir` that is not a directory, an unsafe mount-name segment (a `:` in an
 upload's file name), a session `effort:` the schema rejects or the model does not offer, and a
 `--session-id` with characters outside `[A-Za-z0-9_-]` are refused as category `usage` (exit `2` on `run`/`skill`; `record` keeps its `1` for a
-refused recording), before the run directory is created, so a refused run leaves no run dir. `skill
+refused recording), before the run directory is created, so a refused run leaves no run dir; `chat`
+makes the same check before it creates its run dir. `run <dir/>` (without `--repeat`, whose rollup reports
+such a scenario) checks every scenario's input paths and baseline name before the first one runs, and one
+refusal names every offender (a single file keeps the unprefixed message and hint). `skill
 --dry-run` makes the same check, so its preview of such a path exits `2` — `--ablate-skill` included, since
 ablation drops the plugin from the run but the path is still the caller's input; an unresolved model is not
 an input error and the preview reports it as `model: null`. `record <file> --dry-run` makes the same check
 over its scenario's session, so both previews surface a bad input path; there it is a refusal of a scenario
-that loaded, so it exits `1`. Both check existence and kind, not the git tracked-set filter, which only a
-real run applies. Under `COWORK_HARNESS_SOFT_MISSING` a missing source is excluded instead, and the preview
+that loaded, so it exits `1` (and when the scenario also has a tier-vacuous assertion, the refusal names
+the vacuity, as the real `record` does). `record <dir/> --dry-run` makes the same check per scenario and
+lists each input the real record would refuse (an input path, effort or baseline name, a baseline file
+that does not load, or a tier-vacuous negative tool assertion) under `inputErrors[]` (`{file, message,
+hint?}`) in its payload, with a `⚠ input error:` stderr line that survives `--quiet`; `record <file>
+--dry-run` reports a tier-vacuous assertion alone the same way. It is additive, so `ok` and the exit code
+do not change (such a scenario is a `failed` item on the real `record <dir/>`); a gate that wants it
+checks `.ok and (.inputErrors == [])`. The previews check existence and kind, not the git tracked-set
+filter, which only a real run applies. Under `COWORK_HARNESS_SOFT_MISSING` a missing source is
+excluded instead, and the preview
 prints the same exclusion warning the run prints. `verify-run` follows the same rule: a run dir that does
 not exist or is a file, or a scenario file that does not load, is `usage`; a directory holding no completed
 run stays `runtime`. `answer` splits the same way: a directory or gate that is not there is `usage`; a gate
@@ -806,7 +820,10 @@ On a `record <dir/>` target only the **path-independent** refusals (prompt polic
 assert contradiction, duplicate cassette target, a scenario that resolves no model — `--model` applies
 batch-wide, so this arm knows it exactly) join `broken[]` in exiting `1`; the path-DEPENDENT ones
 (host-inventory destination, cassette portability) are advisory `notes[]` that do not affect the exit
-code, because a dir target takes no `--out` and the preview would be guessing the destination.
+code, because a dir target takes no `--out` and the preview would be guessing the destination. Inputs the
+real record would refuse (an input path, effort or baseline name, a baseline file that does not load, a
+tier-vacuous assertion) are listed
+under `inputErrors[]`, which also leaves the exit code at `0` (see the input-path rule above).
 **`verify-cassettes` uses its OWN three-way split, not the `run`/`skill` meanings above:** `0` clean ·
 `1` verification RAN and found a real problem (any PII finding, any staleness finding whose
 `StalenessFinding.class` is NOT `unverifiable-*`, or scenario-prompt drift) · `2` usage · `3`

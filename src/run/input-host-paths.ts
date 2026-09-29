@@ -1,0 +1,146 @@
+import { closeSync, lstatSync, openSync, readdirSync, readFileSync, readSync, writeFileSync } from "node:fs";
+import { join, posix } from "node:path";
+import type { LaunchPlan, Mount } from "../session.js";
+import { warn } from "../io.js";
+import { hostPathTokens } from "./host-path-tokens.js";
+
+/**
+ * Input provenance for the `host_path_leak` signal.
+ *
+ * At container/microvm fidelity a host-root path in model-visible text fails the run, because the sandbox
+ * shows the agent only `/sessions/…` paths — a host path there is how a harness leak looks. But a file the
+ * USER uploads or connects can carry host paths of its own (a kept run dir's result.json, a log, a config),
+ * and the agent reading or quoting it is not a leak: real Cowork would show the same bytes. So before the
+ * agent runs, the staged input files are tokenized and the tokens kept as a private sidecar in the run dir;
+ * the post-run scan exempts a token found there verbatim.
+ *
+ * Captured on a FRESH stage only, never on a resumed turn: a connected folder is writable, so an agent could
+ * write a host path into it in one turn and read it back in the next. Every bound (file size, binary files,
+ * file and byte totals) only SHRINKS the corpus — fewer exemptions, so the signal fails closed.
+ *
+ * The sidecar lists private host paths: it lives beside `pre-run-manifest.json`, above the staged tree, and
+ * nothing copies it into result.json or a cassette.
+ */
+export const INPUT_HOST_PATHS_FILE = "input-host-paths.json";
+
+const INPUT_KINDS: ReadonlySet<Mount["kind"]> = new Set(["upload", "folder", "project"]);
+const SKIP_DIRS = new Set([".git", "node_modules"]);
+const MAX_FILE_BYTES = 2 * 1024 * 1024;
+const MAX_FILES = 5_000;
+const MAX_TOTAL_BYTES = 64 * 1024 * 1024;
+const BINARY_SNIFF_BYTES = 8 * 1024;
+
+/** The exemption corpus the post-run scan consults, and the roots it must never exempt under. */
+export interface InputHostPathCorpus {
+  tokens: ReadonlySet<string>;
+  /** Locations the harness created for THIS run (the run dir, the VM session dir, the staged agent dir).
+   *  A token at or under one is exactly what a sandbox leak looks like; an input file naming it can only
+   *  be a coincidence, so it is never exempt. */
+  neverExemptRoots: readonly string[];
+  /** Roots refused only as themselves (not what is under them): the vm-work root and the runs dir hold
+   *  OTHER sessions, which an input may legitimately name. */
+  neverExemptExact?: readonly string[];
+}
+
+/** Is `token` a string prefix of `root` that does not end at a path boundary — a spelling of the root cut
+ *  short at a space, `,` or `;` (`/Users/a/Library/Application` for `…/Application Support/…`)? */
+function truncates(token: string, root: string): boolean {
+  return root.length > token.length && root.startsWith(token) && root[token.length] !== "/";
+}
+
+/** Is this host-path token one the user supplied — and not at or under a root the harness created, nor a
+ *  truncated spelling of one? */
+export function isInputBorneHostPath(token: string, corpus: InputHostPathCorpus | undefined): boolean {
+  if (!corpus || !corpus.tokens.has(token)) return false;
+  // The own-root checks compare LOCATIONS, so the token is canonicalized first (membership above stays
+  // exact): invisible format characters (Unicode `Cf`: zero-width chars, soft hyphen, BOM) dropped, `.`/`..` segments resolved, trailing sentence punctuation
+  // and slashes removed (`<run dir>.` names the run dir), and case folded — macOS's default filesystem is
+  // case-insensitive, so `/USERS/…` reaches the same place.
+  const canon = (p: string): string => {
+    const visible = p.replace(/\p{Cf}/gu, "");
+    const normalized = posix.normalize(visible).replace(/[.:,;?!/]+$/, "") || visible;
+    return normalized.toLowerCase();
+  };
+  const bare = canon(token);
+  const roots = corpus.neverExemptRoots.filter((r) => r !== "").map(canon);
+  const exact = (corpus.neverExemptExact ?? []).filter((r) => r !== "").map(canon);
+  const underOrTruncates = roots.some((r) => bare === r || bare.startsWith(`${r}/`) || truncates(bare, r));
+  const exactOrTruncates = exact.some((r) => bare === r || truncates(bare, r));
+  return !underOrTruncates && !exactOrTruncates;
+}
+
+function isBinary(path: string): boolean {
+  const fd = openSync(path, "r");
+  try {
+    const buf = Buffer.alloc(BINARY_SNIFF_BYTES);
+    const n = readSync(fd, buf, 0, BINARY_SNIFF_BYTES, 0);
+    return buf.subarray(0, n).includes(0);
+  } finally {
+    closeSync(fd);
+  }
+}
+
+/**
+ * Tokenize the staged input mounts (uploads, connected folders, projects) under `mntHost` and write the
+ * corpus to `<outDir>/input-host-paths.json`. A no-op on a resumed turn, whose corpus is the one the first
+ * turn captured. Deterministic: entries are walked in sorted order and tokens are stored sorted.
+ */
+export function captureInputHostPathCorpus(plan: Pick<LaunchPlan, "mounts" | "resume">, mntHost: string, outDir: string): void {
+  if (plan.resume) return;
+  const tokens = new Set<string>();
+  let files = 0;
+  let bytes = 0;
+  let capped = false;
+
+  const visit = (path: string): void => {
+    if (capped) return;
+    let st;
+    try {
+      st = lstatSync(path);
+    } catch {
+      return; // unreadable: contributes nothing (fewer exemptions)
+    }
+    if (st.isSymbolicLink()) return; // never follow a link out of the staged tree
+    if (st.isDirectory()) {
+      let names: string[];
+      try {
+        names = readdirSync(path).sort();
+      } catch {
+        return;
+      }
+      for (const n of names) if (!SKIP_DIRS.has(n)) visit(join(path, n));
+      return;
+    }
+    if (!st.isFile() || st.size > MAX_FILE_BYTES) return;
+    if (files >= MAX_FILES || bytes + st.size > MAX_TOTAL_BYTES) {
+      capped = true;
+      return;
+    }
+    files++;
+    bytes += st.size;
+    try {
+      if (isBinary(path)) return;
+      for (const t of hostPathTokens(readFileSync(path, "utf8"))) tokens.add(t);
+    } catch {
+      /* unreadable: contributes nothing */
+    }
+  };
+
+  for (const m of plan.mounts) if (INPUT_KINDS.has(m.kind)) visit(join(mntHost, m.mountPath));
+  if (capped)
+    warn(
+      `::notice:: [scan] input files exceed ${MAX_FILES} files / ${MAX_TOTAL_BYTES / 1024 / 1024} MiB — host paths in the rest ` +
+        `are not recognised as user-supplied, so quoting them counts as a host_path_leak\n`,
+    );
+  writeFileSync(join(outDir, INPUT_HOST_PATHS_FILE), JSON.stringify({ version: 1, capped, tokens: [...tokens].sort() }, null, 2));
+}
+
+/** The corpus a fresh stage persisted. Missing or unreadable ⇒ empty (no exemptions — fails closed). */
+export function readInputHostPathCorpus(outDir: string): Set<string> {
+  try {
+    const parsed = JSON.parse(readFileSync(join(outDir, INPUT_HOST_PATHS_FILE), "utf8")) as { tokens?: unknown };
+    return Array.isArray(parsed.tokens) ? new Set(parsed.tokens.filter((t): t is string => typeof t === "string")) : new Set();
+  } catch {
+    return new Set();
+  }
+}
