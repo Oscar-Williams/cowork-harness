@@ -5,8 +5,8 @@ import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 
 // `scenario.py lint-skill` inspects SKILL.md bodies for two Cowork host-loop footguns:
-//   (a) ${CLAUDE_PLUGIN_ROOT} used as a path in an in-VM bash context (fenced bash / hooks JSON
-//       command / Bash() directive) — dead in the host-loop VM;
+//   (a) ${CLAUDE_PLUGIN_ROOT} in an in-VM bash context (fenced bash / Bash() directive) — at host-loop the
+//       agent replaces the braced form with a HOST path, and the bare form is empty in the VM shell;
 //   (b) a hook command that exports an env var or writes into /tmp for the in-VM agent — a host-side
 //       hook write is not VM-visible in Cowork.
 // The linter is offline Python spawned exactly like the scenario linter (see lint-vendored-yaml.test.ts).
@@ -76,7 +76,7 @@ describe.skipIf(!havePython)("scenario.py lint-skill — Cowork host-loop footgu
     const bashHit = findings.find((f) => f.rule === "plugin-root-in-vm-bash");
     expect(bashHit?.severity).toBe("WARN");
     expect(bashHit?.line).toBe(6); // 1-based line of the setup.sh invocation
-    expect(bashHit?.message).toMatch(/dead in host-loop VM/i);
+    expect(bashHit?.message).toMatch(/HOST path that does not exist inside the VM/i);
 
     // (b) the host-side hook export
     expect(rules).toContain("hook-host-side-write");
@@ -356,6 +356,79 @@ describe.skipIf(!havePython)("lint-skill — plugin-root in an argument value is
       expect(hit?.line).toBe(4);
     },
   );
+});
+
+// The message names the mechanism for the form actually written. The agent replaces the BRACED token in a
+// plugin skill's text when the skill loads (at host-loop, with a host path); it does not replace the bare
+// `$CLAUDE_PLUGIN_ROOT`, which the VM shell then reads as an environment variable, empty at host-loop.
+describe.skipIf(!havePython)("lint-skill — plugin-root message per form", () => {
+  function hitFor(line: string, fence = true): Finding | undefined {
+    const d = mkdtempSync(join(tmpdir(), "cwh-skill-form-"));
+    const body = fence ? ["# S", "", "```bash", line, "```", ""] : ["# S", "", line, ""];
+    writeFileSync(join(d, "SKILL.md"), body.join("\n"));
+    return lintSkill(d).findings.find((f) => f.rule === "plugin-root-in-vm-bash");
+  }
+
+  it("braced ${CLAUDE_PLUGIN_ROOT}: load-time replacement, host path at host-loop, and the forwarding escape", () => {
+    const hit = hitFor('python3 "${CLAUDE_PLUGIN_ROOT}/scripts/x.py"');
+    expect(hit?.severity).toBe("WARN");
+    expect(hit?.message).toMatch(/replaces it with a path when the skill loads/i);
+    expect(hit?.message).toMatch(/HOST path that does not exist inside the VM/i);
+    expect(hit?.fix).toMatch(/only reaches a host-side file tool/i);
+    expect(hit?.fix).toContain("<!-- lint-skill: ignore-start plugin-root-in-vm-bash: ");
+    expect(hit?.fix).toContain("<!-- lint-skill: ignore-end -->");
+  });
+
+  it("bare $CLAUDE_PLUGIN_ROOT: nothing replaces it; the VM shell reads the variable, empty at host-loop", () => {
+    const hit = hitFor('python3 "$CLAUDE_PLUGIN_ROOT/scripts/x.py"');
+    expect(hit?.severity).toBe("WARN");
+    expect(hit?.message).toMatch(/does not replace/i);
+    expect(hit?.message).toMatch(/empty at host-loop/i);
+    expect(hit?.message).not.toMatch(/replaces it with a path when the skill loads/i);
+    // Forwarding an empty value helps nobody, so the fix does not offer the suppression for this form.
+    expect(hit?.fix).not.toMatch(/only reaches a host-side file tool/i);
+  });
+
+  it("the Bash() directive context gets the same per-form message", () => {
+    expect(hitFor("Run Bash(python3 ${CLAUDE_PLUGIN_ROOT}/x.py) first.", false)?.message).toMatch(
+      /replaces it with a path when the skill loads/i,
+    );
+    expect(hitFor("Run Bash(python3 $CLAUDE_PLUGIN_ROOT/x.py) first.", false)?.message).toMatch(/empty at host-loop/i);
+  });
+});
+
+// A plugin hook command is not an in-VM bash step: the agent substitutes the token when it runs the hook
+// and also sets the variable, so the hook always receives a path valid where it runs (on the host at
+// host-loop, in the VM at VM-loop). The rule used to fire there; it no longer does.
+describe.skipIf(!havePython)("lint-skill — hook commands are not a plugin-root context", () => {
+  const hooks = JSON.stringify({
+    hooks: { PreToolUse: [{ hooks: [{ type: "command", command: "bash ${CLAUDE_PLUGIN_ROOT}/hooks/check.sh" }] }] },
+  });
+
+  it("hooks/hooks.json with ${CLAUDE_PLUGIN_ROOT} in a command → no plugin-root finding", () => {
+    const d = mkdtempSync(join(tmpdir(), "cwh-skill-hookroot-"));
+    writeFileSync(join(d, "SKILL.md"), "# S\n");
+    mkdirSync(join(d, "hooks"));
+    writeFileSync(join(d, "hooks", "hooks.json"), hooks);
+    const { findings, status } = lintSkill(d);
+    expect(findings.filter((f) => f.rule.startsWith("plugin-root"))).toEqual([]);
+    expect(status).toBe(0);
+  });
+
+  it("a ```json hooks block in SKILL.md → no plugin-root finding either", () => {
+    const d = mkdtempSync(join(tmpdir(), "cwh-skill-hookroot-md-"));
+    writeFileSync(join(d, "SKILL.md"), ["# S", "", "```json", hooks, "```", ""].join("\n"));
+    expect(lintSkill(d).findings.filter((f) => f.rule.startsWith("plugin-root"))).toEqual([]);
+  });
+
+  it("the host-side-write check on the same hook command still fires", () => {
+    const d = mkdtempSync(join(tmpdir(), "cwh-skill-hookroot-write-"));
+    const cmd = JSON.stringify({ hooks: { SessionStart: [{ hooks: [{ type: "command", command: "export X=${CLAUDE_PLUGIN_ROOT}" }] }] } });
+    writeFileSync(join(d, "SKILL.md"), ["# S", "", "```json", cmd, "```", ""].join("\n"));
+    const rules = lintSkill(d).findings.map((f) => f.rule);
+    expect(rules).toContain("hook-host-side-write");
+    expect(rules).not.toContain("plugin-root-in-vm-bash");
+  });
 });
 
 // A finding's JSON shape when no suppression is in play. The `suppressed` record is opt-in: an invocation

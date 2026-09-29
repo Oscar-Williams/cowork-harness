@@ -50,7 +50,10 @@ lint-skill flags (skill bodies + any sibling hooks.json):
                                so a root-level file is SILENTLY ignored and nothing fires
   I  `hook-event-not-served`   a real hook event that DOES fire (plugin hooks are executed by the agent,
                                live-verified) but has no assertion key, so a scenario can't gate on it
-  W  `${CLAUDE_PLUGIN_ROOT}` in a VM bash step / host-side hook seeding (host-loop footguns)
+  W  `plugin-root-in-vm-bash`  `${CLAUDE_PLUGIN_ROOT}` in a VM bash step: in a plugin skill the agent
+                               replaces it at load with a path that, at host-loop, is on the HOST (a bare
+                               `$CLAUDE_PLUGIN_ROOT` is not replaced and is empty in the VM shell there)
+  W  `hook-host-side-write`    a hook command that exports a var or writes /tmp for the in-VM agent
   W  `skill-body-over-reattach-cap`   SKILL.md body (frontmatter excluded) over 19,000 B — after a
                                compaction the agent re-attaches only the first ~19,900 chars (INFO from 80%)
   W  `skill-reference-over-read-cap` a references/**.md over 60,000 B — a whole-file Read past 25,000 real
@@ -1776,8 +1779,10 @@ def cmd_lint(args):
 # Telling an "in-VM bash" usage apart from a correct host-side reference in freeform
 # markdown is heuristic. v1 only treats these as in-VM bash contexts:
 #   * a fenced ```bash / ```sh / ```shell (or ```zsh) code block,
-#   * a JSON `"command": "..."` value in a hooks config (a fenced ```json block or a hooks.json file),
 #   * a `Bash(...)` tool-directive line.
+# A JSON `"command": "..."` value in a hooks config (a fenced ```json block or a hooks.json file) is checked
+# for host-side writes only: a plugin hook gets a plugin-root path valid where it runs, so the token is fine
+# there.
 # It NEVER inspects host-side prose or a `Read`/`Grep` directive — reading a reference via
 # `${CLAUDE_PLUGIN_ROOT}/references/x.md` in prose is the CORRECT, common idiom and is left alone.
 # Consequence: false negatives are expected. A `${CLAUDE_PLUGIN_ROOT}` path in an INDENTED (4-space)
@@ -1808,17 +1813,46 @@ _BASH_FENCE_LANGS = {"bash", "sh", "shell", "zsh"}
 _JSON_FENCE_LANGS = {"json", "jsonc", "json5"}
 
 
-def _finding_plugin_root(path, line, ctx_label):
-    return Finding(
-        "WARN",
-        "plugin-root-in-vm-bash",
-        f"`${{CLAUDE_PLUGIN_ROOT}}` used as a path in an in-VM bash context ({ctx_label}): "
-        "dead in host-loop VM; discover the mount at runtime instead.",
-        "In VM-executed bash, don't hardcode ${CLAUDE_PLUGIN_ROOT} — resolve the skill/plugin mount at "
-        "runtime (e.g. derive it from the script's own location) instead.",
-        path,
-        line,
-    )
+# The agent replaces only the literal BRACED token in a plugin skill's text when the skill loads; a bare
+# `$CLAUDE_PLUGIN_ROOT` (or `${CLAUDE_PLUGIN_ROOT:-…}`) is left for the shell, which reads the environment.
+_PLUGIN_ROOT_BRACED = re.compile(r"\$\{CLAUDE_PLUGIN_ROOT\}")
+_IGNORE_MARKER_EXAMPLE = (
+    "`<!-- lint-skill: ignore-start plugin-root-in-vm-bash: <why the host path is right> -->` … "
+    "`<!-- lint-skill: ignore-end -->`"
+)
+
+
+def _finding_plugin_root(path, line, ctx_label, text):
+    """The WARN for a plugin-root token in an in-VM bash context. The message states the mechanism for the
+    form written in `text`: the braced token is replaced with a path at skill load (a HOST path at
+    host-loop), the bare form is not replaced at all. Whether the value is then opened in the VM (broken at
+    host-loop) or only forwarded to a host-side file tool (correct) is a property of the receiving program,
+    which the skill text does not show, so both stay WARN and the fix says which is which."""
+    if _PLUGIN_ROOT_BRACED.search(text):
+        message = (
+            f"`${{CLAUDE_PLUGIN_ROOT}}` in an in-VM bash context ({ctx_label}): in a plugin skill the agent "
+            "replaces it with a path when the skill loads, and at host-loop (Cowork's default) that is a HOST "
+            "path that does not exist inside the VM, so a shell step or VM-run program that opens files under "
+            "it fails. Outside a plugin nothing replaces it, and the VM shell expands it empty at host-loop."
+        )
+        fix = (
+            "If the shell or the program you pass it to opens that path, resolve the plugin's VM mount at run "
+            "time instead (see the plugin-root guide). If the value only reaches a host-side file tool (for "
+            "example, it is embedded in a sub-agent's prompt for its Read), the host path is correct: wrap the "
+            f"fence in {_IGNORE_MARKER_EXAMPLE}."
+        )
+    else:
+        message = (
+            f"`$CLAUDE_PLUGIN_ROOT` in an in-VM bash context ({ctx_label}): the agent does not replace this "
+            "form in a skill's text (only the braced `${CLAUDE_PLUGIN_ROOT}`), so the VM shell reads the "
+            "environment variable, which is empty at host-loop (Cowork's default); a path built from it "
+            "points nowhere."
+        )
+        fix = (
+            "Resolve the plugin's VM mount at run time instead (see the plugin-root guide), for example from "
+            "the script's own location or by finding this skill's SKILL.md under /sessions."
+        )
+    return Finding("WARN", "plugin-root-in-vm-bash", message, fix, path, line)
 
 
 def _finding_plugin_root_guarded(path, line, ctx_label):
@@ -1896,8 +1930,9 @@ def _finding_hook_host_write(path, line, what):
 
 def _check_hook_command(path, line_no, cmd, findings):
     """Apply both checks to a single hooks-config command string."""
-    if _PLUGIN_ROOT_TOKEN.search(cmd):
-        findings.append(_finding_plugin_root(path, line_no, "hooks command"))
+    # No plugin-root check here: a plugin hook is not an in-VM bash step. The agent substitutes the token
+    # when it runs the hook and also sets the variable, so the hook gets a path valid where it runs (the
+    # host at host-loop, the VM at VM-loop).
     if _HOOK_EXPORT.search(cmd):
         findings.append(_finding_hook_host_write(path, line_no, "`export`s an env var"))
     if _HOOK_TMP_REDIRECT.search(cmd) or _HOOK_TMP_TEE.search(cmd):
@@ -2039,9 +2074,9 @@ def _lint_skill_text(path, raw_lines, force_json=False):
             self_heal_line = next((bl for bl in bash_block_text if _SELF_HEAL.search(bl)), None)
             healed = self_heal_line is not None
             token = _extract_find_path_token(self_heal_line) if healed else None
-            for ln in bash_token_lines:
+            for ln, text in bash_token_lines:
                 if not healed:
-                    findings.append(_finding_plugin_root(path, ln, "```bash block"))
+                    findings.append(_finding_plugin_root(path, ln, "```bash block", text))
                 elif token is not None and token not in self_plugin_tokens:
                     findings.append(
                         _finding_guard_pattern_mismatch(
@@ -2084,7 +2119,7 @@ def _lint_skill_text(path, raw_lines, force_json=False):
         if ctx == "bash":
             bash_block_text.append(line)  # buffer the block; token hits emit on flush (self-heal aware)
             if _PLUGIN_ROOT_TOKEN.search(line):
-                bash_token_lines.append(i)
+                bash_token_lines.append((i, line))
         elif ctx == "json":
             for cm in _HOOK_CMD.finditer(line):
                 _check_hook_command(path, i, cm.group(1), findings)
@@ -2093,7 +2128,7 @@ def _lint_skill_text(path, raw_lines, force_json=False):
             # Read/Grep directives are intentionally left alone.
             for bm in _BASH_DIRECTIVE.finditer(line):
                 if _PLUGIN_ROOT_TOKEN.search(bm.group(1)):
-                    findings.append(_finding_plugin_root(path, i, "Bash() directive"))
+                    findings.append(_finding_plugin_root(path, i, "Bash() directive", bm.group(1)))
     # A bash fence left unclosed at EOF still has buffered token hits — flush them (else a real WARN/INFO
     # would be silently dropped).
     if in_fence and fence_lang in _BASH_FENCE_LANGS:
@@ -3087,12 +3122,16 @@ def main(argv=None):
         description=(
             "Inspect skill bodies (SKILL.md + any sibling hooks.json) for two antipatterns a paid "
             "Cowork host-loop run would expose:\n"
-            "  (a) ${CLAUDE_PLUGIN_ROOT} used as a PATH in an in-VM bash context — dead in the host-loop VM;\n"
+            "  (a) ${CLAUDE_PLUGIN_ROOT} in an in-VM bash context — in a plugin skill the agent replaces it "
+            "at load with a path that, at host-loop, is on the HOST and does not exist in the VM (a bare "
+            "$CLAUDE_PLUGIN_ROOT is not replaced, and is empty in the VM shell at host-loop). A value only "
+            "forwarded to a host-side file tool is correct; suppress such a reviewed site with a marker "
+            "(below);\n"
             "  (b) a hook command that exports an env var or writes into /tmp for the in-VM agent — a "
             "host-side hook write is not VM-visible (works in the CLI, silently no-ops in Cowork).\n\n"
             "HONEST LIMITS (v1 is deliberately narrow to bound false positives): an in-VM bash context is "
-            "ONLY a fenced ```bash/```sh/```shell block, a hooks-config JSON \"command\" value, or a "
-            "Bash(...) directive. Host-side prose and Read/Grep directives (the correct way to read a "
+            "ONLY a fenced ```bash/```sh/```shell block or a Bash(...) directive (a hook command gets a "
+            "plugin-root path valid where it runs, so it is checked for (b) only). Host-side prose and Read/Grep directives (the correct way to read a "
             "reference via ${CLAUDE_PLUGIN_ROOT}/...) are left alone. False negatives are expected: a token "
             "in an indented/unfenced shell snippet won't be caught.\n\n"
             "Also statically resolves any pinned `subagent_type` value in the SKILL.md against the "

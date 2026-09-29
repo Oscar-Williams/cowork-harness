@@ -3,7 +3,7 @@
 A skill references its own bundled files through `${CLAUDE_PLUGIN_ROOT}`. The token means **different
 things depending on WHERE it is evaluated**, and getting this wrong is the single most common Cowork
 authoring footgun — a skill that works in the Claude Code CLI silently breaks under Cowork's in-VM
-shell, on every fidelity tier.
+shell at host-loop, Cowork's default.
 
 This is an authoring guide: it describes the **observable behavior** a skill author must design around.
 
@@ -11,6 +11,8 @@ This is an authoring guide: it describes the **observable behavior** a skill aut
 
 > **Host-side file tools (`Read`/`Grep`) → the token resolves to the plugin's files. Correct everywhere.**
 > **In-VM `bash` → do NOT rely on the token. Discover the mount at runtime instead.**
+> **The one exception:** a value the VM step only forwards to a host-side file tool (see
+> [below](#a-value-you-forward-to-a-host-side-file-tool)).
 
 ### Host-side reads — correct in every tier
 
@@ -25,13 +27,22 @@ deliberately leaves it alone.
 
 ### In-VM bash — the token is NOT reliable
 
-When your skill runs **shell** — a ` ```bash ` step, a `Bash(...)` directive, or a hook command — the token
-is a different story:
+When your skill runs **shell** — a ` ```bash ` step or a `Bash(...)` directive — the token is a different
+story:
 
-- On **every** fidelity tier, the in-VM shell has `CLAUDE_PLUGIN_ROOT` **unset**. A line like
-  `bash ${CLAUDE_PLUGIN_ROOT}/scripts/build.sh` expands to `bash /scripts/build.sh` (or an empty path) and
-  fails. The agent's own plugin-hook self-heal recovers by **discovering** the mount at runtime, but a
-  hardcoded `${CLAUDE_PLUGIN_ROOT}` path in *your* script does not get that treatment.
+- **In a plugin skill, the shell never sees the braced token.** The agent replaces the literal
+  `${CLAUDE_PLUGIN_ROOT}` with a path in the skill's TEXT when the skill loads, so the model runs the
+  command with that path already written in. Which path depends on the loop mode: at **host-loop**
+  (Cowork's default) it is a HOST staging path that does not exist inside the VM, so
+  `bash ${CLAUDE_PLUGIN_ROOT}/scripts/build.sh` runs a script path the VM does not have and fails; at
+  **VM-loop** it is the plugin's mount under `/sessions/<slug>/mnt/…`, which does exist. Quoting and
+  argument position make no difference: the shell is handed a finished string.
+- **Only the braced form is replaced.** A bare `$CLAUDE_PLUGIN_ROOT` (or `${CLAUDE_PLUGIN_ROOT:-…}`) is left
+  for the shell, which reads the environment variable, and at host-loop that is empty in the VM shell. In a
+  skill that is not part of a plugin nothing is replaced, so the braced form expands empty there too.
+- **A plugin hook command is different.** The agent substitutes the token when it runs the hook and also
+  sets the variable, so a hook gets a path valid where it runs: on the host at host-loop, in the VM at
+  VM-loop. `lint-skill` does not flag the token in a hook command.
 - The plugin's files ARE present in the VM — they are bind-mounted under the session's
   `mnt/.local-plugins/…` (the local-uploads channel, or a marketplace plugin) or
   `mnt/.remote-plugins/plugin_<id>` (a plugin installed through Cowork's UI, or an org-remote one). So the
@@ -63,23 +74,36 @@ is a different story:
   (`.local-plugins/marketplaces/local-desktop-app-uploads/<plugin>`). To test a skill that will ship as an
   installed plugin, declare it under `remote_plugins:` — see [session.md](./session.md).
 
+### A value you forward to a host-side file tool
+
+Some skills pass the plugin root through a VM step only so that it ends up in text a host-side tool
+reads. For example, `python3 build_prompt.py --plugin-root-agent "${CLAUDE_PLUGIN_ROOT}"`, where the
+script writes the value into a sub-agent's prompt and the sub-agent `Read`s files under it. That works in
+both modes: at host-loop the sub-agent's `Read` is a host-side file tool and the host path is exactly
+right (a `/sessions/…` path is denied there), and at VM-loop the path and the sub-agent's file tools are
+both in the VM. Do not "fix" it with mount discovery, which would hand a host-loop sub-agent a VM path it
+cannot read.
+
+The line shape alone does not tell the two cases apart. `python3 tool.py --data-dir
+"${CLAUDE_PLUGIN_ROOT}/data"`, where the script opens the directory itself, is broken at host-loop; the
+difference is in what the receiving program does with the value, which the skill text does not show. So
+`lint-skill` warns on both, and a site you have checked is suppressed with a reason (see
+[Catch both before a paid run](#catch-both-before-a-paid-run)).
+
 ## How the tiers map
 
 The harness reproduces host-loop and VM-loop plugin staging as two distinct mount layouts (different
-guest paths, different staging mechanism), but the token's behavior in a Bash-tool subprocess is
-identical on both: unset. Pick a scenario `fidelity` to exercise the staging layout you care about.
+guest paths, different staging mechanism). Pick a scenario `fidelity` to exercise the staging layout you
+care about.
 
-| Fidelity tier | Resolution mode | In-VM bash sees `${CLAUDE_PLUGIN_ROOT}` |
-|---|---|---|
-| `hostloop` | host-loop | **unset** — discover the mount at runtime |
-| `container` / `microvm` | VM-loop analog (agent runs in the VM) | **unset** — the plugin's files ARE present at the bind-mounted path, but not via this env var; discover the mount at runtime |
+| Fidelity tier | Resolution mode | Braced `${CLAUDE_PLUGIN_ROOT}` in a plugin skill | Bare `$CLAUDE_PLUGIN_ROOT` in the VM shell |
+|---|---|---|---|
+| `hostloop` | host-loop | replaced at load with a HOST path, which does not exist in the VM | **empty** (observed in real Cowork's local lane) |
+| `container` / `microvm` | VM-loop analog (agent runs in the VM) | replaced at load with the plugin's VM mount path | the harness sets no value; a single live probe of real Cowork's VM-loop saw it set to a `/sessions/…/mnt/.remote-plugins/…` path, not re-verified since |
 
-The env var is absent from a Bash-tool subprocess on **every** tier, not just host-loop — a plugin's
-own file references resolve because the agent substitutes the path directly into the plugin's prompt
-TEXT when the definition loads, not because any tier's shell inherits `CLAUDE_PLUGIN_ROOT`. Because the
-token is unset everywhere in-VM bash actually runs, **author for the mount-discovery pattern
-unconditionally**: never hardcode `${CLAUDE_PLUGIN_ROOT}` in a VM shell step; discover the mount, as
-shown above.
+Because real Cowork runs host-loop by default, and the bare variable's value at VM-loop rests on one
+observation, **author for the mount-discovery pattern unconditionally**: never let a VM shell step open a
+path built from `${CLAUDE_PLUGIN_ROOT}`; discover the mount, as shown above.
 
 `CLAUDE_SKILL_DIR` is empty in the in-VM shell too, and the path the agent substitutes into the skill's
 text does not help: at host-loop it is a HOST path, which does not exist in the VM. Do not rewrite it
@@ -104,9 +128,9 @@ cowork-harness lint-skill path/to/skill/
 
 (also runnable directly as `python3 .claude/skills/cowork-harness/scripts/scenario.py lint-skill path/to/skill/`)
 
-It warns on `${CLAUDE_PLUGIN_ROOT}` used as a path in an in-VM bash context (fenced `bash`/`sh` blocks,
-`hooks.json` command values, `Bash(...)` directives) and on a hook that exports an env var / writes `/tmp`
-for the in-VM agent — while leaving correct host-side `Read`/`Grep` references untouched. It is a narrow,
+It warns on `${CLAUDE_PLUGIN_ROOT}` in an in-VM bash context (fenced `bash`/`sh` blocks and `Bash(...)`
+directives; the message says which of the two forms above you wrote and what happens to it) and on a hook
+that exports an env var / writes `/tmp` for the in-VM agent — while leaving correct host-side `Read`/`Grep` references untouched. It is a narrow,
 heuristic v1 (see its `--help` for the documented limits), so treat a clean result as "no *obvious*
 footgun," not a proof.
 

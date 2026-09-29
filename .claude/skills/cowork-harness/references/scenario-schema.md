@@ -238,7 +238,8 @@ with no session file, the CLI flags `--folder <dir>` and `--upload <file>` are t
 `plugins.remote_plugins` instead — Cowork serves an installed plugin from `.remote-plugins/plugin_<id>`
 (named by id, not plugin name), while `local_plugins` mounts two levels deeper
 (`.local-plugins/marketplaces/local-desktop-app-uploads/<plugin>`). The choice matters to a skill that
-locates its own files from the shell (`$CLAUDE_PLUGIN_ROOT` is unset in the VM shell on every tier).
+locates its own files from the shell (at host-loop, Cowork's default, the braced `${CLAUDE_PLUGIN_ROOT}` is
+replaced with a HOST path and a bare `$CLAUDE_PLUGIN_ROOT` is empty in the VM shell).
 Search for the skill's own `SKILL.md`, not for a directory named after the plugin — that finds nothing
 under `.remote-plugins/plugin_<id>` — and set no `-maxdepth` that stops short of the deeper local layout:
 `find /sessions/*/mnt/.local-plugins /sessions/*/mnt/.remote-plugins -path '*/skills/<skill-name>/SKILL.md' 2>/dev/null | head -1`.

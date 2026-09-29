@@ -75,14 +75,15 @@
 ## Skill-authoring & host-loop footguns
 
 - **A skill works in the Claude Code CLI but misbehaves under Cowork.** Two common footguns:
-  a `${CLAUDE_PLUGIN_ROOT}` path hardcoded into in-VM bash — unset in in-VM bash on every fidelity tier
+  a `${CLAUDE_PLUGIN_ROOT}` path opened from in-VM bash — at host-loop the agent has already replaced it
+  with a HOST path the VM does not have, and a bare `$CLAUDE_PLUGIN_ROOT` is empty there
   (see [plugin-root.md](./plugin-root.md); resolve the mount at runtime instead) — and a hook command
   that `export`s an env var or writes into `/tmp` (a host-side
   hook write isn't VM-visible to the agent). `cowork-harness lint-skill <SKILL.md | skill-dir>` (also
   runnable directly as `scenario.py lint-skill <SKILL.md | skill-dir>`) scans a skill's body (and any
-  sibling `hooks.json`) for both, WARN-only and deliberately narrow (fenced bash/sh/shell code blocks,
-  hooks-config JSON, and `Bash(...)` directives only — host-side prose and `Read`/`Grep` directives are
-  left alone, so false negatives on unfenced snippets are expected).
+  sibling `hooks.json`) for both, WARN-only and deliberately narrow (fenced bash/sh/shell code blocks and
+  `Bash(...)` directives for the first, hooks-config JSON for the second — host-side prose and
+  `Read`/`Grep` directives are left alone, so false negatives on unfenced snippets are expected).
 
 - **Harvesting a `critique` run? Read the GRADED turn (`turns/1/`), not `turns/2/`.** A `critique` writes
   two turns into one run dir — the task turn (`turns/1/`) and the reflection turn (`turns/2/`) — with no

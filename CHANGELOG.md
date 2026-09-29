@@ -6,6 +6,25 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Changed
+
+- **`lint-skill`'s `plugin-root-in-vm-bash` message now states the mechanism for the form you wrote.** In a
+  plugin skill the agent replaces the braced `${CLAUDE_PLUGIN_ROOT}` with a path when the skill loads, and at
+  host-loop that path is on the host: a VM shell step or VM-run program that opens it fails, while a value
+  passed through only to a host-side file tool (for example, a path embedded in a sub-agent's prompt for its
+  `Read`) is correct. A bare `$CLAUDE_PLUGIN_ROOT` is not replaced, and the VM shell reads it as an
+  environment variable, which is empty at host-loop. The rule still warns on every braced use, because the
+  difference is in the receiving program, not in the skill text; the fix text now says which case is which
+  and how to suppress a reviewed site. `docs/plugin-root.md` is corrected to match: it no longer says the
+  token is unset in the VM shell on every tier.
+
+### Fixed
+
+- **`lint-skill` no longer flags `${CLAUDE_PLUGIN_ROOT}` in a hook command.** A plugin hook gets a path valid
+  where it runs (the agent substitutes the token when it runs the hook, and sets the variable), so the
+  `plugin-root-in-vm-bash` WARN there was a false positive. `hook-host-side-write` still checks the same
+  command.
+
 ## [4.0.0] — 2026-09-29
 
 ### Breaking changes (requires a major bump; see [SPEC.md §12](./SPEC.md#12-versioning--the-10-compatibility-contract))
