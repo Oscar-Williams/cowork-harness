@@ -3507,7 +3507,7 @@ function outputsDeleteSnippet(cmd: string, mount = "outputs"): string {
  *  `claude-code-vm` parent of the pinned version, since a pruned pin falls back to a sibling version, which
  *  is then the one mounted (plus a `COWORK_AGENT_BINARY` override's dir). A host path at or under one of
  *  them in model-visible text is what a sandbox leak looks like, so input provenance never exempts it.
- *  `exact`: the vm-work root and the runs dir — they hold OTHER sessions, which an input may legitimately
+ *  `exact`: the vm-work root, the runs root and the run's own parent dir — they hold OTHER sessions, which an input may legitimately
  *  name, so only the root itself is refused. Mount SOURCE paths are deliberately absent: they reach
  *  model-visible text only at hostloop, where the signal is skipped. */
 export function ownHostRoots(outDir: string, sessionId: string, baseline: PlatformBaseline): { subtree: string[]; exact: string[] } {
@@ -3515,7 +3515,7 @@ export function ownHostRoots(outDir: string, sessionId: string, baseline: Platfo
   const staged = (baseline.agentBinary?.stagedPath ?? "").replace(/^~(?=$|\/)/, homedir());
   if (staged) subtree.push(dirname(dirname(staged)));
   if (process.env.COWORK_AGENT_BINARY) subtree.push(dirname(resolve(process.env.COWORK_AGENT_BINARY)));
-  const exact = [VM_WORK_HOST, dirname(resolve(outDir))];
+  const exact = [VM_WORK_HOST, dirname(resolve(outDir)), resolve(runsWriteRoot())];
   const withRealpaths = (roots: string[]): string[] => {
     const out = [...roots];
     for (const r of roots) {

@@ -561,7 +561,7 @@ export function computeVerdict(result: RunResult, lane: "live" | "replay"): Verd
     const fromInputs = result.scan?.hostPathsFromInputs ?? 0;
     if (fromInputs > 0 && result.effectiveFidelity !== "hostloop" && result.effectiveFidelity !== "protocol")
       warn(
-        `::notice:: [verdict] ${fromInputs} host path(s) in model-visible text came verbatim from the scenario's input files; not counted as a leak\n`,
+        `::notice:: [verdict] ${fromInputs} host path(s) in model-visible text came verbatim from the scenario's inputs or prompt; not counted as a leak\n`,
       );
 
     // L0 (protocol) reading the operator's REAL config dir — their installed plugins, skills, auto-memory

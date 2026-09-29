@@ -235,7 +235,7 @@ describe("verdict — a pass that relied on the exemption says so", () => {
       spy.mockRestore();
     }
     expect(writes.join("")).toMatch(
-      /::notice:: \[verdict\] 2 host path\(s\) in model-visible text came verbatim from the scenario's input files/,
+      /::notice:: \[verdict\] 2 host path\(s\) in model-visible text came verbatim from the scenario's inputs or prompt; not counted as a leak/,
     );
   });
 });
@@ -361,5 +361,59 @@ describe("wiring", () => {
     expect(src("run/execute.ts")).toMatch(
       /inputProvenanceCorpus\(outDir, sessionId, baseline, scenario\.prompt, effectiveFidelity\)[\s\S]{0,200}scanEvents\(join\(outDir, "events\.jsonl"\), deleteDeniedRootsFromPlan\(plan\), inputCorpus\)/,
     );
+  });
+});
+
+// A whitespace-separated run that STARTS a new path (or a URL) is the next item in a list, not the rest of
+// this one — refusing it would fail every one-path-per-line listing of the user's own files.
+describe("continuation: a following new path or URL is not a continuation", () => {
+  for (const [name, text] of [
+    ["one path per line", "/Users/alice/a\n/Users/alice/b\n"],
+    ["two paths on one command line", "cp /Users/alice/a /Users/alice/b"],
+    ["a path then a URL", "see /Users/alice/a https://example.com/x"],
+    ["a path then a sandbox path", "copied /Users/alice/a /sessions/x/mnt/outputs/b"],
+  ] as const)
+    it(`${name}: exempt when every host path is an input`, () => {
+      const scan = scanEvents(events(say(text)), ["outputs"], corpusOf(["/Users/alice/a", "/Users/alice/b"]) as any);
+      expect(scan.hostPathLeaked).toBe(false);
+    });
+  it("leak control: the second path is not an input", () => {
+    expect(
+      scanEvents(events(say("cp /Users/alice/a /Users/alice/b")), ["outputs"], corpusOf(["/Users/alice/a"]) as any).hostPathLeaked,
+    ).toBe(true);
+  });
+  it("still refuses a space inside a path (`Application Support/…`)", () => {
+    const t = "at /Users/alice/Library/Application Support/Claude/logs";
+    expect(scanEvents(events(say(t)), ["outputs"], corpusOf(["/Users/alice/Library/Application"]) as any).hostPathLeaked).toBe(true);
+  });
+});
+
+// Trailing sentence punctuation is part of the token (so an input path followed by `.` is not exempt), but it
+// must not let an own root slip past the root checks either.
+describe("own roots with trailing punctuation, and the runs root itself", () => {
+  const withRoots = async (tokens: string[]) => {
+    const { subtree, exact } = (execute as any).ownHostRoots(outDir, "local_sid", {});
+    return { tokens: new Set(tokens), neverExemptRoots: subtree, neverExemptExact: exact };
+  };
+  for (const suffix of [".", ":", "?", "!"])
+    it(`the run dir followed by ${JSON.stringify(suffix)} leaks`, async () => {
+      const tok = `${outDir}${suffix}`;
+      expect(scanEvents(events(say(`saved under ${tok}`)), ["outputs"], (await withRoots([tok])) as any).hostPathLeaked).toBe(true);
+    });
+  it("the vm-work root followed by `.` leaks", async () => {
+    const { VM_WORK_HOST } = await import("../src/runtime/lima.js");
+    const tok = `${VM_WORK_HOST}.`;
+    expect(scanEvents(events(say(`in ${tok}`)), ["outputs"], (await withRoots([tok])) as any).hostPathLeaked).toBe(true);
+  });
+  it("the runs root (COWORK_HARNESS_RUNS_DIR) itself leaks", async () => {
+    const runs = join(dir, "runs-root");
+    process.env.COWORK_HARNESS_RUNS_DIR = runs;
+    try {
+      const { exact } = (execute as any).ownHostRoots(outDir, "local_sid", {});
+      expect(exact).toContain(runs);
+      expect(scanEvents(events(say(`ls ${runs}`)), ["outputs"], (await withRoots([runs])) as any).hostPathLeaked).toBe(true);
+    } finally {
+      delete process.env.COWORK_HARNESS_RUNS_DIR;
+    }
   });
 });

@@ -52,9 +52,10 @@ function truncates(token: string, root: string): boolean {
  *  truncated spelling of one? */
 export function isInputBorneHostPath(token: string, corpus: InputHostPathCorpus | undefined): boolean {
   if (!corpus || !corpus.tokens.has(token)) return false;
-  const bare = token.length > 1 ? token.replace(/\/+$/, "") : token;
+  // Trailing sentence punctuation and slashes are not part of the location: `<run dir>.` names the run dir.
+  const bare = token.length > 1 ? token.replace(/[.:,;?!/]+$/, "") || token : token;
   const underOrTruncates = corpus.neverExemptRoots.some(
-    (r) => r !== "" && (bare === r || token.startsWith(r.endsWith("/") ? r : `${r}/`) || truncates(bare, r)),
+    (r) => r !== "" && (bare === r || bare.startsWith(r.endsWith("/") ? r : `${r}/`) || truncates(bare, r)),
   );
   const exactOrTruncates = (corpus.neverExemptExact ?? []).some((r) => r !== "" && (bare === r || truncates(bare, r)));
   return !underOrTruncates && !exactOrTruncates;

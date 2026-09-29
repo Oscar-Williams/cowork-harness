@@ -28,7 +28,8 @@ function decodedForm(text: string): string {
 }
 
 /** One host-path token in a text. `continued`: the token ended at whitespace, `,` or `;`, and the text
- *  goes on with a run containing `/` (up to the next whitespace) — `/Users/a/My Documents/x`,
+ *  goes on with a run containing `/` (up to the next whitespace) that does not itself start a new path or
+ *  URL — `/Users/a/My Documents/x`,
  *  `/Users/a/proj,old/secret`. The token is then probably a TRUNCATED spelling of a longer path, and the
  *  input-provenance exemption refuses it: an unrelated input can easily carry the same truncated prefix. */
 export interface HostPathTokenOccurrence {
@@ -46,7 +47,11 @@ function continuesAsPath(text: string, end: number): boolean {
   } else return false;
   let j = i;
   while (j < text.length && !/\s/.test(text[j])) j++;
-  return text.slice(i, j).includes("/");
+  const run = text.slice(i, j);
+  // After whitespace, a run that STARTS a new path or a URL is the next item of a list or command line
+  // (`cp /a /b`, one path per line), not the rest of this one.
+  if (/\s/.test(c) && (run.startsWith("/") || /^\w+:\/\//.test(run))) return false;
+  return run.includes("/");
 }
 
 function occurrencesIn(text: string, into: HostPathTokenOccurrence[]): void {

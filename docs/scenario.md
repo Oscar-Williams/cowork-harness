@@ -789,7 +789,7 @@ or the fidelity tier. Recognize these before "fixing" a non-bug:
   the path goes on — whitespace, `,` or `;` followed by more path (`/Users/a/My Documents/x`,
   `/Users/a/proj,old/x`) — is never exempt, since an unrelated input can carry the same truncated prefix.
   The exemption never covers a location the harness created for this run — the run dir, the microvm
-  session dir, the staged agent versions' dir, and the vm-work root and runs dir themselves — nor a
+  session dir, the staged agent versions' dir, and the vm-work root, the runs root and the run's scenario dir themselves — nor a
   truncated spelling of one. It is captured on the first turn only, so a path the agent writes into a
   connected folder is not exempt on a later turn. Files over 2 MiB, binary files, `.git/` and
   `node_modules/` are not scanned (past 5,000 files or 64 MiB the rest are skipped too, with a notice) —
