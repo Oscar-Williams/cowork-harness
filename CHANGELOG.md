@@ -6,6 +6,24 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+
+- **`lint-skill` per-rule suppression, so `--strict` can stay the gate over a reviewed finding.**
+  `--ignore-rule <rule>[=<glob>]` (repeatable) applies to the whole run, or only to files matching the glob;
+  it is the only form for a finding with no line, such as the size caps. Unscoped, it also hides the next
+  new finding of that rule in any file, so scope it when you lint more than one skill. In a `SKILL.md`,
+  `<!-- lint-skill: ignore-start <rule>[,<rule>…]: <reason> -->` … `<!-- lint-skill: ignore-end -->`
+  suppresses the named rules on the lines in between, in that file only; a marker inside a fenced block is
+  ignored, so wrap the whole fence. A suppressed finding is still reported: text mode prints it with `⊘` and
+  counts it in the summary, and `--json` keeps its severity and adds a `suppressed` record (how, the marker
+  line, the reason). The key appears only on a suppressed finding, so output without suppression is
+  unchanged; the `--output-format json` envelope adds `suppressedCount` when it is non-zero. Only judgement-call
+  WARN and INFO rules can be suppressed: an ERROR, `hooks-json-misplaced` or
+  `subagent-type-not-found-in-plugin`, or an unknown rule, is refused (exit 2 for the flag, WARN
+  `lint-skill-ignore-invalid` for a marker). An unclosed marker is WARN `lint-skill-ignore-unclosed`, and a
+  marker rule or flag that suppressed nothing is INFO `lint-skill-ignore-unused`. `lint --ignore-rule` is
+  rejected by name.
+
 ### Changed
 
 - **`lint-skill`'s `plugin-root-in-vm-bash` message now states the mechanism for the form you wrote.** In a

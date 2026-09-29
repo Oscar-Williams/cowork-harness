@@ -134,6 +134,22 @@ that exports an env var / writes `/tmp` for the in-VM agent — while leaving co
 heuristic v1 (see its `--help` for the documented limits), so treat a clean result as "no *obvious*
 footgun," not a proof.
 
+**A reviewed forwarding site** ([above](#a-value-you-forward-to-a-host-side-file-tool)) is suppressed in
+place, with the reason, by wrapping the whole fence in markers (a marker inside the fence is ignored):
+
+````markdown
+<!-- lint-skill: ignore-start plugin-root-in-vm-bash: the value only lands in the sub-agent's prompt, for its Read -->
+```bash
+python3 "$S/build_prompt.py" --plugin-root-agent "${CLAUDE_PLUGIN_ROOT}"
+```
+<!-- lint-skill: ignore-end -->
+````
+
+The finding is still printed, marked as suppressed with your reason, and stops failing `--strict`. Every
+other `plugin-root-in-vm-bash` site in the skill keeps warning, so the next real `--data-dir` bug is not
+hidden. The full syntax, and `--ignore-rule` for run-wide decisions such as an accepted size cap, are in
+the [CLI guide](./cli.md#flags-worth-knowing).
+
 **Plain `lint-skill` (no `--strict`) is advisory-only** — it prints these WARNs but exits 0. CI should
 run `lint-skill --strict path/to/skill/` to actually gate on them (this also gates on the provable
 in-plugin `subagent_type` typo — see [subagents.md](./subagents.md#static-subagent_type-resolution-resolve-agent-types--lint-skill)).
