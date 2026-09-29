@@ -167,6 +167,31 @@ All notable changes to this project are documented here. The format is based on
 
 ### Added
 
+- **Baseline `desktop-2.9939.4`** (agent **2.1.284**, staged from a **release-candidate** channel,
+  `…/claude-code-releases/rc/16cbb4dd…`). This is what `baseline: latest` now resolves to. From a
+  first-party session's point of view nothing moved:
+  - The Cowork system prompt and all four sub-agent append fingerprints are byte-identical to 2.9939.2.
+  - `spawn.env`, `spawnEnvKeys`, the effort config, the egress allowlist, `asarGateIds` and
+    `asarFingerprint` are unchanged, and the VM rootfs origin is unmoved. No pinned gate changed state.
+  - **The stable channel serves a different build under the same version.** Stable 2.1.284 is commit
+    `2b8ce618…` (linux-arm64 sha256 `3dd0f96d…`); the build Desktop staged is the RC commit `16cbb4dd…`
+    (sha256 `e242ab7f…`, which the RC manifest confirms). The CI recipes' `B=` now point at the RC base,
+    since the stable URL would download a binary whose checksum does not match the baseline.
+  - The agent's host-dialog attestation for settings-file edits is present in 2.1.284 but compiled off:
+    the approval recorder runs, while both its consumer and the "staged for review" settings path are
+    gated on constant-false functions. A skill that edits a Claude settings file behaves the same under
+    the harness and in Cowork today.
+  - `desktopInitSurface` is observed from **2 init frames, both from a scheduled task**, the same kind
+    of session as 2.9939.2's. The tool surface is identical.
+  - No live pass has run against it yet.
+  - **The committed cassettes are re-stamped, not re-recorded.** The three in `examples/replays/` and
+    `test/fixtures/tool-call-dispatch/dispatch-shell.cassette.json` now name `2.9939.4` in
+    `fingerprint.baseline`, but the recordings are unchanged: three were made against agent 2.1.281, and the protocol-tier
+    one against the host CLI (2.1.282). The
+    re-stamp is sound only because the recorded contract (spawn env, system prompt, sub-agent append,
+    prompt assets) is byte-identical between the two releases; `verify-cassettes` is clean and all four
+    replay green under `--strict`. A real re-record is owed.
+
 - **The packaged Action takes a `model` input** for the live `run` lane. It is exported as
   `COWORK_HARNESS_MODEL` when set, so it fills in where a scenario's session sets no `model:`. Left empty,
   it exports nothing, so a job-level `COWORK_HARNESS_MODEL` still applies.
