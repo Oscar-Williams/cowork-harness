@@ -1014,7 +1014,8 @@ Covered-surface changes follow semver as of `1.0.0` — see [RELEASING.md](./REL
   a `runtime`-category pre-spend refusal also exits `2`, alongside usage errors.
 - *Scenario schema (tightened validation).* `fidelity:` is required; before 4.0.0 it defaulted to
   `container`. No exit code changes meaning: a scenario without the key is a loader rejection, so
-  `run`/`record` exit `2` as for any file that does not load (§11). Its knock-on in the
+  `run` (a file or a directory) and `record <file>` exit `2` as for any file that does not load, and
+  `record <dir/>` lists it as broken and exits `1`, as for any broken file in a batch (§11). Its knock-on in the
   *`verify-cassettes` envelope*: a cassette's recorded scenario source that the loader rejects is an
   `unverifiable[]` entry (exit `3`), where before 4.0.0 it was a non-failing note, so a gate that is
   green on 3.x can fail on 4.0.0.
