@@ -41,7 +41,8 @@ All notable changes to this project are documented here. The format is based on
   agent is on PATH. A VM still provisioning is waited for (up to `COWORK_VM_PROVISION_TIMEOUT_S`); one
   whose egress firewall is in place while the agent is missing — whether its provisioning is still stuck
   or has since given up — is restarted once, which clears the firewall and lets provisioning run again.
-  Anything else, including a restart that fails or does not help, fails with `microvm <instance> never
+  A VM that `limactl start` returns before it has finished provisioning fails with a message to re-run
+  (the next run waits for it). Anything else, including a restart that fails or does not help, fails with `microvm <instance> never
   finished provisioning (<reason>). Delete it and retry: cowork-harness vm delete [<baseline>]`. The
   harness never deletes a VM itself. `limactl start` now gets `--timeout 20m`, so a slow first boot is not
   cut off in the first place. The capability probe skips a VM that is not provisioned instead of caching

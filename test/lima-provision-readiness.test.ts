@@ -210,8 +210,28 @@ describe("vmInit — a fresh start is probed once, not polled", () => {
           return ok();
         },
       });
-      expect(() => lima.vmInit(BASELINE)).toThrow(/never finished provisioning/);
+      expect(() => lima.vmInit(BASELINE)).toThrow(/has not finished provisioning/);
       expect(readinessCalls(calls)).toHaveLength(1);
+    });
+
+    it(`${initial}: still provisioning after start ⇒ the error says to re-run, not to delete`, () => {
+      let started = false;
+      script({
+        status: () => (started ? "Running" : initial),
+        readiness: () => state("pending"),
+        start: () => {
+          started = true;
+          return ok();
+        },
+      });
+      let msg = "";
+      try {
+        lima.vmInit(BASELINE);
+      } catch (e) {
+        msg = (e as Error).message;
+      }
+      expect(msg).toMatch(/re-run; the next run waits for provisioning to finish \(COWORK_VM_PROVISION_TIMEOUT_S\)/);
+      expect(msg).not.toMatch(/Delete it/);
     });
 
     it(`${initial}: start then ready ⇒ returns Running`, () => {

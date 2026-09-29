@@ -189,9 +189,7 @@ function reasonFor(state: Exclude<VmProvisioning, "ready">, afterRestart: boolea
         ? "its egress firewall was applied before provisioning finished, and a restart did not recover it"
         : "its egress firewall is in place but the agent is not on PATH";
     case "pending":
-      return afterRestart
-        ? "provisioning had not finished when the restart returned"
-        : "provisioning had not finished when limactl start returned";
+      return "provisioning had not finished when the restart returned";
   }
 }
 
@@ -265,6 +263,11 @@ export function vmInit(baseline: PlatformBaseline): { instance: string; status: 
   // `limactl start` waits for Lima's own boot-done requirement, so one probe is enough here: not ready
   // now means the start itself went wrong, and polling would only delay saying so.
   const state = vmProvisioned(instance);
+  // Still provisioning is not a broken VM: a Running VM is waited for, so the next run picks it up.
+  if (state === "pending")
+    throw new Error(
+      `microvm ${instance} has not finished provisioning (limactl start returned first) — re-run; the next run waits for provisioning to finish (COWORK_VM_PROVISION_TIMEOUT_S)`,
+    );
   if (state !== "ready") throw provisioningError(instance, reasonFor(state, false));
   return { instance, status: vmStatus(instance) };
 }
