@@ -52,6 +52,10 @@ All notable changes to this project are documented here. The format is based on
   where it runs (the agent substitutes the token when it runs the hook, and sets the variable), so the
   `plugin-root-in-vm-bash` WARN there was a false positive. `hook-host-side-write` still checks the same
   command.
+- **The example scenarios and the scenario docs no longer deny a harmless command in their Bash `allow_if`.**
+  `!command.includes('rm')` also matched "normalize", "format" or "confirm", so `csv-fx-normalize` denied
+  its own producer; they now use a word match, `!/\brm\b/.test(command)`, in single-quoted YAML so the
+  `\b` survives.
 
 ## [4.0.0] — 2026-09-29
 

@@ -73,7 +73,7 @@ answers:                            # scripted answers (see below)
   - when_question: "Which output format"
     choose: "Markdown"
   - when_tool: Bash
-    allow_if: "!command.includes('rm')"
+    allow_if: '!/\brm\b/.test(command)' # a word match; `includes('rm')` also denies "normalize"
     else: deny
   - when_tool: Write
     decide: allow
@@ -282,7 +282,7 @@ label validation by intent (mutually exclusive with `choose`):
 - when_tool: Write
   decide: allow                   # allow | deny
 - when_tool: Bash
-  allow_if: "!command.includes('rm') && !command.includes('curl')"  # JS predicate over tool input
+  allow_if: '!/\brm\b/.test(command) && !command.includes("curl")'  # JS predicate over tool input
   else: deny                      # decision when predicate is false (default deny)
 - when_tool: "webfetch:example.com"   # a web_fetch approval (provenance-miss gate)
   decide: allow

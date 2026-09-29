@@ -27,7 +27,7 @@ answers:
   - when_tool: Write
     decide: allow
   - when_tool: Bash # allow running the producer; forbid installs / deletes
-    allow_if: "!command.includes('rm') && !command.includes('pip')"
+    allow_if: '!/\brm\b/.test(command) && !command.includes("pip")' # \b: "normalize" contains "rm"
     else: deny
 
 assert:

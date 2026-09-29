@@ -1,4 +1,6 @@
 import { describe, it, expect } from "vitest";
+import { readFileSync } from "node:fs";
+import { parse as parseYaml } from "yaml";
 import {
   matchLabel,
   coerceLabel,
@@ -79,6 +81,40 @@ describe("evalPredicate via ScriptedDecider (broken predicate throws, never sile
     const deny = await new ScriptedDecider(rule("!command.includes('rm')")).decide(perm({ command: "rm -rf /" }), ctx());
     expect((deny as any).response).toMatchObject({ kind: "permission", behavior: "deny" });
   });
+});
+
+// `command.includes('rm')` is a substring test: "normalize", "format", "confirm" and "platform" all contain
+// "rm", so it denies harmless commands. The shipped examples and docs use a word-boundary regex literal
+// instead; these pin that the predicate evaluator accepts one, and that the YAML spelling in the examples
+// reaches it with its backslashes intact (a double-quoted YAML string would turn `\b` into a backspace).
+describe("evalPredicate — a word-boundary regex literal for `rm`", () => {
+  const rule = (allow_if: string): AnswerRule[] => [{ when_tool: "Bash", allow_if } as AnswerRule];
+  const decide = async (allow_if: string, command: string) =>
+    ((await new ScriptedDecider(rule(allow_if)).decide(perm({ command }), ctx())) as any).response.behavior;
+  const RX = String.raw`!/\brm\b/.test(command)`;
+
+  it.each([
+    ["python3 normalize.py", "allow"],
+    ["rm -rf x", "deny"],
+    ["x && rm y", "deny"],
+  ])("%s → %s", async (command, want) => {
+    expect(await decide(RX, command)).toBe(want);
+  });
+
+  it("the substring form it replaces denies a harmless command (why the examples moved off it)", async () => {
+    expect(await decide("!command.includes('rm')", "python3 normalize.py")).toBe("deny");
+  });
+
+  it.each(["examples/scenarios/csv-fx-normalize.yaml", "examples/scenarios/csv-metrics.yaml"])(
+    "%s: its Bash allow_if allows the producer and denies rm",
+    async (file) => {
+      const doc = parseYaml(readFileSync(file, "utf8")) as { answers: Array<{ when_tool?: string; allow_if?: string }> };
+      const pred = doc.answers.find((a) => a.when_tool === "Bash")?.allow_if;
+      expect(pred).toBeDefined();
+      expect(await decide(pred!, "python3 /sessions/s/mnt/x/scripts/normalize.py uploads/a.csv outputs")).toBe("allow");
+      expect(await decide(pred!, "rm -rf outputs")).toBe("deny");
+    },
+  );
 });
 
 // evalPredicate exposes a single `input` object (reaching non-identifier keys) AND keeps binding
