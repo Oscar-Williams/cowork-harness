@@ -525,6 +525,13 @@ export async function executeScenario(scenario: Scenario, opts: ExecuteOptions =
   // after the status line, where it has always been.
   const effectiveFidelity = effectiveTier(scenario.fidelity, baseline);
 
+  // A `tool_not_called` naming a tool this tier provably does not serve is an authoring error: refused
+  // HERE, before the run dir exists (and before a same-origin `--session-id` re-run clears its prior dir),
+  // ahead of every spawn, staging and image pull. UsageError, not a plain throw: a bare Error would be
+  // categorized `internal` — an authoring mistake reported as a harness bug.
+  const vacuous = tierVacuityRefusal(scenario, baseline);
+  if (vacuous) throw new UsageError(vacuous);
+
   // Every declared source (plugins, skills, uploads, folders, marketplaces) is resolved and checked HERE,
   // before the run directory exists: a path that does not exist is a UsageError, and a run refused for it
   // leaves no run dir, status.json or index row behind. buildLaunchPlan stages from this same resolution.
@@ -635,33 +642,6 @@ export async function executeScenario(scenario: Scenario, opts: ExecuteOptions =
   installTerminationHandler();
 
   if (scenario.fidelity === "cowork") process.stderr.write(`[loop] cowork → ${effectiveFidelity} (per gate 1143815894)\n`);
-
-  // Refuse a `tool_not_called` naming a tool this tier provably does not serve. Placed HERE, not in the
-  // schema or validateScenarioRegexes, because both run before the baseline and the tier exist — and a
-  // `fidelity: cowork` scenario has no tier at all until the line above resolves it, which is the tier
-  // most authors actually write. Still ahead of every spawn, staging and image pull, so no model spend is
-  // wasted on an assertion that could never have been violated. (A same-origin `--session-id` re-run has
-  // already cleared the prior outDir by this point — pre-spend for tokens, not for that.)
-  //
-  // UsageError, not a plain throw: parseScenarioFile wraps only ZodError, so a bare Error here would be
-  // categorized `internal` — an authoring mistake reported as a harness bug.
-  const viaApiForVacuity = readGateFlag(baseline, "1978029737", "coworkWebFetchViaApi", false);
-  for (const a of scenario.assert) {
-    // BOTH negative tool keys. `subagent_tool_absent` reads the tools sub-agents actually USED
-    // (assert.ts's `ctx.subagentTools`), not a per-dispatch declared list, so the same tier table applies
-    // — covering one and not the other would refuse `tool_not_called: "Bash"` at hostloop while silently
-    // greening the sub-agent form of the identical claim.
-    for (const key of ["tool_not_called", "subagent_tool_absent"] as const) {
-      const pattern = a[key];
-      if (pattern === undefined) continue;
-      // The object form of tool_not_called is refused only when EVERY listed tool is unserved.
-      const finding =
-        typeof pattern === "string"
-          ? tierVacuousTool(pattern, effectiveFidelity, viaApiForVacuity)
-          : objectFormTierVacuous(pattern, effectiveFidelity, viaApiForVacuity);
-      if (finding) throw new UsageError(tierVacuousMessage(finding, key, scenario.name));
-    }
-  }
 
   let agentSessionId: string | undefined;
   if (opts.sessionId || opts.resume) {
@@ -2202,12 +2182,19 @@ export function ablateSession<T extends { plugins: Record<string, unknown>; skil
  * file's own directory (see {@link resolveSessionPaths}). Exported for the matrix runner — cli.ts loads
  * the base session ONCE per matrix run, then applies per-cell overrides (applySessionOverrides,
  * session.ts) on top of the SAME loaded+resolved object, rather than re-resolving paths per cell. */
-/** The input-path check a preview makes (`record <file> --dry-run`): open the scenario's session, apply the
- *  model the run would resolve, and run the same write-free source resolution `executeScenario` runs before
- *  it creates a run dir. Throws that resolution's `UsageError` (a path that does not exist or is the wrong
- *  kind, an effort the model does not offer). A session that does not load at all is left to the real run,
- *  as the model pre-flight leaves it. */
-export function launchSourcesPreflight(scenario: Scenario, modelOverride: string | undefined): void {
+/** The input-path check a preview or batch pre-flight makes (`record --dry-run`, `run <dir/>`): open the
+ *  scenario's session, apply the model the run would resolve (and `ablateSkill`, as the run applies it), and
+ *  run the same write-free source resolution `executeScenario` runs before it creates a run dir. Throws that
+ *  resolution's `UsageError` (a path that does not exist or is the wrong kind, an effort the model does not
+ *  offer, a baseline name that resolves nowhere). A session that does not load at all is left to the real
+ *  run, as the model pre-flight leaves it; a baseline file that does not load throws what the run would.
+ *  `quiet` mutes the resolution's warnings, for a caller whose run resolves again and prints them itself;
+ *  `baseline` passes one the caller already loaded. */
+export function launchSourcesPreflight(
+  scenario: Scenario,
+  modelOverride: string | undefined,
+  opts: { quiet?: boolean; ablateSkill?: boolean; baseline?: PlatformBaseline } = {},
+): void {
   let loaded: ReturnType<typeof loadSession>;
   try {
     loaded = loadSessionFromFile(scenario.session);
@@ -2216,9 +2203,86 @@ export function launchSourcesPreflight(scenario: Scenario, modelOverride: string
     return;
   }
   const model = resolvePinnedModel(modelOverride, loaded.model, envModelDefault());
-  const session = model !== undefined && model !== loaded.model ? applySessionOverrides(loaded, { model }) : loaded;
-  const baseline = loadBaseline(scenario.baseline);
-  resolveLaunchSources(session, baseline, effectiveTier(scenario.fidelity, baseline), false, { stageFilters: false });
+  const withModel = model !== undefined && model !== loaded.model ? applySessionOverrides(loaded, { model }) : loaded;
+  const session = opts.ablateSkill ? ablateSession(withModel) : withModel;
+  const baseline = opts.baseline ?? loadBaseline(scenario.baseline);
+  resolveLaunchSources(session, baseline, effectiveTier(scenario.fidelity, baseline), false, {
+    stageFilters: false,
+    quiet: opts.quiet,
+  });
+}
+
+/** Every input check `executeScenario` makes before it creates a run dir, in its order, for a caller that
+ *  must answer before that (a batch pre-flight, a dry run): the baseline name, a tier-vacuous negative tool
+ *  assertion, then every declared input path. Returns the first refusal as the `UsageError` the run would
+ *  throw (message and hint), or `undefined`. Anything else that is not an input error is thrown.
+ *
+ *  A baseline FILE that does not load (malformed JSON, a shape the schema rejects) is the caller's choice,
+ *  `unloadableBaseline`: `"throw"` (the default) fails as the run would; `"skip"` leaves it to the run
+ *  (a batch pre-flight, where that scenario still fails on its turn); `"report"` returns the load error as
+ *  the refusal (a directory dry run, whose real record fails that item). */
+export function scenarioInputRefusal(
+  scenario: Scenario,
+  modelOverride: string | undefined,
+  opts: ScenarioInputCheckOptions = {},
+): UsageError | undefined {
+  const f = scenarioInputFindings(scenario, modelOverride, opts);
+  return f.vacuity ?? f.inputs;
+}
+
+export type ScenarioInputCheckOptions = { quiet?: boolean; ablateSkill?: boolean; unloadableBaseline?: "throw" | "skip" | "report" };
+
+/** The two halves of {@link scenarioInputRefusal}, from ONE resolution, for a caller that treats them
+ *  differently (`record <file> --dry-run` reports vacuity but refuses a bad input): `vacuity`, the
+ *  tier-vacuous refusal; `inputs`, the baseline-name or input-path refusal. The run throws `vacuity` first. */
+export function scenarioInputFindings(
+  scenario: Scenario,
+  modelOverride: string | undefined,
+  opts: ScenarioInputCheckOptions = {},
+): { vacuity?: UsageError; inputs?: UsageError } {
+  let baseline: PlatformBaseline;
+  try {
+    baseline = loadBaseline(scenario.baseline);
+  } catch (e) {
+    if (e instanceof UsageError) return { inputs: e };
+    if ((opts.unloadableBaseline ?? "throw") === "throw") throw e;
+    if (opts.unloadableBaseline === "skip") return {};
+    return { inputs: new UsageError(`baseline "${scenario.baseline}" does not load: ${(e as Error).message}`) };
+  }
+  const vacuous = tierVacuityRefusal(scenario, baseline);
+  let inputs: UsageError | undefined;
+  try {
+    launchSourcesPreflight(scenario, modelOverride, { quiet: opts.quiet, ablateSkill: opts.ablateSkill, baseline });
+  } catch (e) {
+    if (!(e instanceof UsageError)) throw e;
+    inputs = e;
+  }
+  return { ...(vacuous ? { vacuity: new UsageError(vacuous) } : {}), ...(inputs ? { inputs } : {}) };
+}
+
+/** Refuse a `tool_not_called` / `subagent_tool_absent` naming a tool the scenario's tier provably does not
+ *  serve: the assertion could never be violated, so it verifies nothing. Returns the refusal text, or
+ *  `undefined`. Depends only on the scenario and the baseline (which resolves a `cowork` fidelity to its
+ *  tier), so `executeScenario` checks it before the run dir exists and `run <dir/>` before the first
+ *  scenario runs. Not in the schema or validateScenarioRegexes: both run before the baseline and the tier
+ *  exist, and `fidelity: cowork` — the tier most authors write — has no tier until then. */
+export function tierVacuityRefusal(scenario: Scenario, baseline: PlatformBaseline): string | undefined {
+  const tier = effectiveTier(scenario.fidelity, baseline);
+  const viaApi = readGateFlag(baseline, "1978029737", "coworkWebFetchViaApi", false);
+  for (const a of scenario.assert) {
+    // BOTH negative tool keys. `subagent_tool_absent` reads the tools sub-agents actually USED
+    // (assert.ts's `ctx.subagentTools`), not a per-dispatch declared list, so the same tier table applies
+    // — covering one and not the other would refuse `tool_not_called: "Bash"` at hostloop while silently
+    // greening the sub-agent form of the identical claim.
+    for (const key of ["tool_not_called", "subagent_tool_absent"] as const) {
+      const pattern = a[key];
+      if (pattern === undefined) continue;
+      // The object form of tool_not_called is refused only when EVERY listed tool is unserved.
+      const finding = typeof pattern === "string" ? tierVacuousTool(pattern, tier, viaApi) : objectFormTierVacuous(pattern, tier, viaApi);
+      if (finding) return tierVacuousMessage(finding, key, scenario.name);
+    }
+  }
+  return undefined;
 }
 
 export function loadSessionFromFile(sessionRef: string): ReturnType<typeof loadSession> {

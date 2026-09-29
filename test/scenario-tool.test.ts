@@ -241,6 +241,74 @@ describe.skipIf(!can || !havePython)("cowork-harness lint-skill --output-format 
   });
 });
 
+// `--ignore-rule` through the wrapper: its value must be forwarded as a value (never parsed as a global
+// flag), the json envelope carries the `suppressed` record unchanged plus a `suppressedCount`, and the wrong
+// sibling (`lint`) fails with a named error.
+describe.skipIf(!can || !havePython)("cowork-harness lint-skill --ignore-rule (CLI passthrough)", () => {
+  function writeBigSkill(dir: string) {
+    writeFileSync(join(dir, "SKILL.md"), "# Big\n\n" + "x".repeat(19_001));
+  }
+
+  it("json: ok:true under --strict, the finding keeps suppressed.by=flag, suppressedCount:1", () => {
+    const d = mkdtempSync(join(tmpdir(), "cwh-lint-skill-ignore-json-"));
+    writeBigSkill(d);
+    const { code, stdout } = runCli([
+      "lint-skill",
+      d,
+      "--ignore-rule",
+      "skill-body-over-reattach-cap",
+      "--strict",
+      "--output-format",
+      "json",
+    ]);
+    expect(code).toBe(0);
+    const payload = JSON.parse(stdout.trim());
+    expect(payload.ok).toBe(true);
+    expect(payload.findings[0].rule).toBe("skill-body-over-reattach-cap");
+    expect(payload.findings[0].suppressed.by).toBe("flag");
+    expect(payload.suppressedCount).toBe(1);
+  });
+
+  it("text: the same invocation exits 0 and reports the suppression", () => {
+    const d = mkdtempSync(join(tmpdir(), "cwh-lint-skill-ignore-text-"));
+    writeBigSkill(d);
+    const { code, stdout } = runCli(["lint-skill", d, "--ignore-rule", "skill-body-over-reattach-cap", "--strict"]);
+    expect(code).toBe(0);
+    expect(stdout).toMatch(/1 suppressed \(skill-body-over-reattach-cap ×1 by --ignore-rule\)/);
+  });
+
+  it("the `--ignore-rule=<value>` form is forwarded too", () => {
+    const d = mkdtempSync(join(tmpdir(), "cwh-lint-skill-ignore-eq-"));
+    writeBigSkill(d);
+    const { code, stdout } = runCli(["lint-skill", d, "--ignore-rule=skill-body-over-reattach-cap", "--strict", "--output-format", "json"]);
+    expect(code).toBe(0);
+    expect(JSON.parse(stdout.trim()).suppressedCount).toBe(1);
+  });
+
+  it("an unknown rule is a usage error (exit 2)", () => {
+    const d = mkdtempSync(join(tmpdir(), "cwh-lint-skill-ignore-bad-"));
+    writeBigSkill(d);
+    const { code, stderr } = runCli(["lint-skill", d, "--ignore-rule", "nope"]);
+    expect(code).toBe(2);
+    expect(stderr).toMatch(/unknown lint-skill rule: nope/);
+  });
+
+  it("`lint --ignore-rule` → exit 2 naming lint-skill as the owner", () => {
+    const d = mkdtempSync(join(tmpdir(), "cwh-lint-ignore-rule-"));
+    const scenario = writeCleanScenario(d);
+    const { code, stderr } = runCli(["lint", scenario, "--ignore-rule", "replay-noop"]);
+    expect(code).toBe(2);
+    expect(stderr).toMatch(/--ignore-rule is a `lint-skill` flag; `lint` has no rule suppression/);
+  });
+
+  it("json without suppression: no suppressedCount key (the envelope is unchanged)", () => {
+    const d = mkdtempSync(join(tmpdir(), "cwh-lint-skill-ignore-none-"));
+    writeFootgunSkill(d);
+    const payload = JSON.parse(runCli(["lint-skill", d, "--output-format", "json"]).stdout.trim());
+    expect(payload).not.toHaveProperty("suppressedCount");
+  });
+});
+
 // `lint`/`lint-skill` previously accepted ANY `--output-format` value that wasn't literally "text" or
 // "json" (and a valueless trailing `--output-format`) by silently falling through isJsonOutput's strict
 // match into text mode — unlike every other command, which validates via parseOutputFormat and exits 2

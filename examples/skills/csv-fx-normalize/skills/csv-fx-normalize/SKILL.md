@@ -23,8 +23,15 @@ to USD.
 2. Run the bundled producer (reachable via `${CLAUDE_PLUGIN_ROOT}`):
 
    ```bash
-   python3 "${CLAUDE_PLUGIN_ROOT}/skills/csv-fx-normalize/scripts/normalize.py" uploads/sales_eur.csv outputs
+   S="${CLAUDE_PLUGIN_ROOT}/skills/csv-fx-normalize/scripts/normalize.py"
+   [ -f "$S" ] || S="$(find /sessions/*/mnt/.local-plugins /sessions/*/mnt/.remote-plugins \
+     -path '*/skills/csv-fx-normalize/scripts/normalize.py' 2>/dev/null | head -1)"
+   python3 "$S" uploads/sales_eur.csv outputs
    ```
+
+   The second line matters in Cowork's default host-loop mode, where the path the agent
+   writes in for `${CLAUDE_PLUGIN_ROOT}` is on the host and the VM shell cannot open it;
+   it then finds the script at the plugin's mount inside the VM.
 
    It makes one outbound call — to a public FX API — to get the EUR→USD rate. If that
    call is blocked (as it is under Cowork's default-deny egress), it falls back to the

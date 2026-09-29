@@ -379,12 +379,12 @@ gate; the naive first-reach invocation without `--strict` is a silent rubber-sta
 | connected folders | production default **rw** (rwd only after delete-approval consent); the harness's `mode: r` is a HARNESS EXTENSION for authoring read-only fixtures (bind-mounted `:ro` — Read passes, Write is blocked), and a `rw`/`rwd` folder additionally requires operator consent to run | rw per mount, except a harness `mode: r` folder, which is `:ro` | same — a harness `mode: r` folder is read-only, not rw |
 | `/sessions/*` | DENIED (a VM path on a host filesystem) | valid — it IS the sub-agent's namespace | valid — it IS the sub-agent's namespace |
 | delete semantics | file tools have no delete verb | `rm` is **not** blocked at the mount by the harness — production denies deletes in outputs/connected folders outright, unblockable except through its own approval flow, but the harness mounts those writable and catches a delete **after the fact** via a post-run scan/assertion; a per-mount delete-deny is separate, not-yet-built work | same post-hoc detection as bash |
-| `${CLAUDE_PLUGIN_ROOT}` | pre-resolved into the agent's prompt TEXT at definition load; the literal token is never expanded by file tools; the env var is not present in the Bash-tool subprocess env | same — the env var is absent from the Bash subprocess on the VM loop too | same — pre-resolved in text; env var absent from Bash |
+| `${CLAUDE_PLUGIN_ROOT}` | the braced token is pre-resolved into the agent's prompt TEXT at definition load, to a HOST path; the literal token is never expanded by file tools | a bare `$CLAUDE_PLUGIN_ROOT` is empty in the VM shell; the pre-resolved host path does not exist there | braced: pre-resolved in text to the VM mount path. Bare, in the Bash subprocess: the harness (`container`/`microvm`) sets no value; for real Cowork's VM loop see the [plugin-root.md tier table](./plugin-root.md#how-the-tiers-map) |
 
 The `${CLAUDE_PLUGIN_ROOT}` row deserves a second read: a plugin's own file references resolve because
 the path is substituted into the prompt text when the plugin definition is loaded, not because a
-sub-agent's shell inherits an environment variable — no tier ever exposes `CLAUDE_PLUGIN_ROOT` to a
-Bash-tool subprocess. See [plugin-root.md](./plugin-root.md) for the full authoring guide (per-tier
+sub-agent's shell inherits an environment variable — do not rely on the variable in a Bash-tool
+subprocess on any tier. See [plugin-root.md](./plugin-root.md) for the full authoring guide (per-tier
 staging paths, the host-loop self-heal, and the lint tooling that catches a hardcoded-token footgun in
 a skill's shell steps).
 

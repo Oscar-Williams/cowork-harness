@@ -7,7 +7,9 @@ Tracks `cowork-harness 4.0.0` (baseline `desktop-2.9939.4`). Read it when a run 
 A run misbehaved, or greened when you don't trust it. Debugging is a first-class loop, not an
 afterthought: the run already wrote its evidence, so you **localize the failure post-hoc** rather than
 re-run and hope. Start at the triage below, then use the observability output and, when you need to
-reproduce interactively, `chat`.
+reproduce interactively, `chat`. (The fuller human-facing map is
+[`docs/debugging.md`](https://github.com/yaniv-golan/cowork-harness/blob/main/docs/debugging.md) — repo-only,
+not shipped with the installed skill.)
 
 > **"Evidence" below means the run's own record** — events, trace, transcript; what `trace` / `inspect` /
 > `diff` / `verify-run` / `replay --explain` read. `critique`'s **evaluator** grades against a separate,

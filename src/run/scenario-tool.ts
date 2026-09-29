@@ -121,7 +121,7 @@ function runLintLike(subcommand: "lint" | "lint-skill", args: string[], prepass:
     fail(subcommand, "usage", String((e as Error).message), undefined, isJsonOutput(args));
   }
   // --dotenv / --run-dir after the subcommand: applied here (python knows neither), then not forwarded.
-  args = stripCommandGlobals(subcommand, args, ["--min-severity", "--output-format"], isJsonOutput(args));
+  args = stripCommandGlobals(subcommand, args, ["--min-severity", "--ignore-rule", "--output-format"], isJsonOutput(args));
   resolveScenarioScript(); // fail on a missing script before the loader pre-pass does any work
   const json = isJsonOutput(args);
   const pyArgs = stripOutputFormatFlag(args);
@@ -202,7 +202,13 @@ function runLintLike(subcommand: "lint" | "lint-skill", args: string[], prepass:
     out(jsonError(subcommand, "usage", `${subcommand}: python emitted non-JSON output on --json (exit ${status})`));
     return exit(status);
   }
-  out(jsonPayloadEnvelope(subcommand, status === 0, { findings }));
+  // lint-skill: a suppressed finding stays in `findings` (with its `suppressed` record); the count is a
+  // sibling, added only when something was suppressed so an envelope without suppression is unchanged.
+  const suppressedCount =
+    subcommand === "lint-skill" && Array.isArray(findings)
+      ? findings.filter((f) => typeof f === "object" && f !== null && "suppressed" in f).length
+      : 0;
+  out(jsonPayloadEnvelope(subcommand, status === 0, suppressedCount > 0 ? { findings, suppressedCount } : { findings }));
   return exit(status);
 }
 

@@ -564,6 +564,27 @@ describe.skipIf(!can)("cli --output-format json envelope + exit codes", () => {
       encoding: "utf8",
     });
     expect(ok.status).toBe(0);
+    // The success line carries the standard frame, like its error output: `version` and `error: null`.
+    const doc = JSON.parse(ok.stdout);
+    expect(doc.tool).toBe("cowork-harness");
+    expect(typeof doc.version).toBe("string");
+    expect(doc.command).toBe("answer");
+    expect(doc.ok).toBe(true);
+    expect(doc.gate).toBe(1);
+    expect(doc.answers).toEqual({ Pick: "yes" });
+    expect(doc.error).toBeNull();
+  });
+
+  it('answer --answer "q=a" prints the standard frame on success', () => {
+    const r0 = run(["--version"]);
+    writeIn(r0.cwd, "req-1.json", JSON.stringify({ id: "req-1", questions: [{ question: "Pick", options: [{ label: "Yes" }] }] }));
+    const ok = spawnSync("node", [CLI, "answer", r0.cwd, "--gate", "1", "--answer", "Pick=Yes", "--output-format", "json"], {
+      encoding: "utf8",
+    });
+    expect(ok.status, ok.stderr).toBe(0);
+    const doc = JSON.parse(ok.stdout);
+    expect(doc).toMatchObject({ tool: "cowork-harness", command: "answer", ok: true, gate: 1, answers: { Pick: "Yes" }, error: null });
+    expect(typeof doc.version).toBe("string");
   });
 
   it("answer: repeated --choose answers a multiSelect gate (array resp); rejected on a single-select gate", () => {

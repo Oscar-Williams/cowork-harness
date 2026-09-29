@@ -32,6 +32,53 @@ All notable changes to this project are documented here. The format is based on
   they exempted from `host_path_leak` (see Fixed). Omitted when zero; the paths themselves are kept only
   in a private file in the run dir.
 
+- **`lint-skill` per-rule suppression, so `--strict` can stay the gate over a reviewed finding.**
+  `--ignore-rule <rule>[=<glob>]` (repeatable) applies to the whole run, or only to files matching the glob
+  (as printed, or relative to the parent of the skill directory, so the glob names the skill:
+  `deck-review/SKILL.md`; a bare `SKILL.md` matches no skill passed as `<dir>/`). It is the only form for a
+  finding with no line, such as the size caps. Unscoped, it also hides the next new finding of that rule in
+  any file, so scope it when you lint more than one skill. In a `SKILL.md`,
+  `<!-- lint-skill: ignore-start <rule>[,<rule>…]: <reason> -->` … `<!-- lint-skill: ignore-end -->`
+  suppresses the named rules on the lines in between, in that file only; a marker inside a fenced block, or
+  indented 4 or more spaces, is ignored, so wrap the whole fence. A suppressed finding is still reported: text mode prints it with `⊘` and
+  counts it in the summary, and `--json` keeps its severity and adds a `suppressed` record (how, the marker
+  line, the reason). The key appears only on a suppressed finding, so output without suppression is
+  unchanged; the `--output-format json` envelope adds `suppressedCount` when it is non-zero. Only judgement-call
+  WARN and INFO rules can be suppressed: an ERROR, `hooks-json-misplaced` or
+  `subagent-type-not-found-in-plugin`, or an unknown rule, is refused (exit 2 for the flag, WARN
+  `lint-skill-ignore-invalid` for a marker). An unclosed marker is WARN `lint-skill-ignore-unclosed`, and a
+  marker rule or flag that suppressed nothing is INFO `lint-skill-ignore-unused`. `lint --ignore-rule` is
+  rejected by name.
+
+- **`record --dry-run` reports the inputs a real record would refuse under a new `inputErrors[]` key.**
+  On a directory: an input path, effort or baseline name that the real `record` would refuse, a baseline
+  file that does not load, and a `tool_not_called` / `subagent_tool_absent` the scenario's tier can never
+  violate. On a single file, which already refuses a bad input path (exit 1): the tier-vacuous assertion,
+  and when a file has both, the refusal names the vacuity, as the real `record` does. Each entry is
+  `{file, message, hint?}`, with a `⚠ input error:` line on stderr that `--quiet` does not mute. The
+  preview's exit code and `ok` are unchanged: the real `record` fails that scenario, so treat an entry as a
+  failure to come (`jq -e '.ok and (.inputErrors == [])'` gates on both).
+
+### Changed
+
+- **`lint-skill`'s `plugin-root-in-vm-bash` message now states the mechanism for the form you wrote.** In a
+  plugin skill the agent replaces the braced `${CLAUDE_PLUGIN_ROOT}` with a path when the skill loads, and at
+  host-loop that path is on the host: a VM shell step or VM-run program that opens it fails, while a value
+  passed through only to a host-side file tool (for example, a path embedded in a sub-agent's prompt for its
+  `Read`) is correct. A bare `$CLAUDE_PLUGIN_ROOT` is not replaced, and the VM shell reads it as an
+  environment variable, which is empty at host-loop. The rule still warns on every braced use, because the
+  difference is in the receiving program, not in the skill text; the fix text now says which case is which
+  and how to suppress a reviewed site. A braced form with an operator, such as `${CLAUDE_PLUGIN_ROOT:-…}`, is
+  not replaced either, and the message quotes it as written. `docs/plugin-root.md`, `docs/subagents.md` and
+  `docs/session.md` are corrected to match: they no longer say the token is unset in the VM shell on every
+  tier.
+- **The `csv-metrics` and `csv-fx-normalize` example skills find their bundled script inside the VM** when
+  the path written in for `${CLAUDE_PLUGIN_ROOT}` is a host path, as it is at host-loop, instead of failing
+  there. At `container` they run exactly as before.
+- **The companion skill now tells the agent to read its debugging reference first** when a run failed or a
+  green looks wrong, instead of summarising part of it inline. The reference's triage separates a
+  misbehaving skill from a green you don't trust, which the summary skipped.
+
 ### Fixed
 
 - **microvm: a VM that was Running but not yet provisioned is no longer used and sealed.** A first boot
@@ -70,6 +117,36 @@ All notable changes to this project are documented here. The format is based on
   the default `host_path_leak` signal only because of such an input-borne path now passes, and an
   authored `transcript_no_host_path: true` applies the same rule. A result that relied on the exemption
   prints a `::notice::`.
+
+- **`lint-skill` no longer flags `${CLAUDE_PLUGIN_ROOT}` in a hook command.** A plugin hook gets a path valid
+  where it runs (the agent substitutes the token when it runs the hook, and sets the variable), so the
+  `plugin-root-in-vm-bash` WARN there was a false positive. The exemption covers every `"command"` value the
+  linter reads as a hook command: in a `hooks.json`, and in any ```` ```json ```` fence in a `SKILL.md` (so a
+  JSON example of a Bash tool input there is not checked for it either). `hook-host-side-write` still checks
+  the same command.
+- **The example scenarios and the scenario docs no longer deny a harmless command in their Bash `allow_if`.**
+  `!command.includes('rm')` also matched "normalize", "format" or "confirm", so `csv-fx-normalize` denied
+  its own producer; they now use a word match, `!/\brm\b/.test(command)`, in single-quoted YAML so the
+  `\b` survives.
+
+- **`run <dir/>` checks every scenario's input paths before the first one runs.** A plugin, skill, upload,
+  folder or marketplace path that did not exist was refused only when its scenario's turn came, after the
+  earlier scenarios had run and been paid for, and their results were not in the JSON output. The refusal
+  (exit 2, `usage`) now comes first and names every scenario with a missing path, an `effort:` its model
+  does not offer, or a baseline name that resolves nowhere. A single file's message is unchanged. `run
+  --repeat` is unchanged: a scenario with a missing path is still reported in its rollup. Two batches
+  change outcome: one whose earlier scenario creates (on the host) a path a later scenario names is now
+  refused up front, and one whose earlier scenario would have thrown now exits 2 before anything runs.
+- **A `tool_not_called` / `subagent_tool_absent` that the scenario's tier can never violate is refused
+  before the run directory is created.** It was refused after the run directory and its `status.json`
+  existed; now it leaves nothing behind, and `run <dir/>` (without `--repeat`) refuses it before the first
+  scenario runs.
+- **`chat` no longer leaves a run directory behind when an input path does not exist.** A missing skill
+  folder, `--plugin`, `--upload` or `--folder` was refused (exit 2) only after `chat` had created its run
+  directory; it is now checked first, as `run` and `skill` already do.
+- **`answer --output-format json` prints the standard frame on success**: it now carries `version` and
+  `error: null` beside `gate` and `answers`, like its error output and every payload-shaped command.
+
 
 ## [4.0.0] — 2026-09-29
 

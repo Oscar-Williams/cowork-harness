@@ -31,9 +31,9 @@ describe.skipIf(!can)("chat arg guards", () => {
   // ── extra positionals ──
   it("folder-only is accepted by the parser (does not error on arg count)", () => {
     // We can't run the full REPL (would spawn), but an extra-positional error must NOT fire for one
-    // positional. Assert the message we'd emit for >2 positionals is absent. (Spawn is avoided because
-    // a single positional with a non-existent folder still proceeds to spawn — so we instead test the
-    // negative via the >2 case below; here we just confirm <folder> alone is not an arg-count error.)
+    // positional. Assert the message we'd emit for >2 positionals is absent. (A bogus --fidelity forces
+    // an exit before the folder is resolved — a non-existent folder is refused, exit 2, before any run
+    // dir — so this checks the arg count alone; the >2 case below is the positive side.)
     const r = chat(["./skill", "--fidelity", "bogus-tier"]); // forces an early exit on fidelity, not arg-count
     expect(r.stderr).not.toMatch(/takes at most/);
   });

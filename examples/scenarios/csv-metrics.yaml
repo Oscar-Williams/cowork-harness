@@ -28,7 +28,7 @@ answers:
   - when_tool: Write
     decide: allow
   - when_tool: Bash # allow running the producer; forbid network / installs / deletes
-    allow_if: "!command.includes('rm') && !command.includes('curl') && !command.includes('pip')"
+    allow_if: '!/\brm\b/.test(command) && !command.includes("curl") && !command.includes("pip")'
     else: deny
 
 assert:

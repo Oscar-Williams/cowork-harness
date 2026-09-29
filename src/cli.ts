@@ -22,6 +22,7 @@ import {
   parseScenarioFile,
   loadSessionFromFile,
   unresolvedModelPreflight,
+  scenarioInputRefusal,
   UnansweredError,
   BoundaryError,
   UsageError,
@@ -274,6 +275,7 @@ const HELP = `cowork-harness <command>   (v${"$VERSION"})
       NOTE: exit 127 means python3 itself is missing — treat any non-zero exit as a CI failure, do not swallow it.
   lint-skill <SKILL.md | skill-dir/>…  lint a skill body (and any sibling hooks.json) for Cowork host-loop footguns (bundled scenario.py; needs python3)
       [--strict]               fail on WARN too, not just ERROR (never INFO)
+      [--ignore-rule <id>[=<glob>]]  suppress a reviewed WARN/INFO rule (repeatable; still reported, no longer gates); see also the ignore-start/ignore-end markers
   analyze-skill <SKILL.md | skill-dir/ | glob>…  ADVISORY token-free scan: warns on a /sessions/... path handed to a file tool or dispatch/sub-agent output (denied on host-loop) AND on interactive-artifact write-backs lost under Cowork — reuses the ported /sessions path-gate predicate; only the extraction is heuristic
       A directory target scans the UNION of every contract-bearing markdown file present, not just SKILL.md: top-level SKILL.md + references/**, a plugin root's agents/** + references/** + commands/** + skills/*/SKILL.md(+references/**), and (for a skill dir inside a plugin) the enclosing plugin's agents/**, references/** and commands/** (every one of these walked RECURSIVELY). Multiple positionals are accepted (matches lint-skill's nargs="+"), incl. a simple hand-rolled '*' glob — "dir/*.md" (shallow) or "dir/**/*.md" (recursive) — with the results of ALL positionals UNIONed + deduped by resolved path. Zero scannable files across every positional is a usage error (exit 2), never a silent clean pass.
       [--strict]               fail (exit 1) on any finding instead of just warning (mirrors lint-skill's --strict)
@@ -1899,6 +1901,35 @@ async function cmdRun(rawArgs: string[]) {
       undefined,
       o.json,
     );
+  // Every scenario's inputs, before any runs: its baseline name, a `tool_not_called` its tier can never
+  // violate, then every declared input path (plugins, skills, uploads, folders, marketplaces).
+  // executeScenario checks the same, in the same order, but on a directory only when that file's turn came
+  // — after the earlier ones had been paid for, and with their results lost to the refusal. After the model
+  // refusal, which this resolution needs (an `effort:` is checked against the model). The pre-check is
+  // quiet: the run resolves again and prints any warning (a COWORK_HARNESS_SOFT_MISSING exclusion) itself.
+  // Not under --repeat: there a scenario that throws is reported in its rollup (`stoppedEarly: "error"`),
+  // and that envelope and exit code are the invocation's contract.
+  if (repeatN === undefined) {
+    const badInputs: { file: string; message: string; hint?: string }[] = [];
+    for (let i = 0; i < files.length; i++) {
+      const refusal = scenarioInputRefusal(loaded[i], modelFlag, {
+        quiet: true,
+        ablateSkill: flags.ablateSkill,
+        unloadableBaseline: "skip",
+      });
+      if (refusal) badInputs.push({ file: files[i], message: refusal.message, hint: refusal.hint });
+    }
+    // One file keeps the message (and hint) executeScenario would have thrown, unprefixed; a batch names
+    // every offender, one per line, without hints.
+    if (badInputs.length)
+      fail(
+        "run",
+        "usage",
+        files.length === 1 ? badInputs[0].message : badInputs.map((b) => `${b.file}: ${b.message}`).join("\n"),
+        files.length === 1 ? badInputs[0].hint : undefined,
+        o.json,
+      );
+  }
   if (maxBudgetUsd !== undefined && repeatN === undefined)
     for (const scenario of loaded) preflightBudget("run", scenario.name, maxBudgetUsd, o.json);
 
@@ -4089,7 +4120,7 @@ function cmdAnswer(args: string[]) {
     const category = e instanceof UsageError ? "usage" : "runtime";
     return void fail("answer", category, `cannot answer gate ${seq} in ${dir}: ${String((e as Error).message)}`, undefined, json);
   }
-  if (json) out(JSON.stringify({ tool: "cowork-harness", command: "answer", ok: true, gate: seq, answers }));
+  if (json) out(jsonPayloadEnvelope("answer", true, { gate: seq, answers }));
   else log(`✓ answered gate ${seq}: ${JSON.stringify(answers)}`);
 }
 
