@@ -3698,7 +3698,8 @@ export const RECORD_USAGE =
   '       answer gates LIVE: [--decider-dir <dir>] (single scenario only) | [--decider-llm [--intent "<one line>"] [--decider-model <id>]] | [--on-unanswered fail|first]\n' +
   "       (a live decider flags the cassette non-deterministic — re-recording may drift; replay stays deterministic. --rerecord-stale rejects these flags.)\n" +
   "       --quiet: suppress the --dry-run readiness/scenario preview block (✗ broken:/skipped: lines and exit codes are unaffected).\n" +
-  "       NOTE: --allow-failing only relaxes the post-run VERDICT gate; it does NOT salvage an unanswered gate (that throws before any cassette is written — use --on-unanswered first / a decider).";
+  "       NOTE: --allow-failing only relaxes the post-run VERDICT gate; it does NOT salvage an unanswered gate (that throws before any cassette is written — use --on-unanswered first / a decider).\n" +
+  "       --output-format json: one document on stdout, last. Its `ok` is the exit code's verdict (ok ⇔ exit 0) on every path; the recorded run's verdict is results[0].verdict.pass (a file) or items[].verdict.pass (a dir/ batch or --rerecord-stale, one item per scenario or cassette: status recorded|failed|skipped-budget). They differ when --allow-failing records a failing run.";
 
 /** `record <scenario.yaml | dir> [--out <file>] [--rerecord-stale] [--no-redact] [--allow-failing]` —
  *  run live + save a cassette. A single file records one; a dir batches; --rerecord-stale treats
