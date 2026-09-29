@@ -9,12 +9,14 @@ All notable changes to this project are documented here. The format is based on
 ### Added
 
 - **`lint-skill` per-rule suppression, so `--strict` can stay the gate over a reviewed finding.**
-  `--ignore-rule <rule>[=<glob>]` (repeatable) applies to the whole run, or only to files matching the glob;
-  it is the only form for a finding with no line, such as the size caps. Unscoped, it also hides the next
-  new finding of that rule in any file, so scope it when you lint more than one skill. In a `SKILL.md`,
+  `--ignore-rule <rule>[=<glob>]` (repeatable) applies to the whole run, or only to files matching the glob
+  (as printed, or relative to the parent of the skill directory, so the glob names the skill:
+  `deck-review/SKILL.md`; a bare `SKILL.md` matches no skill passed by directory). It is the only form for a
+  finding with no line, such as the size caps. Unscoped, it also hides the next new finding of that rule in
+  any file, so scope it when you lint more than one skill. In a `SKILL.md`,
   `<!-- lint-skill: ignore-start <rule>[,<rule>…]: <reason> -->` … `<!-- lint-skill: ignore-end -->`
-  suppresses the named rules on the lines in between, in that file only; a marker inside a fenced block is
-  ignored, so wrap the whole fence. A suppressed finding is still reported: text mode prints it with `⊘` and
+  suppresses the named rules on the lines in between, in that file only; a marker inside a fenced block, or
+  indented 4 or more spaces, is ignored, so wrap the whole fence. A suppressed finding is still reported: text mode prints it with `⊘` and
   counts it in the summary, and `--json` keeps its severity and adds a `suppressed` record (how, the marker
   line, the reason). The key appears only on a suppressed finding, so output without suppression is
   unchanged; the `--output-format json` envelope adds `suppressedCount` when it is non-zero. Only judgement-call
@@ -33,8 +35,13 @@ All notable changes to this project are documented here. The format is based on
   `Read`) is correct. A bare `$CLAUDE_PLUGIN_ROOT` is not replaced, and the VM shell reads it as an
   environment variable, which is empty at host-loop. The rule still warns on every braced use, because the
   difference is in the receiving program, not in the skill text; the fix text now says which case is which
-  and how to suppress a reviewed site. `docs/plugin-root.md` is corrected to match: it no longer says the
-  token is unset in the VM shell on every tier.
+  and how to suppress a reviewed site. A braced form with an operator, such as `${CLAUDE_PLUGIN_ROOT:-…}`, is
+  not replaced either, and the message quotes it as written. `docs/plugin-root.md`, `docs/subagents.md` and
+  `docs/session.md` are corrected to match: they no longer say the token is unset in the VM shell on every
+  tier.
+- **The `csv-metrics` and `csv-fx-normalize` example skills find their bundled script inside the VM** when
+  the path written in for `${CLAUDE_PLUGIN_ROOT}` is a host path, as it is at host-loop, instead of failing
+  there. At `container` they run exactly as before.
 - **The companion skill now tells the agent to read its debugging reference first** when a run failed or a
   green looks wrong, instead of summarising part of it inline. The reference's triage separates a
   misbehaving skill from a green you don't trust, which the summary skipped.

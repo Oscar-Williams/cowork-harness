@@ -277,6 +277,14 @@ describe.skipIf(!can || !havePython)("cowork-harness lint-skill --ignore-rule (C
     expect(stdout).toMatch(/1 suppressed \(skill-body-over-reattach-cap ×1 by --ignore-rule\)/);
   });
 
+  it("the `--ignore-rule=<value>` form is forwarded too", () => {
+    const d = mkdtempSync(join(tmpdir(), "cwh-lint-skill-ignore-eq-"));
+    writeBigSkill(d);
+    const { code, stdout } = runCli(["lint-skill", d, "--ignore-rule=skill-body-over-reattach-cap", "--strict", "--output-format", "json"]);
+    expect(code).toBe(0);
+    expect(JSON.parse(stdout.trim()).suppressedCount).toBe(1);
+  });
+
   it("an unknown rule is a usage error (exit 2)", () => {
     const d = mkdtempSync(join(tmpdir(), "cwh-lint-skill-ignore-bad-"));
     writeBigSkill(d);

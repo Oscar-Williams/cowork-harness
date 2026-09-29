@@ -389,6 +389,19 @@ describe.skipIf(!havePython)("lint-skill — plugin-root message per form", () =
     expect(hit?.fix).not.toMatch(/only reaches a host-side file tool/i);
   });
 
+  it("a line with both forms gets the braced message", () => {
+    expect(hitFor('cp "${CLAUDE_PLUGIN_ROOT}/a" "$CLAUDE_PLUGIN_ROOT/b"')?.message).toMatch(
+      /replaces it with a path when the skill loads/i,
+    );
+  });
+
+  it("a braced form with an operator is not replaced, and the message echoes it as written", () => {
+    const hit = hitFor('python3 "${CLAUDE_PLUGIN_ROOT:-/opt/p}/x.py"');
+    expect(hit?.message).toContain("`${CLAUDE_PLUGIN_ROOT:-/opt/p}`");
+    expect(hit?.message).toMatch(/does not replace/i);
+    expect(hit?.message).not.toContain("`$CLAUDE_PLUGIN_ROOT`");
+  });
+
   it("the Bash() directive context gets the same per-form message", () => {
     expect(hitFor("Run Bash(python3 ${CLAUDE_PLUGIN_ROOT}/x.py) first.", false)?.message).toMatch(
       /replaces it with a path when the skill loads/i,
@@ -615,10 +628,33 @@ describe.skipIf(!havePython)("lint-skill — per-rule suppression", () => {
       expect(caps.find((x) => x.file.includes("beta"))?.suppressed).toBeUndefined();
     });
 
-    it("the glob also matches the path relative to the argument it came from", () => {
+    it("the glob also matches the path relative to the argument's PARENT, so it names the skill dir", () => {
       const d = skill(["# S", "", BIG]);
-      const r = run([d, "--json", "--strict", "--ignore-rule", "skill-body-over-reattach-cap=SKILL.md"]);
+      const name = d.split(/[\\/]/).pop();
+      const r = run([d, "--json", "--strict", "--ignore-rule", `skill-body-over-reattach-cap=${name}/SKILL.md`]);
       expect(r.status).toBe(0);
+    });
+
+    it("one dir per skill: `=a/SKILL.md` covers only a; a bare `=SKILL.md` covers neither (never every skill)", () => {
+      const root = mkdtempSync(join(tmpdir(), "cwh-skill-sup-base-"));
+      for (const n of ["a", "b"]) {
+        mkdirSync(join(root, n));
+        writeFileSync(join(root, n, "SKILL.md"), ["# S", "", "```bash", FWD, "```", ""].join("\n"));
+      }
+      const args = [join(root, "a"), join(root, "b"), "--json", "--strict"];
+      const scoped = run([...args, "--ignore-rule", "plugin-root-in-vm-bash=a/SKILL.md"]);
+      const hits = scoped.findings.filter((x) => x.rule === "plugin-root-in-vm-bash");
+      expect(hits.map((x) => [x.file.endsWith(join("a", "SKILL.md")), x.suppressed?.by ?? null])).toEqual([
+        [true, "flag"],
+        [false, null],
+      ]);
+      // A SKILL.md argument resolves to the same base as its directory.
+      const fileArgs = run([join(root, "a", "SKILL.md"), "--json", "--strict", "--ignore-rule", "plugin-root-in-vm-bash=a/SKILL.md"]);
+      expect(fileArgs.status).toBe(0);
+      const bare = run([...args, "--ignore-rule", "plugin-root-in-vm-bash=SKILL.md"]);
+      expect(bare.findings.filter((x) => x.suppressed)).toEqual([]);
+      expect(bare.findings.some((x) => x.rule === "lint-skill-ignore-unused")).toBe(true);
+      expect(bare.status).toBe(1);
     });
 
     it("an --ignore-rule that suppresses nothing is INFO lint-skill-ignore-unused, per (id, glob); --strict still 0", () => {
@@ -692,6 +728,29 @@ describe.skipIf(!havePython)("lint-skill — per-rule suppression", () => {
       const r = run([d, "--json", "--strict"]);
       expect(r.status).toBe(1);
       expect(r.findings.find((x) => x.rule === "plugin-root-in-vm-bash")?.suppressed).toBeUndefined();
+      expect(r.findings.some((x) => x.rule.startsWith("lint-skill-ignore"))).toBe(false);
+    });
+
+    it("a marker indented 4+ spaces is indented code, not a marker; up to 3 spaces is still a marker", () => {
+      const four = skill(["# S", "", "    " + START, "```bash", FWD, "```", "    " + END, ""]);
+      const r4 = run([four, "--json", "--strict"]);
+      expect(r4.status).toBe(1);
+      expect(r4.findings.find((x) => x.rule === "plugin-root-in-vm-bash")?.suppressed).toBeUndefined();
+      const three = skill(["# S", "", "   " + START, "```bash", FWD, "```", "   " + END, ""]);
+      expect(run([three, "--json", "--strict"]).status).toBe(0);
+    });
+
+    it("a 4-backtick fence holding a ``` line: the marker parser and the linter agree it is still open", () => {
+      // If the marker parser closed the fence at the inner ``` (as a naive rule would), it would honour the
+      // markers below and suppress the second hit. Both scanners must keep the fence open until ````.
+      const d = skill(["# S", "", "````bash", FWD, "```", START, FWD, END, "````", ""]);
+      const r = run([d, "--json", "--strict"]);
+      expect(r.status).toBe(1);
+      const hits = r.findings.filter((x) => x.rule === "plugin-root-in-vm-bash");
+      expect(hits.map((x) => [x.line, x.suppressed ?? null])).toEqual([
+        [4, null],
+        [7, null],
+      ]);
       expect(r.findings.some((x) => x.rule.startsWith("lint-skill-ignore"))).toBe(false);
     });
 

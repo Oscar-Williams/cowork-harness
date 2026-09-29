@@ -1869,10 +1869,10 @@ def cmd_lint(args):
 # v1 declines to do.
 
 _PLUGIN_ROOT_TOKEN = re.compile(r"\$\{?CLAUDE_PLUGIN_ROOT\}?")
-# A runtime SELF-HEAL for a dead ${CLAUDE_PLUGIN_ROOT}: discovering the real mount under /sessions at run
+# A runtime SELF-HEAL for a ${CLAUDE_PLUGIN_ROOT} path the VM does not have at host-loop: discovering the real mount under /sessions at run
 # time (the prescribed pattern — e.g. `[ -d "$X" ] || X=$(find /sessions ... -name ...)`, or an inline
 # `|| python3 "$(find /sessions ...)"`). When a bash block that uses the token ALSO contains a `find` over
-# /sessions, the token is dead but the block rescues it → downgrade the WARN to INFO (Item 4). Conservative:
+# /sessions, the block rescues a path the VM does not have at host-loop → downgrade the WARN to INFO (Item 4). Conservative:
 # we do NOT verify the find pattern actually matches the plugin's layout (hence the INFO's "not validated").
 _SELF_HEAL = re.compile(r"\bfind\b[^\n]*/sessions")
 # Opening/closing fence: ``` or ~~~ (>=3), optional info string (language).
@@ -1894,6 +1894,8 @@ _JSON_FENCE_LANGS = {"json", "jsonc", "json5"}
 # The agent replaces only the literal BRACED token in a plugin skill's text when the skill loads; a bare
 # `$CLAUDE_PLUGIN_ROOT` (or `${CLAUDE_PLUGIN_ROOT:-…}`) is left for the shell, which reads the environment.
 _PLUGIN_ROOT_BRACED = re.compile(r"\$\{CLAUDE_PLUGIN_ROOT\}")
+# The form as written, for the message: `${CLAUDE_PLUGIN_ROOT:-…}` or a bare `$CLAUDE_PLUGIN_ROOT`.
+_PLUGIN_ROOT_WRITTEN = re.compile(r"\$\{CLAUDE_PLUGIN_ROOT[^}]*\}|\$CLAUDE_PLUGIN_ROOT\b")
 _IGNORE_MARKER_EXAMPLE = (
     "`<!-- lint-skill: ignore-start plugin-root-in-vm-bash: <why the host path is right> -->` … "
     "`<!-- lint-skill: ignore-end -->`"
@@ -1920,9 +1922,11 @@ def _finding_plugin_root(path, line, ctx_label, text):
             f"fence in {_IGNORE_MARKER_EXAMPLE}."
         )
     else:
+        m = _PLUGIN_ROOT_WRITTEN.search(text)
+        written = m.group(0) if m else "$CLAUDE_PLUGIN_ROOT"
         message = (
-            f"`$CLAUDE_PLUGIN_ROOT` in an in-VM bash context ({ctx_label}): the agent does not replace this "
-            "form in a skill's text (only the braced `${CLAUDE_PLUGIN_ROOT}`), so the VM shell reads the "
+            f"`{written}` in an in-VM bash context ({ctx_label}): the agent does not replace this "
+            "form in a skill's text (only the exact braced `${CLAUDE_PLUGIN_ROOT}`), so the VM shell reads the "
             "environment variable, which is empty at host-loop (Cowork's default); a path built from it "
             "points nowhere."
         )
@@ -1938,7 +1942,8 @@ def _finding_plugin_root_guarded(path, line, ctx_label):
         "INFO",
         "plugin-root-guarded",
         f"`${{CLAUDE_PLUGIN_ROOT}}` used in an in-VM bash context ({ctx_label}), but the same block "
-        "self-heals it (a runtime `find` under /sessions) — the dead token is harmless here.",
+        "self-heals it (a runtime `find` under /sessions), so the path the VM does not have at host-loop is "
+        "harmless here.",
         "Guard not validated: the linter does not check the `find` pattern actually matches the plugin's "
         "layout. Prefer resolving the mount from the script's own location over a find-fallback.",
         path,
@@ -2999,12 +3004,13 @@ def _ignore_rule_spec(value):
 
 
 # A marker line, outside any fence: an HTML comment (recommended), a `[//]: # (…)` link comment, or a bare
-# line, each optionally as a list item. A `>` blockquote line never matches. The reason separator is `:`,
+# line, each optionally as a list item, indented at most 3 spaces (4 is indented code in CommonMark). A `>`
+# blockquote line never matches. The reason separator is `:`,
 # because an HTML comment may not contain `--`.
 _MARKER_RES = (
-    re.compile(r"^\s*(?:[-*]\s+)?<!--\s*lint-skill:\s*(ignore-start|ignore-end)(?:\s+(.*?))?\s*-->\s*$"),
-    re.compile(r"^\s*(?:[-*]\s+)?\[[^\]]*\]:\s*#\s*\(\s*lint-skill:\s*(ignore-start|ignore-end)(?:\s+(.*?))?\s*\)\s*$"),
-    re.compile(r"^\s*(?:[-*]\s+)?lint-skill:\s*(ignore-start|ignore-end)(?:\s+(.*?))?\s*$"),
+    re.compile(r"^ {0,3}(?:[-*]\s+)?<!--\s*lint-skill:\s*(ignore-start|ignore-end)(?:\s+(.*?))?\s*-->\s*$"),
+    re.compile(r"^ {0,3}(?:[-*]\s+)?\[[^\]]*\]:\s*#\s*\(\s*lint-skill:\s*(ignore-start|ignore-end)(?:\s+(.*?))?\s*\)\s*$"),
+    re.compile(r"^ {0,3}(?:[-*]\s+)?lint-skill:\s*(ignore-start|ignore-end)(?:\s+(.*?))?\s*$"),
 )
 
 
@@ -3091,12 +3097,14 @@ def _lint_skill_markers(path, raw_lines):
     return ranges, diags
 
 
-def _glob_matches(glob, file, root):
+def _glob_matches(glob, file, base):
     """`--ignore-rule <id>=<glob>`: fnmatch (a `*` also crosses `/`) against the finding's `file` as printed,
-    or against that path relative to the argument it came from."""
+    or against that path relative to the PARENT of the skill directory it came from, so the relative form
+    always starts with the skill's own directory name (`deck-review/SKILL.md`). A bare `SKILL.md` therefore
+    cannot silently cover every skill in a run that passes one directory per skill."""
     cand = [Path(file).as_posix()]
     try:
-        cand.append(Path(os.path.relpath(file, root)).as_posix())
+        cand.append(Path(os.path.relpath(Path(file).resolve(), base)).as_posix())
     except ValueError:
         pass
     return any(fnmatch.fnmatchcase(c, glob) for c in cand)
@@ -3144,12 +3152,12 @@ def _apply_suppressions(tagged, ranges, specs):
 
 def cmd_lint_skill(args):
     all_findings = []
-    tagged = []  # (finding, the argument's directory) — the base an --ignore-rule glob is also tried against
+    tagged = []  # (finding, the parent of the argument's skill dir) — the base an --ignore-rule glob is also tried against
     ranges = []
     n_files = 0
     for arg in args.paths:
         start = len(all_findings)
-        root = arg if Path(arg).is_dir() else str(Path(arg).parent)
+        root = (Path(arg) if Path(arg).is_dir() else Path(arg).parent).resolve().parent
         md, hooks = _resolve_skill_targets(arg)
         if md is None and not hooks:
             all_findings.append(
@@ -3427,7 +3435,9 @@ def main(argv=None):
             "host-side hook write is not VM-visible (works in the CLI, silently no-ops in Cowork).\n\n"
             "HONEST LIMITS (v1 is deliberately narrow to bound false positives): an in-VM bash context is "
             "ONLY a fenced ```bash/```sh/```shell block or a Bash(...) directive (a hook command gets a "
-            "plugin-root path valid where it runs, so it is checked for (b) only). Host-side prose and Read/Grep directives (the correct way to read a "
+            "plugin-root path valid where it runs, so it is checked for (b) only). Every `\"command\"` value in "
+            "a ```json/```jsonc/```json5 fence in SKILL.md is read as a hook command, so a JSON example of a "
+            "Bash tool input there is not checked for (a). Host-side prose and Read/Grep directives (the correct way to read a "
             "reference via ${CLAUDE_PLUGIN_ROOT}/...) are left alone. False negatives are expected: a token "
             "in an indented/unfenced shell snippet won't be caught.\n\n"
             "Also statically resolves any pinned `subagent_type` value in the SKILL.md against the "
@@ -3482,8 +3492,10 @@ def main(argv=None):
         action="append",
         type=_ignore_rule_spec,
         metavar="RULE[=GLOB]",
-        help="suppress a reviewed WARN/INFO rule (repeatable). With `=GLOB`, only in files whose path, as "
-        "printed or relative to the argument, matches (fnmatch; `*` also crosses `/`). A suppressed finding is "
+        help="suppress a reviewed WARN/INFO rule (repeatable). With `=GLOB`, only in files whose path matches "
+        "(fnmatch; `*` also crosses `/`), either as printed or relative to the parent of the skill directory, "
+        "so the relative form starts with the skill's directory name: `deck-review/SKILL.md`, "
+        "`deck-review/references/*`. A bare `SKILL.md` matches no skill passed by directory. A suppressed finding is "
         "still reported (it keeps its severity; `--json` adds a `suppressed` record) but no longer gates. "
         "An unknown rule, or a provable one (ERROR, `hooks-json-misplaced`, `subagent-type-not-found-in-plugin`), "
         "is a usage error. Unscoped, it also hides the next new finding of that rule in any file.",
