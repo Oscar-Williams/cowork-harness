@@ -32,6 +32,11 @@ agent stderr) — read those before re-running; a re-record rarely tells you mor
 already does.
 <!-- END triage-canonical -->
 
+**microvm: "control-protocol write failed" with `env: 'claude': No such file or directory` in the agent
+stderr** usually means the VM never finished provisioning (the agent never reached PATH). Check
+`cowork-harness vm status` — a `provisioning` other than `ready` confirms it — and if a run does not
+recover it on its own, `cowork-harness vm delete` and retry.
+
 **Is it your skill's bug, or a known harness gap?** Before deep-debugging a wrong behavior, rule out a
 **deliberate fidelity gap** — the harness intentionally does *not* reproduce a few real-Cowork behaviors,
 so a "bug" you see here that real Cowork also has isn't yours to fix. The tier semantics are in

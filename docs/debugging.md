@@ -117,6 +117,11 @@ already happened.
    promote a finding to a scenario afterward) are in
    [scenario.md → Debugging with `chat`](./scenario.md#debugging-with-chat).
 
+**microvm: "control-protocol write failed" with `env: 'claude': No such file or directory` in the agent
+stderr** usually means the VM never finished provisioning (the agent never reached PATH). Check
+`cowork-harness vm status` — a `provisioning` other than `ready` confirms it — and if a run does not
+recover it on its own, `cowork-harness vm delete` and retry.
+
 > The cheap authoring loop falls out of this: keep **one** run, then iterate answers and assertions
 > against it with `trace` + `verify-run` for free. Re-keep after a skill change that moves gate phrasing —
 > a kept run is a snapshot, not a live mirror.

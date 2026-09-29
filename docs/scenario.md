@@ -1386,8 +1386,9 @@ local install paths. Remove an orphaned VM with `vm prune`.
   its provisioning (the apt/toolchain install and the agent symlink) did not complete. Before a run uses
   a Running VM, the harness checks that Lima's boot scripts finished and the agent is on PATH: a VM still
   provisioning is waited for (up to `COWORK_VM_PROVISION_TIMEOUT_S`, default 900 s), and one whose egress
-  firewall was applied before provisioning finished is restarted once to recover. If provisioning ended
-  without the agent, or the restart did not help, delete it and retry: `cowork-harness vm delete`.
+  firewall was applied before provisioning finished (whether provisioning is still stuck or has since given
+  up) is restarted once to recover. If provisioning ended without the agent, or the restart failed or did
+  not help, delete it and retry: `cowork-harness vm delete`.
   `vm status` shows the state (`provisioning` in its JSON output; the text output appends it when the
   VM is Running but not ready), and so does `doctor --tier microvm`.
 - **A run errors with "not mounted — VM not provisioned for this harness config"** — the VM predates a
