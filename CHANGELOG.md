@@ -11,7 +11,7 @@ All notable changes to this project are documented here. The format is based on
 - **`lint-skill` per-rule suppression, so `--strict` can stay the gate over a reviewed finding.**
   `--ignore-rule <rule>[=<glob>]` (repeatable) applies to the whole run, or only to files matching the glob
   (as printed, or relative to the parent of the skill directory, so the glob names the skill:
-  `deck-review/SKILL.md`; a bare `SKILL.md` matches no skill passed by directory). It is the only form for a
+  `deck-review/SKILL.md`; a bare `SKILL.md` matches no skill passed as `<dir>/`). It is the only form for a
   finding with no line, such as the size caps. Unscoped, it also hides the next new finding of that rule in
   any file, so scope it when you lint more than one skill. In a `SKILL.md`,
   `<!-- lint-skill: ignore-start <rule>[,<rule>…]: <reason> -->` … `<!-- lint-skill: ignore-end -->`
@@ -50,8 +50,10 @@ All notable changes to this project are documented here. The format is based on
 
 - **`lint-skill` no longer flags `${CLAUDE_PLUGIN_ROOT}` in a hook command.** A plugin hook gets a path valid
   where it runs (the agent substitutes the token when it runs the hook, and sets the variable), so the
-  `plugin-root-in-vm-bash` WARN there was a false positive. `hook-host-side-write` still checks the same
-  command.
+  `plugin-root-in-vm-bash` WARN there was a false positive. The exemption covers every `"command"` value the
+  linter reads as a hook command: in a `hooks.json`, and in any ```` ```json ```` fence in a `SKILL.md` (so a
+  JSON example of a Bash tool input there is not checked for it either). `hook-host-side-write` still checks
+  the same command.
 - **The example scenarios and the scenario docs no longer deny a harmless command in their Bash `allow_if`.**
   `!command.includes('rm')` also matched "normalize", "format" or "confirm", so `csv-fx-normalize` denied
   its own producer; they now use a word match, `!/\brm\b/.test(command)`, in single-quoted YAML so the

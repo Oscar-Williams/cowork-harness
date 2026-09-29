@@ -130,9 +130,9 @@ cowork-harness lint-skill path/to/skill/
 
 It warns on `${CLAUDE_PLUGIN_ROOT}` in an in-VM bash context (fenced `bash`/`sh` blocks and `Bash(...)`
 directives; the message says which of the two forms above you wrote and what happens to it) and on a hook
-that exports an env var / writes `/tmp` for the in-VM agent — while leaving correct host-side `Read`/`Grep` references untouched. It is a narrow,
-heuristic v1 (see its `--help` for the documented limits), so treat a clean result as "no *obvious*
-footgun," not a proof.
+that exports an env var / writes `/tmp` for the in-VM agent — while leaving correct host-side
+`Read`/`Grep` references untouched. It is a narrow, heuristic v1 (see its `--help` for the documented
+limits), so treat a clean result as "no *obvious* footgun," not a proof.
 
 **A reviewed forwarding site** ([above](#a-value-you-forward-to-a-host-side-file-tool)) is suppressed in
 place, with the reason, by wrapping the whole fence in markers (a marker inside the fence is ignored):

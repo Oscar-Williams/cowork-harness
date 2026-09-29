@@ -1651,7 +1651,9 @@ def lint_file(path):
 SEV_ORDER = {"ERROR": 0, "WARN": 1, "INFO": 2}
 
 
-def _print_findings(findings, n_files, kind="scenario", clean_suffix=" — no silent-false-green findings.", suppression=False):
+def _print_findings(
+    findings, n_files, kind="scenario", clean_suffix=" — no silent-false-green findings.", suppression=False
+):
     """`suppression=True` is lint-skill's renderer: a suppressed finding gets the ⊘ glyph and a note, the
     counts cover only the findings still in play, and the summary names what was suppressed. `lint` never
     passes it, so its output is unchanged."""
@@ -1869,11 +1871,12 @@ def cmd_lint(args):
 # v1 declines to do.
 
 _PLUGIN_ROOT_TOKEN = re.compile(r"\$\{?CLAUDE_PLUGIN_ROOT\}?")
-# A runtime SELF-HEAL for a ${CLAUDE_PLUGIN_ROOT} path the VM does not have at host-loop: discovering the real mount under /sessions at run
-# time (the prescribed pattern — e.g. `[ -d "$X" ] || X=$(find /sessions ... -name ...)`, or an inline
-# `|| python3 "$(find /sessions ...)"`). When a bash block that uses the token ALSO contains a `find` over
-# /sessions, the block rescues a path the VM does not have at host-loop → downgrade the WARN to INFO (Item 4). Conservative:
-# we do NOT verify the find pattern actually matches the plugin's layout (hence the INFO's "not validated").
+# A runtime SELF-HEAL for a ${CLAUDE_PLUGIN_ROOT} path the VM does not have at host-loop: discovering the
+# real mount under /sessions at run time (the prescribed pattern — e.g.
+# `[ -d "$X" ] || X=$(find /sessions ... -name ...)`, or an inline `|| python3 "$(find /sessions ...)"`).
+# When a bash block that uses the token ALSO contains a `find` over /sessions, the block rescues that path
+# → downgrade the WARN to INFO. Conservative: we do NOT verify the find pattern actually matches the
+# plugin's layout (hence the INFO's "not validated").
 _SELF_HEAL = re.compile(r"\bfind\b[^\n]*/sessions")
 # Opening/closing fence: ``` or ~~~ (>=3), optional info string (language).
 _FENCE = re.compile(r"^\s*(`{3,}|~{3,})\s*([A-Za-z0-9_+-]*)\s*$")
@@ -3007,10 +3010,12 @@ def _ignore_rule_spec(value):
 # line, each optionally as a list item, indented at most 3 spaces (4 is indented code in CommonMark). A `>`
 # blockquote line never matches. The reason separator is `:`,
 # because an HTML comment may not contain `--`.
+# `ignore-start: reason` (no rule) still parses as a marker, so it is reported rather than silently inert.
+_MARKER_WORD = r"lint-skill:\s*(ignore-start|ignore-end)(?:(?:\s+|(?=:))(.*?))?"
 _MARKER_RES = (
-    re.compile(r"^ {0,3}(?:[-*]\s+)?<!--\s*lint-skill:\s*(ignore-start|ignore-end)(?:\s+(.*?))?\s*-->\s*$"),
-    re.compile(r"^ {0,3}(?:[-*]\s+)?\[[^\]]*\]:\s*#\s*\(\s*lint-skill:\s*(ignore-start|ignore-end)(?:\s+(.*?))?\s*\)\s*$"),
-    re.compile(r"^ {0,3}(?:[-*]\s+)?lint-skill:\s*(ignore-start|ignore-end)(?:\s+(.*?))?\s*$"),
+    re.compile(r"^ {0,3}(?:[-*]\s+)?<!--\s*" + _MARKER_WORD + r"\s*-->\s*$"),
+    re.compile(r"^ {0,3}(?:[-*]\s+)?\[[^\]]*\]:\s*#\s*\(\s*" + _MARKER_WORD + r"\s*\)\s*$"),
+    re.compile(r"^ {0,3}(?:[-*]\s+)?" + _MARKER_WORD + r"\s*$"),
 )
 
 
@@ -3152,7 +3157,8 @@ def _apply_suppressions(tagged, ranges, specs):
 
 def cmd_lint_skill(args):
     all_findings = []
-    tagged = []  # (finding, the parent of the argument's skill dir) — the base an --ignore-rule glob is also tried against
+    # (finding, the parent of the argument's skill dir) — the base an --ignore-rule glob is also tried against
+    tagged = []
     ranges = []
     n_files = 0
     for arg in args.paths:
@@ -3495,7 +3501,7 @@ def main(argv=None):
         help="suppress a reviewed WARN/INFO rule (repeatable). With `=GLOB`, only in files whose path matches "
         "(fnmatch; `*` also crosses `/`), either as printed or relative to the parent of the skill directory, "
         "so the relative form starts with the skill's directory name: `deck-review/SKILL.md`, "
-        "`deck-review/references/*`. A bare `SKILL.md` matches no skill passed by directory. A suppressed finding is "
+        "`deck-review/references/*`. A bare `SKILL.md` matches no skill passed as `<dir>/`. A suppressed finding is "
         "still reported (it keeps its severity; `--json` adds a `suppressed` record) but no longer gates. "
         "An unknown rule, or a provable one (ERROR, `hooks-json-misplaced`, `subagent-type-not-found-in-plugin`), "
         "is a usage error. Unscoped, it also hides the next new finding of that rule in any file.",

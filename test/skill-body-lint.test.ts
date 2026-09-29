@@ -832,6 +832,14 @@ describe.skipIf(!havePython)("lint-skill — per-rule suppression", () => {
       expect(bad[1].message).toMatch(/cannot be suppressed/);
     });
 
+    it("`ignore-start: reason` (a reason but no rule) is still a marker: WARN names no rule, on its line", () => {
+      const d = skill(["# S", "", "<!-- lint-skill: ignore-start: forwarded to the sub-agent -->", "```bash", FWD, "```", END, ""]);
+      const r = run([d, "--json"]);
+      const bad = r.findings.filter((x) => x.rule === "lint-skill-ignore-invalid");
+      expect(bad.map((x) => [x.line, /names no rule/.test(x.message)])).toEqual([[3, true]]);
+      expect(r.findings.find((x) => x.rule === "plugin-root-in-vm-bash")?.suppressed).toBeUndefined();
+    });
+
     it("a marker range that suppresses nothing is INFO lint-skill-ignore-unused; --strict 0", () => {
       const d = skill(["# S", "", START, "Nothing to see.", END, ""]);
       const r = run([d, "--json", "--strict"]);
