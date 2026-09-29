@@ -13,6 +13,10 @@ All notable changes to this project are documented here. The format is based on
   problem on its own, but the capability probe may have cached an empty toolchain for that VM: delete
   `capability-cache.json` from the runs root (`~/.cowork-harness/runs/` unless you set
   `COWORK_HARNESS_RUNS_DIR`) so it is probed again.
+- **Redaction policy copied by `init-redact`:** the fix below that keeps `/private/var/empty` is in the
+  packaged reference policy. A copy made by an earlier `init-redact` keeps redacting it; re-run
+  `init-redact --force` (after saving any tailoring) or add the same lookahead to your two `/private/var/`
+  rules. Cassettes already committed are unaffected.
 
 ### Fixed
 
@@ -30,6 +34,12 @@ All notable changes to this project are documented here. The format is based on
   reports the state (a new `provisioning` field in its JSON output: `ready`, `pending`, `sealed`,
   `failed`, or `null` when the VM is not Running), and `doctor --tier microvm` no longer calls a Running
   VM "provisioned" until it is.
+- **The reference redaction policy keeps `/private/var/empty`.** From Desktop 2.7032.0 the host-loop agent
+  runs at `/var/empty` and reports its realpath, a system path that identifies no one. `verify-cassettes`
+  already called it clean, but the policy `init-redact` copies rewrote it, so a cassette lost the evidence
+  of where the agent ran. The policy now keeps it (and any path under it with no `..` segment) exactly where
+  the scanner calls it clean; the scanner in turn now matches it case-insensitively and when it is quoted in
+  backticks, as the policy does.
 
 ## [4.0.0] — 2026-09-29
 

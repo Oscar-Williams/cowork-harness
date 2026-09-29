@@ -375,3 +375,58 @@ describe("data-volume paths after a non-boundary char, and host paths in a URL q
     }
   });
 });
+
+// From Desktop 2.7032.0 the host-loop agent's cwd is `/var/empty`, reported as its realpath
+// `/private/var/empty` — a system constant that identifies no one. The scanner already treated it as
+// clean; the reference policy rewrote it anyway, so a cassette lost the evidence of where the agent ran.
+// The two layers must now agree on every shape: the policy keeps exactly what the scanner calls clean.
+describe("/private/var/empty — kept by the policy exactly where the scanner calls it clean", () => {
+  const KEPT = [
+    "/private/var/empty",
+    '"/private/var/empty"',
+    "cwd: /private/var/empty\n",
+    "cwd is `/private/var/empty` here",
+    "(/private/var/empty)",
+    "/private/var/empty/",
+    "/private/var/empty/x",
+    "ls /private/var/empty/a/b.txt done",
+    "/PRIVATE/VAR/EMPTY",
+    "/private/var/empty/..foo",
+  ];
+  const REDACTED = [
+    "/private/var/emptyish/x",
+    "/private/var/folders/ab/x",
+    "/private/var/empty/../../Users/a",
+    "/private/var/empty/..",
+    "/private/var/empty/x/../../../Users/a",
+    // Trailing punctuation is not a delimiter in either layer, so a sentence-final path is not exempt.
+    "ran in /private/var/empty.",
+    "/private/var/empty,/private/var/folders/q",
+  ];
+
+  for (const s of KEPT)
+    it(`keeps ${JSON.stringify(s)}`, () => {
+      expect(redactText(s, POLICY)).toBe(s);
+      expect(pathFindings(s)).toEqual([]);
+    });
+
+  for (const s of REDACTED)
+    it(`still redacts ${JSON.stringify(s)}`, () => {
+      expect(redactText(s, POLICY)).not.toBe(s);
+      expect(pathFindings(s).length).toBeGreaterThan(0);
+    });
+
+  it("parity: for every shape, scanner-clean ⇔ policy-keeps", () => {
+    for (const s of [...KEPT, ...REDACTED])
+      expect({ s, kept: redactText(s, POLICY) === s }).toEqual({ s, kept: pathFindings(s).length === 0 });
+  });
+
+  it("a host root after the `]`/backtick cut keeps the scanner finding", () => {
+    expect(pathFindings("/private/var/empty]/../../Users/alice/x").length).toBeGreaterThan(0);
+  });
+
+  it("the /mnt/-anchored rule keeps it too, and still redacts a real temp root before /mnt/", () => {
+    expect(redactText("/private/var/empty/mnt/outputs/x", POLICY)).toBe("/private/var/empty/mnt/outputs/x");
+    expect(redactText(PRIVATE_VAR_FOLDERS, POLICY)).not.toContain("alice");
+  });
+});

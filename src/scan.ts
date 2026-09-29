@@ -370,9 +370,19 @@ function allowed(sample: string, cls: string, allow: AllowPattern[]): boolean {
 
 /** macOS system paths that identify no one and appear in ordinary recordings: from Desktop 2.7032.0 the
  *  host-loop agent runs at `/var/empty` and reports its realpath. Exact directory, or a path under it with
- *  no `..` segment (which could walk out of it into a path that does identify someone). */
+ *  no `..` segment (which could walk out of it into a path that does identify someone).
+ *
+ *  The reference redaction policy (`.cowork-redact.json`) keeps the same set, so a redacted recording is
+ *  exactly as clean as this scanner says: compared case-insensitively (the path class and the policy both
+ *  match with `i`), and cut at `]` or a backtick, which end a path in the policy but not in this pattern
+ *  (a backtick-quoted `/private/var/empty` would otherwise carry the closing backtick into the sample). A
+ *  trailing `.`, `,` or `;` ends it in neither, so `/private/var/empty.` is not exempt in either layer. */
 const SYSTEM_CONSTANT_PATHS = ["/private/var/empty"];
-function isSystemConstantPath(p: string): boolean {
+function isSystemConstantPath(sample: string): boolean {
+  const cut = sample.search(/[\]`]/);
+  const p = (cut === -1 ? sample : sample.slice(0, cut)).toLowerCase();
+  // Whatever follows the cut is still part of this one finding; if it names a host root, the finding stays.
+  if (cut !== -1 && /\/(?:users|home|root|private|var|system|volumes)\//i.test(sample.slice(cut))) return false;
   if (p.split("/").includes("..")) return false;
   return SYSTEM_CONSTANT_PATHS.some((c) => p === c || p.startsWith(`${c}/`));
 }
