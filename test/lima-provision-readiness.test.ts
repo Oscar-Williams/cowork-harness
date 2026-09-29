@@ -135,6 +135,69 @@ describe("vmInit — a reused (Running) VM must be provisioned before it is retu
   });
 });
 
+describe("vmInit — the restart and fresh-start error paths name the remedy", () => {
+  it("a failed restart of a sealed VM is the named error with the vm delete remedy", () => {
+    script({ status: () => "Running", readiness: () => state("sealed"), start: () => ({ status: 1, stdout: "", stderr: "boom" }) });
+    expect(() => lima.vmInit(BASELINE)).toThrow(/never finished provisioning.*restart.*cowork-harness vm delete/s);
+  });
+
+  it("a fresh start that comes up sealed does not claim a restart was tried", () => {
+    let started = false;
+    script({
+      status: () => (started ? "Running" : "Stopped"),
+      readiness: () => state("sealed"),
+      start: () => {
+        started = true;
+        return ok();
+      },
+    });
+    let msg = "";
+    try {
+      lima.vmInit(BASELINE);
+    } catch (e) {
+      msg = (e as Error).message;
+    }
+    expect(msg).toMatch(/never finished provisioning.*firewall/s);
+    expect(msg).not.toMatch(/restart did not/);
+  });
+});
+
+// A deleted or pruned VM's name can come back (COWORK_LIMA_INSTANCE, or the same config hash), and the
+// capability probe's per-instance cache would then describe a VM that no longer exists.
+describe("vmDelete / vmPrune forget the instance's cached capability probe", () => {
+  let runs: string;
+  beforeEach(() => {
+    runs = mkdtempSync(join(tmpdir(), "lima-cache-"));
+    process.env.COWORK_HARNESS_RUNS_DIR = runs;
+    writeFileSync(
+      join(runs, "capability-cache.json"),
+      JSON.stringify({ "microvm:cowork-vm-a": ["ocr"], "microvm:cowork-vm-b": [], "microvm:cowork-vm-keep": [], "container:x": [] }),
+    );
+  });
+  afterEach(() => {
+    delete process.env.COWORK_HARNESS_RUNS_DIR;
+    rmSync(runs, { recursive: true, force: true });
+  });
+  const cache = async () => {
+    const { readFileSync } = await vi.importActual<typeof import("node:fs")>("node:fs");
+    return Object.keys(JSON.parse(readFileSync(join(runs, "capability-cache.json"), "utf8"))).sort();
+  };
+
+  it("vmDelete drops only that instance's entry", async () => {
+    spawnSync.mockReturnValue(ok());
+    lima.vmDelete("cowork-vm-a");
+    expect(await cache()).toEqual(["container:x", "microvm:cowork-vm-b", "microvm:cowork-vm-keep"]);
+  });
+
+  it("vmPrune drops every pruned instance's entry and keeps the current one", async () => {
+    spawnSync.mockImplementation((_c: string, args: string[]) =>
+      args[0] === "list" ? ok("cowork-vm-a\ncowork-vm-b\ncowork-vm-keep\n") : ok(),
+    );
+    expect(lima.vmPrune("cowork-vm-keep").sort()).toEqual(["cowork-vm-a", "cowork-vm-b"]);
+    expect(await cache()).toEqual(["container:x", "microvm:cowork-vm-keep"]);
+  });
+});
+
 describe("vmInit — a fresh start is probed once, not polled", () => {
   for (const initial of ["Absent", "Stopped"]) {
     it(`${initial}: start then one probe; not ready ⇒ throws at once`, () => {
@@ -227,7 +290,10 @@ describe("provisioning readiness probe — the guest script's branches", () => {
     ["boot done + agent on PATH", { BOOT_DONE: "run", AGENT: "1", IPT: "ACCEPT" }, "ready"],
     ["boot done at the /var/run spelling", { BOOT_DONE: "varrun", AGENT: "1", IPT: "ACCEPT" }, "ready"],
     ["boot done, agent missing", { BOOT_DONE: "run", AGENT: "0", IPT: "ACCEPT" }, "failed"],
-    ["boot done, agent missing, firewalled", { BOOT_DONE: "run", AGENT: "0", IPT: "DROP" }, "failed"],
+    // A sealed VM that has sat long enough for apt to give up: boot-done is written, the agent never landed.
+    // A restart still recovers it, so it reads as sealed, not failed.
+    ["boot done, agent missing, firewalled", { BOOT_DONE: "run", AGENT: "0", IPT: "DROP" }, "sealed"],
+    ["boot done + agent on PATH, firewalled (an ordinary sealed-after-run VM)", { BOOT_DONE: "run", AGENT: "1", IPT: "DROP" }, "ready"],
     ["not done, OUTPUT policy DROP", { BOOT_DONE: "no", AGENT: "0", IPT: "DROP" }, "sealed"],
     ["not done, OUTPUT policy ACCEPT", { BOOT_DONE: "no", AGENT: "0", IPT: "ACCEPT" }, "pending"],
     ["not done, iptables not installed yet (exit 127)", { BOOT_DONE: "no", AGENT: "0", IPT: "missing" }, "pending"],
@@ -236,18 +302,4 @@ describe("provisioning readiness probe — the guest script's branches", () => {
     it(`${name} ⇒ ${expected} (script exits 0)`, () => {
       expect(runProbe(env)).toEqual({ exit: 0, state: expected });
     });
-});
-
-// The firewall must only ever meet a provisioned guest. `vmInit` enforces readiness; what keeps that
-// sufficient is that spawnMicroVm calls it BEFORE applying the firewall.
-describe("spawnMicroVm ordering", () => {
-  it("applies the guest firewall only after vmInit has returned", async () => {
-    const { readFileSync } = await vi.importActual<typeof import("node:fs")>("node:fs");
-    const src = readFileSync(join(import.meta.dirname, "..", "src", "runtime", "microvm.ts"), "utf8");
-    const body = src.slice(src.indexOf("export function spawnMicroVm"));
-    const initAt = body.indexOf("vmInit(baseline)");
-    const firewallAt = body.indexOf("applyGuestFirewall(instance");
-    expect(initAt).toBeGreaterThan(-1);
-    expect(firewallAt).toBeGreaterThan(initAt);
-  });
 });

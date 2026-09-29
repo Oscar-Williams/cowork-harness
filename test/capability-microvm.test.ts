@@ -129,6 +129,24 @@ describe("probeMicrovmOmitted — silent vmStatus gate", () => {
     });
   }
 
+  it("runs the capability probe through the configured limactl (COWORK_LIMACTL), like every other Lima call", () => {
+    process.env.COWORK_LIMACTL = "/fake/bin/limactl";
+    try {
+      spawnSync.mockImplementation(
+        router(
+          () => listResult("Running"),
+          () => shellProbeResult(["ocr"]),
+        ),
+      );
+      probeMicrovmOmitted(INSTANCE);
+      const cmds = spawnSync.mock.calls.map((c: any) => c[0]);
+      expect(cmds.length).toBeGreaterThan(0);
+      expect(new Set(cmds)).toEqual(new Set(["/fake/bin/limactl"]));
+    } finally {
+      delete process.env.COWORK_LIMACTL;
+    }
+  });
+
   // execute.ts's pre-flight (finding 2 in the observability sweep) feeds probeMicrovmOmitted's result
   // straight into capabilityPreflightDecision. Pin the composition end-to-end: a not-yet-Running microvm
   // (the normal cold-start state at pre-flight time — the guest isn't up yet) must never abort the run

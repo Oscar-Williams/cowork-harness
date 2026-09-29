@@ -3,6 +3,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative, resolve } from "node:path";
+import { fakeLimactl } from "./helpers/fake-limactl.js";
 
 // COWORK_HARNESS_OUTPUT_FORMAT=json is documented as the default for `--output-format`, for EVERY command
 // that takes the flag. Several commands honoured it only on their error path (the shared `isJsonOutput`)
@@ -12,11 +13,12 @@ import { join, relative, resolve } from "node:path";
 //
 // The behavioural rows below are the real guard: each drives a token-free SUCCESS path twice — once with
 // the flag, once with only the env var — and requires the same single document (command, ok, exit code).
-// `vm status` needs limactl, so on a CI runner without it that row is skipped and only the structural scan
-// at the bottom covers `vm`.
+// `vm status` runs against a scripted limactl (macOS only — `vm` refuses other platforms), so off macOS that
+// row is skipped and only the structural scan at the bottom covers `vm`.
 const CLI = resolve("dist/cli.js");
 const can = existsSync(CLI);
-const hasLima = spawnSync("limactl", ["--version"], { encoding: "utf8" }).status === 0;
+// `vm` is macOS-only; its row talks to a scripted limactl, never to a VM on this machine.
+const notDarwin = process.platform !== "darwin";
 
 const work = mkdtempSync(join(tmpdir(), "json-env-parity-"));
 const runs = mkdtempSync(join(tmpdir(), "json-env-parity-runs-"));
@@ -25,6 +27,7 @@ const { COWORK_HARNESS_OUTPUT_FORMAT: _inherited, ...inheritedEnv } = process.en
 const baseEnv: NodeJS.ProcessEnv = {
   ...inheritedEnv,
   COWORK_HARNESS_RUNS_DIR: runs,
+  COWORK_LIMACTL: fakeLimactl({ status: "Running", provisioning: "ready" }),
   CLAUDE_CODE_OAUTH_TOKEN: "",
   ANTHROPIC_API_KEY: "",
   ANTHROPIC_AUTH_TOKEN: "",
@@ -110,7 +113,7 @@ const ROWS: [string, string[], boolean?][] = [
   ["replay <cassette>", ["replay", CASSETTE]],
   ["verify-cassettes <dir>", ["verify-cassettes", REPLAYS]],
   ["critique <skill> --corpus-only", ["critique", skill, "--corpus-only"]],
-  ["vm status", ["vm", "status"], !hasLima],
+  ["vm status", ["vm", "status"], notDarwin],
 ];
 
 describe.skipIf(!can)("COWORK_HARNESS_OUTPUT_FORMAT=json alone gives the same document as --output-format json", () => {

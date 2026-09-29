@@ -10,7 +10,11 @@ import { CASSETTE_VERSION } from "../src/run/cassette.js";
 // Exercises the built CLI's --output-format json envelope + exit codes. Token-free and spawn-free
 // (usage/boundary fail before any agent spawn; replay is deterministic). Needs `dist/cli.js`
 // (the `ci` script builds before testing); skips cleanly otherwise.
+import { fakeLimactl } from "./helpers/fake-limactl.js";
+
 const CLI = resolve("dist/cli.js");
+// `vm status` reaches Lima; these tests talk to a scripted limactl, never to a VM on this machine.
+const FAKE_LIMA = { COWORK_LIMACTL: fakeLimactl({ status: "Running", provisioning: "pending" }) };
 const can = existsSync(CLI);
 
 function run(args: string[], env?: NodeJS.ProcessEnv) {
@@ -719,7 +723,7 @@ describe.skipIf(!can)("cli --output-format json envelope + exit codes", () => {
     () => {
       // Pre-fix: loadBaseline(args[1]="--output-format") → ENOENT internal error. Now the flag parses and
       // an optional baseline is an independent positional; status emits the JSON envelope, exit 0.
-      const r = run(["vm", "status", "--output-format", "json"]);
+      const r = run(["vm", "status", "--output-format", "json"], FAKE_LIMA);
       expect(r.code).toBe(0);
       expect(r.json?.command).toBe("vm");
       expect(r.json?.subcommand).toBe("status");
@@ -731,27 +735,36 @@ describe.skipIf(!can)("cli --output-format json envelope + exit codes", () => {
   );
 
   it.skipIf(process.platform !== "darwin")("`vm status` (text) prints instance: status, exit 0", () => {
-    const r = run(["vm", "status"]);
+    const r = run(["vm", "status"], FAKE_LIMA);
     expect(r.code).toBe(0);
     expect(r.json).toBeNull(); // text mode → nothing parses as JSON
-    expect(r.stderr).toMatch(/:/); // `<instance>: <status>`
+    expect(r.stderr).toMatch(/: Running \(provisioning: pending\)/); // `<instance>: <status>`, + a not-ready state
+  });
+
+  it.skipIf(process.platform !== "darwin")("`vm status` on a stopped VM reports provisioning: null and never probes it", () => {
+    const r = run(["vm", "status", "--output-format", "json"], {
+      COWORK_LIMACTL: fakeLimactl({ status: "Stopped", provisioning: "ready" }),
+    });
+    expect(r.code).toBe(0);
+    expect(r.json?.status).toBe("Stopped");
+    expect(r.json?.provisioning).toBeNull();
   });
 
   it.skipIf(process.platform !== "darwin")("`vm status latest` (explicit baseline) works in text mode", () => {
-    const r = run(["vm", "status", "latest"]);
+    const r = run(["vm", "status", "latest"], FAKE_LIMA);
     expect(r.code).toBe(0);
     expect(r.stderr).toMatch(/:/);
   });
 
   it.skipIf(process.platform !== "darwin")("`vm status latest --output-format json` parses both the baseline and the flag", () => {
-    const r = run(["vm", "status", "latest", "--output-format", "json"]);
+    const r = run(["vm", "status", "latest", "--output-format", "json"], FAKE_LIMA);
     expect(r.code).toBe(0);
     expect(r.json?.subcommand).toBe("status");
     expect(r.json?.baseline?.name).toBe("latest");
   });
 
   it.skipIf(process.platform !== "darwin")("vm status JSON envelope carries baseline path/version, image hints, warnings", () => {
-    const r = run(["vm", "status", "--output-format", "json"]);
+    const r = run(["vm", "status", "--output-format", "json"], FAKE_LIMA);
     expect(r.code).toBe(0);
     expect(typeof r.json?.baseline?.path).toBe("string");
     expect(typeof r.json?.baseline?.appVersion).toBe("string");
@@ -759,10 +772,9 @@ describe.skipIf(!can)("cli --output-format json envelope + exit codes", () => {
     expect(r.json?.image).toBeTruthy();
     expect(typeof r.json?.image?.guestOs).toBe("string");
     expect(Array.isArray(r.json?.warnings)).toBe(true);
-    // Additive: how far a Running guest's provisioning got; null when the VM is not Running.
-    expect(r.json).toHaveProperty("provisioning");
-    if (r.json?.status === "Running") expect(["ready", "pending", "sealed", "failed"]).toContain(r.json?.provisioning);
-    else expect(r.json?.provisioning).toBeNull();
+    // Additive: how far a Running guest's provisioning got (null when the VM is not Running).
+    expect(r.json?.status).toBe("Running");
+    expect(r.json?.provisioning).toBe("pending");
   });
 
   it.skipIf(process.platform !== "darwin")("vm validates the subcommand before touching the baseline (exit 2)", () => {
