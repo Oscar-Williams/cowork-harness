@@ -28,7 +28,7 @@ import { randomUUID } from "node:crypto";
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { packageEvidence, MAX_PACKAGE_BYTES } from "./package-evidence.js";
 import { appendCritiqueRollupRow, CRITIQUE_SESSION_PREFIX } from "../run/run-index.js";
-import { jsonPayloadEnvelope } from "../run/envelope.js";
+import { jsonPayloadEnvelope, envOutputFormat, fail, isJsonOutput, type ErrCategory } from "../run/envelope.js";
 import { checkMountDelivers } from "./mount-check.js";
 import { binaryPluginIdentity } from "../session.js";
 import { runsWriteRoot } from "../run/trace-view.js";
@@ -310,7 +310,8 @@ function parseArgs(
   let runDir: string | undefined;
   let fidelity = "container";
   let evaluatorModel: string | undefined;
-  let outputFormat: "json" | "text" = "text";
+  // The default is COWORK_HARNESS_OUTPUT_FORMAT, as for every command; an explicit flag below overrides it.
+  let outputFormat: "json" | "text" = envOutputFormat();
   let out: string | undefined;
   let skillSelector: string | undefined;
   let promptFile: string | undefined;

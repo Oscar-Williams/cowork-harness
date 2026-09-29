@@ -141,7 +141,16 @@ import {
 import type { Cassette } from "./run/cassette.js";
 import { buildScaffold } from "./run/scaffold.js";
 import { buildInspectView } from "./run/inspect-view.js";
-import { pkgVersion, jsonEnvelope, jsonPayloadEnvelope, jsonError, parseOutputFormat, fail, isJsonOutput } from "./run/envelope.js";
+import {
+  pkgVersion,
+  jsonEnvelope,
+  jsonPayloadEnvelope,
+  jsonError,
+  parseOutputFormat,
+  fail,
+  isJsonOutput,
+  envOutputFormat,
+} from "./run/envelope.js";
 import { buildRepeatRollup, rollupPasses, armLabel, type RepeatRollup } from "./run/repeat.js";
 import { parseRepeatFlags, RepeatFlagError } from "./run/repeat-flags.js";
 import { cmdCritique } from "./critique/command.js";
@@ -1054,8 +1063,7 @@ function rejectUnknownFlags(command: string, args: string[], knownFlags: string[
  */
 function takeCommonFlags(args: string[], commandName: string = "skill"): { rest: string[]; flags: CommonFlags } {
   const rest: string[] = [];
-  const envOutputFormat = process.env.COWORK_HARNESS_OUTPUT_FORMAT;
-  const defaultOutput: "text" | "json" = envOutputFormat === "json" ? "json" : "text";
+  const defaultOutput: "text" | "json" = envOutputFormat();
   const flags: CommonFlags = { output: defaultOutput, quiet: false, verbose: false };
   // INVARIANT for every `fail()` inside this loop: pass `isJsonOutput(args)`, never `flags.output`.
   // `flags.output` is only populated once the loop REACHES `--output-format`, so reading it here makes
@@ -2644,7 +2652,8 @@ function cmdVm(args: string[]) {
     return fail("vm", "usage", String((e as Error).message), undefined, isJsonOutput(args));
   }
   applyParsedCommandGlobals("vm", vmParsed, isJsonOutput(args));
-  const vmJson = vmParsed.options["--output-format"] === "json";
+  // isJsonOutput, not the flag alone: COWORK_HARNESS_OUTPUT_FORMAT=json selects json on the success path too.
+  const vmJson = isJsonOutput(args);
   if (vmParsed.positionals.length > 1) {
     return fail(
       "vm",
@@ -3724,7 +3733,7 @@ async function cmdStatus(args: string[]) {
     return fail("status", "usage", (e as Error).message, undefined, isJsonOutput(args));
   }
   applyParsedCommandGlobals("status", p, isJsonOutput(args));
-  const json = p.options["--output-format"] === "json";
+  const json = isJsonOutput(args);
   if (p.options["--latest-for"] !== undefined) {
     // A dedicated mode, not a modifier on the run-id/run-dir lookup above: it resolves a SCENARIO to its
     // newest run dir rather than reading a status.json a caller already has the path to, so it takes no
@@ -4193,7 +4202,7 @@ async function cmdVerifyRun(args: string[]) {
     return fail("verify-run", "usage", (e as Error).message, undefined, isJsonOutput(args));
   }
   applyParsedCommandGlobals("verify-run", p, isJsonOutput(args));
-  const json = p.options["--output-format"] === "json";
+  const json = isJsonOutput(args);
   const [runDir, scenarioFile] = p.positionals;
   if (!runDir || !scenarioFile) {
     return fail("verify-run", "usage", "usage: verify-run <run-dir> <scenario.yaml> [--output-format json]", undefined, isJsonOutput(args));

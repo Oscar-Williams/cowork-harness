@@ -5712,7 +5712,7 @@ export async function cmdReplay(args: string[]) {
   if (p.positionals.length > 1) {
     return fail("replay", "usage", `replay takes one target (got ${p.positionals.length}: ${p.positionals.join(", ")})`, undefined, asJson);
   }
-  const json = p.options["--output-format"] === "json";
+  const json = asJson; // flag, else COWORK_HARNESS_OUTPUT_FORMAT — the success path follows the same rule as the errors
   const strict = p.flags["--strict"] ?? false; // escalate ALL staleness findings to failures (release gate)
   const bestEffortFutureCassette = p.flags["--best-effort-future-cassette"] ?? false; // opt into warn-and-replay for a future-version cassette
   // `--assert-from <file>` (explicit path) / `--reassert` (auto-resolve the sibling) opt INTO re-checking against
@@ -6255,7 +6255,7 @@ export async function cmdVerifyCassettes(args: string[]) {
     return fail("verify-cassettes", "usage", msg, hostInventoryFlagHint("verify-cassettes", msg), asJson);
   }
   applyParsedCommandGlobals("verify-cassettes", p, asJson);
-  const json = p.options["--output-format"] === "json";
+  const json = asJson; // flag, else COWORK_HARNESS_OUTPUT_FORMAT — the success path follows the same rule as the errors
   // Ship A escape hatch, same contract as `replay --session`: supplies a SESSION (so `staleness.hash_ignore`
   // and the rest of the boundary survive) for ONE relocated cassette. Refused for a batch — each cassette in a
   // directory may have been recorded against a different source, and silently pinning the wrong tree would

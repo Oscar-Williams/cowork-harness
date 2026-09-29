@@ -149,6 +149,13 @@ export function jsonError(command: string, category: ErrCategory, message: strin
   });
 }
 
+/** The output format COWORK_HARNESS_OUTPUT_FORMAT selects when no `--output-format` flag is given: `json`
+ *  only for exactly "json" (the value is validated at dispatch), otherwise `text`. The single reading of
+ *  the variable — every default for the flag comes from here or from `isJsonOutput`. */
+export function envOutputFormat(): "text" | "json" {
+  return process.env.COWORK_HARNESS_OUTPUT_FORMAT === "json" ? "json" : "text";
+}
+
 /** Shared json-output predicate so the parser and the top-level catch can never drift. An explicit
  *  `--output-format text|json` flag (first occurrence wins, matching parseOutputFormat's
  *  first-occurrence-authoritative semantics) takes precedence; absent any flag, fall back to the
@@ -161,7 +168,7 @@ export function isJsonOutput(args: string[]): boolean {
     if (args[i] === "--output-format" && args[i + 1] === "text") return false;
     if (args[i] === "--output-format=text") return false;
   }
-  return process.env.COWORK_HARNESS_OUTPUT_FORMAT === "json";
+  return envOutputFormat() === "json";
 }
 
 /** The single error exit used by every command + the top-level catch, in both `cli.ts` and `doctor.ts`.
