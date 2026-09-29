@@ -106,7 +106,7 @@ So **Linux live == `container` only**: `microvm` is Apple-VZ (macOS), and `hostl
      brew install lima
      cowork-harness vm init   # one-time: provisions the Lima VM image
      ```
-     `cowork-harness doctor --tier microvm` checks for Lima (not Docker) and warns — non-fatally — if `vm init` hasn't run yet (a live run self-provisions on first use, just with extra VM-boot latency).
+     `cowork-harness doctor --tier microvm` checks for Lima (not Docker) and warns — non-fatally — if `vm init` hasn't run yet (a live run self-provisions on first use, just with extra VM-boot latency) or if a Running VM has not finished provisioning.
 
 > The `pytest` lane (`python/README.md`) has its own, slightly different prerequisite list (adds `pytest`
 > + package importability) — see there if you're driving tests via `pytest` instead of the CLI directly.
@@ -654,6 +654,7 @@ Each is overridden by the matching explicit flag.
 - `COWORK_VM_GATEWAY` — overrides the Lima host-proxy gateway IP (default `192.168.5.2`; must be a canonical IPv4 literal — an invalid value is rejected, since it is interpolated into the guest firewall rule).
 - `COWORK_VM_PROXY_PORT` — pins the egress-proxy port (unset, the host binds an OS-assigned free port and threads that same value into the guest firewall + `HTTP(S)_PROXY`).
 - `COWORK_LIMA_INSTANCE` — pins a fixed Lima instance name. By default the instance is named `cowork-vm-<config-hash>` (a config change → a fresh VM), and `vm prune` removes orphaned ones.
+- `COWORK_VM_PROVISION_TIMEOUT_S` — how long a run waits (seconds, default `900`) for an already-Running VM to finish provisioning before it fails with `microvm <instance> never finished provisioning (…)`. A VM that was Running but not yet provisioned — typically a first boot that outlasted `limactl start` — is waited for rather than used as-is.
 
 ### Advanced / internal escape hatches
 

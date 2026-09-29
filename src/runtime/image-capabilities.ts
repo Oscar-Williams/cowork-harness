@@ -14,7 +14,7 @@ import { currentTurnEventLines } from "../run/turn-events.js";
 import { isAbsolute, join, resolve } from "node:path";
 import { runsWriteRoot } from "../run/trace-view.js";
 import { warn } from "../io.js";
-import { vmStatus } from "./lima.js";
+import { vmStatus, vmProvisioned } from "./lima.js";
 
 export type CapabilityFamily = "ocr" | "office_convert" | "ml_extract" | "cv" | "pdf_tables" | "magick";
 
@@ -151,6 +151,10 @@ export function probeMicrovmOmitted(instance: string): CapabilityFamily[] | null
   const cache = readCache();
   if (cache[key]) return cache[key] as CapabilityFamily[];
   if (vmStatus(instance) !== "Running") return null;
+  // Running is not provisioned. This probe runs BEFORE vmInit and its answer is cached for the instance's
+  // lifetime, so probing a guest whose toolchain is still installing (or never will be) would pin "omitted"
+  // on families the finished VM has. Only a provisioned guest is probed; otherwise the pre-flight skips.
+  if (vmProvisioned(instance) !== "ready") return null;
   const r = spawnSync("limactl", ["shell", "--workdir", "/", instance, "sh", "-c", probeScript()], {
     encoding: "utf8",
     timeout: 120_000,

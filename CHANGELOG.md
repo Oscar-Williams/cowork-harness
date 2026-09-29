@@ -6,6 +6,31 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Upgrade notes
+
+- **microvm: if runs failed with "control-protocol write failed" and `env: 'claude': No such file or
+  directory`**, the VM was sealed mid-provisioning (see Fixed). The next run now recovers or names the
+  problem on its own, but the capability probe may have cached an empty toolchain for that VM: delete
+  `capability-cache.json` from the runs root (`~/.cowork-harness/runs/` unless you set
+  `COWORK_HARNESS_RUNS_DIR`) so it is probed again.
+
+### Fixed
+
+- **microvm: a VM that was Running but not yet provisioned is no longer used and sealed.** A first boot
+  that outlasted `limactl start` left the VM Running with its apt/toolchain install unfinished. The next
+  run reused it and applied the guest egress firewall, so provisioning could never complete, the agent
+  never reached PATH, and every later run failed with an opaque control-protocol error until the VM was
+  deleted by hand. Before using a Running VM, a run now checks that Lima's boot scripts finished and the
+  agent is on PATH. A VM still provisioning is waited for (up to `COWORK_VM_PROVISION_TIMEOUT_S`, default
+  900 s); one firewalled mid-provisioning is restarted once, which clears the firewall and lets
+  provisioning finish; anything else fails with `microvm <instance> never finished provisioning (<reason>).
+  Delete it and retry: cowork-harness vm delete [<baseline>]`. The harness never deletes a VM itself.
+  `limactl start` now gets `--timeout 20m`, so a slow first boot is not cut off in the first place. The
+  capability probe skips a VM that is not provisioned instead of caching its missing toolchain. `vm status`
+  reports the state (a new `provisioning` field in its JSON output: `ready`, `pending`, `sealed`,
+  `failed`, or `null` when the VM is not Running), and `doctor --tier microvm` no longer calls a Running
+  VM "provisioned" until it is.
+
 ## [4.0.0] — 2026-09-29
 
 ### Breaking changes (requires a major bump; see [SPEC.md §12](./SPEC.md#12-versioning--the-10-compatibility-contract))

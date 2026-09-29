@@ -134,6 +134,8 @@ export function spawnMicroVm(
   const proxyPort = opts.proxyPort ?? parseEnvPortMicroVm("COWORK_VM_PROXY_PORT", 8899);
   const gatewayIp = vmGatewayIp(); // one resolved value feeds both the firewall rule and proxy URL.
   const lockdown = (process.env.COWORK_LOCKDOWN ?? "on") !== "off";
+  // Ordering is the guarantee: `vmInit` above returns only a PROVISIONED guest. Sealing one that is still
+  // provisioning cuts apt off from the network, so the agent never reaches PATH and the VM is stuck.
   if (lockdown) {
     try {
       applyGuestFirewall(instance, proxyPort, gatewayIp);

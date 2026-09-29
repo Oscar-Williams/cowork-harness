@@ -759,6 +759,10 @@ describe.skipIf(!can)("cli --output-format json envelope + exit codes", () => {
     expect(r.json?.image).toBeTruthy();
     expect(typeof r.json?.image?.guestOs).toBe("string");
     expect(Array.isArray(r.json?.warnings)).toBe(true);
+    // Additive: how far a Running guest's provisioning got; null when the VM is not Running.
+    expect(r.json).toHaveProperty("provisioning");
+    if (r.json?.status === "Running") expect(["ready", "pending", "sealed", "failed"]).toContain(r.json?.provisioning);
+    else expect(r.json?.provisioning).toBeNull();
   });
 
   it.skipIf(process.platform !== "darwin")("vm validates the subcommand before touching the baseline (exit 2)", () => {
