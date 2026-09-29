@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 import { fail, isJsonOutput, jsonError, jsonPayloadEnvelope, parseOutputFormat } from "./envelope.js";
 import { writeAllSync } from "../io.js";
-import { lintPrepass, type LintFinding } from "./lint-load.js";
+import { LINT_VALUE_FLAGS, lintPrepass, type LintFinding } from "./lint-load.js";
 import { stripCommandGlobals } from "./command-globals.js";
 
 // Synchronous fd write (match envelope.ts/cli.ts/doctor.ts): writeAllSync retries EAGAIN and loops on
@@ -55,6 +55,9 @@ function pythonNotFoundMessage(py: string, cmd: string): string {
  *  its own basename. It is also how the script knows the wrapper ran (lint's loader note keys on it). */
 function scenarioScriptEnv(): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...process.env, COWORK_HARNESS_PROG: "cowork-harness" };
+  // Findings use Unicode severity glyphs. Keep wrapper output stable on Windows consoles whose legacy
+  // code page cannot encode them (the same bytes are also captured by JSON/text callers in CI).
+  env.PYTHONIOENCODING = "utf-8";
   // Only the lint wrapper may hand python loader findings. A value inherited from the caller's shell would
   // inject findings nobody computed (or, on a clean corpus, report ones that are not there).
   delete env[EXTRA_FINDINGS_ENV];
@@ -63,7 +66,9 @@ function scenarioScriptEnv(): NodeJS.ProcessEnv {
 
 /** Spawn `python3 scenario.py <subcommand> …`. On a spawn failure (python missing → ENOENT) it writes the
  *  reason to stderr and returns `undefined`; the caller exits 127. Shared by `lint`, `lint-skill` and the
- *  flag-built `scaffold`, so all three resolve python and report its absence the same way. */
+ *  flag-built `scaffold`, so all three resolve python and report its absence the same way. Text output is
+ *  captured and written back unchanged so the built wrapper remains composable in pipes and end-to-end
+ *  callers can observe the same stdout as an interactive invocation. */
 function spawnScenarioScript(
   subcommand: string,
   pyArgs: string[],
@@ -84,15 +89,19 @@ function spawnScenarioScript(
     process.stderr.write((enoent ? pythonNotFoundMessage(py, subcommand) : String(r.error.message)) + "\n");
     return undefined;
   }
+  if (!capture && r.stdout) {
+    const stdout = typeof r.stdout === "string" ? r.stdout : r.stdout.toString("utf8");
+    writeAllSync(1, stdout);
+  }
   return r;
 }
 
 /** Shared `lint`/`lint-skill` → `python3 scenario.py <cmd> …` passthrough (npm-consumer ergonomics;
  *  skill authors can still invoke python3 on the bundled script directly).
  *
- *  - **Text mode** (the default): unchanged behavior — `stdio: "inherit"`, exits with the child's code —
- *    after stripping `--output-format` (python doesn't know it either way; only the flag itself changes
- *    here, not how output reaches the terminal).
+ *  - **Text mode** (the default): unchanged output and exit behavior — the child's stdout is forwarded
+ *    unchanged after stripping `--output-format` (python doesn't know it either way; only the wrapper flag
+ *    changes here, not what reaches the terminal).
  *  - **JSON mode** (`isJsonOutput(args)`): python's `--output-format` is stripped and replaced with
  *    python's own `--json`; `stdio` captures stdout only (`["inherit","pipe","inherit"]` — stdin/stderr
  *    still inherited) so the child's BARE findings array can be parsed and re-wrapped in the harness's
@@ -121,7 +130,7 @@ function runLintLike(subcommand: "lint" | "lint-skill", args: string[], prepass:
     fail(subcommand, "usage", String((e as Error).message), undefined, isJsonOutput(args));
   }
   // --dotenv / --run-dir after the subcommand: applied here (python knows neither), then not forwarded.
-  args = stripCommandGlobals(subcommand, args, ["--min-severity", "--output-format"], isJsonOutput(args));
+  args = stripCommandGlobals(subcommand, args, LINT_VALUE_FLAGS, isJsonOutput(args));
   resolveScenarioScript(); // fail on a missing script before the loader pre-pass does any work
   const json = isJsonOutput(args);
   const pyArgs = stripOutputFormatFlag(args);

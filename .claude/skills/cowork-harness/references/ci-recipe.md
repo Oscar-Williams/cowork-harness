@@ -94,6 +94,12 @@ GitHub-hosted runners, no token/Docker/agent:
                                                     # the pair explicit. `--min-severity INFO` gates on
                                                     # INFO as well. (`lint-skill --strict` never fails
                                                     # on INFO and has no floor to widen.)
+- run: cowork-harness lint scenarios/*.yaml --strict --min-severity INFO --cassette-dir cassettes/
+                                                    # committed *.cassette.json evidence suppresses only
+                                                    # replay advisories proven by every matching cassette;
+                                                    # skipped or malformed cassettes stay visible.
+                                                    # Staleness does not affect this existence check;
+                                                    # verify-cassettes checks freshness and drift.
 - run: cowork-harness verify-cassettes cassettes/    # privacy + staleness — FAILS on a stale recording
                                                     # ALSO fails on a leaked host inventory: recording at
                                                     # protocol/hostloop freezes YOUR machine's MCP servers,

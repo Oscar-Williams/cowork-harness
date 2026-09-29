@@ -80,7 +80,21 @@ import functools
 import json
 import re
 import sys
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
+
+
+def _configure_utf8_output():
+    """Keep the standalone linter usable on legacy Windows console encodings."""
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            try:
+                reconfigure(encoding="utf-8")
+            except (OSError, ValueError):
+                pass
+
+
+_configure_utf8_output()
 
 # --- the replay-class taxonomy ---
 # NB: this is NOT a 1:1 mirror of the ALWAYS_CONTENT_KEYS/QUESTION_GATE_KEYS/MANIFEST_KEYS buckets in src/run/cassette.ts. cassette.ts keeps the verdict
@@ -547,8 +561,14 @@ def _is_positional_choose(choose):
 # and guessing a cassette from the scenario name would be wrong when `record --out` chose a custom path.
 # When a caller supplies `--cassette-dir`, the records below are matched by the cassette's persisted
 # `scenarioSource`, never by filename. This is the Python-side equivalent of replay's evidence-shape gate;
-# keeping it here means text/JSON output and the exit code agree.
+# keeping it here means text/JSON output and the exit code agree. A skipped cassette is still visible and
+# keeps the INFO advisory: a healthy sibling cannot prove that the skipped recording was safe to ignore.
 _MISSING = object()
+
+# Keep these values in sync with src/run/cassette.ts. The sync test below makes a format-range change
+# fail loudly instead of allowing lint to suppress an advisory from a cassette replay would refuse.
+CASSETTE_VERSION = 13
+MIN_SUPPORTED_CASSETTE_VERSION = 9
 
 
 def _valid_string_list(value):
@@ -625,42 +645,89 @@ def _cassette_checkability(raw):
 def _cassette_records(location):
     """Read an opt-in cassette file or a non-recursive cassette directory.
 
-    Directory mode follows the repository's existing cassette-directory convention and considers JSON
-    files, including custom `record --out foo.json` names. A custom extension can be supplied directly as
-    a file. Unreadable or malformed records are ignored here; because they cannot yield a matching,
-    trusted provenance record, the corresponding INFO remains in place (fail closed).
+    Directory mode follows the repository's existing cassette-directory convention and considers only
+    `*.cassette.json` files. A custom extension can be supplied directly as a file. Every file that cannot
+    become trusted evidence is retained as a skipped record and reported as an INFO finding: otherwise a
+    healthy sibling could incorrectly suppress the replay advisory.
     """
     if not location:
-        return []
+        return [], []
     root = Path(location)
     try:
         if root.is_file():
             paths = [root]
         elif root.is_dir():
-            paths = sorted(p for p in root.iterdir() if p.is_file() and p.suffix.lower() == ".json")
+            paths = sorted(p for p in root.glob("*.cassette.json") if p.is_file())
         else:
-            return []
+            return [], []
     except OSError:
-        return []
+        return [], [
+            Finding(
+                "INFO",
+                "cassette-evidence-skipped",
+                f"cassette directory could not be read: {location}",
+                "Point `--cassette-dir` at a readable cassette file or directory.",
+                str(location),
+            )
+        ]
 
     records = []
+    findings = []
+
+    def skipped(path, reason):
+        records.append({"source": None, "checkable": {}, "skipped": True})
+        findings.append(
+            Finding(
+                "INFO",
+                "cassette-evidence-skipped",
+                f"cassette {path} was skipped: {reason}; it cannot suppress replay-evidence advice",
+                "Repair or remove the cassette, then rerun lint with `--cassette-dir`.",
+                str(path),
+            )
+        )
+
     for path in paths:
         try:
             raw = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, UnicodeError, ValueError):
+        except (OSError, UnicodeError) as e:
+            skipped(path, f"unreadable ({e})")
+            continue
+        except ValueError as e:
+            skipped(path, f"invalid JSON ({e})")
             continue
         if not isinstance(raw, dict):
+            skipped(path, "the top level is not a JSON object")
             continue
+
+        recorded_version = raw.get("cassetteVersion", 0)
+        if (
+            isinstance(recorded_version, bool)
+            or not isinstance(recorded_version, int)
+            or not (MIN_SUPPORTED_CASSETTE_VERSION <= recorded_version <= CASSETTE_VERSION)
+        ):
+            skipped(
+                path,
+                f"cassetteVersion {recorded_version!r} is outside the supported range "
+                f"{MIN_SUPPORTED_CASSETTE_VERSION}..{CASSETTE_VERSION}",
+            )
+            continue
+
         source = raw.get("scenarioSource")
-        if not isinstance(source, str) or not source or Path(source).is_absolute():
+        if not isinstance(source, str) or not source:
+            skipped(path, "missing or empty scenarioSource")
+            continue
+        if Path(source).is_absolute() or PureWindowsPath(source).is_absolute() or source.startswith(("/", "\\")):
+            skipped(path, "scenarioSource is absolute; it must be relative to the cassette")
             continue
         source_path = os.path.normcase(os.path.abspath(os.path.normpath(str(path.parent / source))))
-        records.append({"source": source_path, "checkable": _cassette_checkability(raw)})
-    return records
+        records.append({"source": source_path, "checkable": _cassette_checkability(raw), "skipped": False})
+    return records, findings
 
 
 def _all_matching_cassettes_prove(records, scenario_path, key):
     """True only when at least one exact-provenance cassette exists and every one proves `key`."""
+    if any(record.get("skipped") for record in records):
+        return False
     target = os.path.normcase(os.path.abspath(os.path.normpath(str(scenario_path))))
     matching = [record for record in records if record["source"] == target]
     return bool(matching) and all(record["checkable"].get(key, False) for record in matching)
@@ -1857,7 +1924,11 @@ def cmd_lint(args):
     # Cassette inspection is opt-in: without the flag the linter remains entirely static, preserving the
     # existing CI behavior. With it, one index is shared across all scenario files in this invocation.
     cassette_location = getattr(args, "cassette_dir", None)
-    cassette_records = _cassette_records(cassette_location) if cassette_location else None
+    if cassette_location:
+        cassette_records, cassette_findings = _cassette_records(cassette_location)
+        all_findings.extend(cassette_findings)
+    else:
+        cassette_records = None
     # Linter self-check: a valid schema key the replay-class sets don't classify can't be linted
     # correctly — surface it as a hard ERROR so it fails the gate (and --strict) until someone classifies it.
     if UNCLASSIFIED_KEYS:
@@ -3216,7 +3287,7 @@ def main(argv=None):
     lp.add_argument(
         "--cassette-dir",
         metavar="PATH",
-        help="optionally inspect a cassette file or a directory of *.json cassettes by exact scenarioSource; "
+        help="optionally inspect a cassette file or a directory of *.cassette.json cassettes by exact scenarioSource; "
         "INFO advice is suppressed only when every matching cassette proves the relevant replay evidence",
     )
     lp.set_defaults(func=cmd_lint)
@@ -3328,6 +3399,10 @@ def main(argv=None):
         ):
             (target or ap).error("unrecognized arguments: " + " ".join(extras) + " (--min-severity is a `lint` flag, not `lint-skill` — rerun with `cowork-harness lint` instead)")
         (target or ap).error("unrecognized arguments: " + " ".join(extras))
+    if getattr(args, "command", None) == "lint" and getattr(args, "cassette_dir", None):
+        cassette_path = Path(args.cassette_dir)
+        if not cassette_path.is_file() and not cassette_path.is_dir():
+            sub.choices["lint"].error(f"--cassette-dir path does not exist or is not readable: {args.cassette_dir}")
     return args.func(args)
 
 

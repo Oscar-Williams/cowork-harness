@@ -588,7 +588,7 @@ def test_min_severity_filters_json_identically(tmp_path):
 
 
 def _write_cassette(path, scenario_source, **fields):
-    cassette = {"scenarioSource": scenario_source, **fields}
+    cassette = {"cassetteVersion": 13, "scenarioSource": scenario_source, **fields}
     path.write_text(json.dumps(cassette), encoding="utf-8")
 
 
@@ -705,6 +705,118 @@ def test_malformed_cassette_evidence_fails_closed(tmp_path):
     assert code == 0
     assert "manifest-needs-snapshot" in rules
     assert "gate-needs-controlout" in rules
+
+
+def test_healthy_matching_cassette_suppresses_replay_advice(tmp_path):
+    body = "assert:\n  - file_exists: outputs/result.json\n  - question_asked: '.*'\n"
+    code, findings, _ = _lint_with_cassettes(
+        tmp_path,
+        body,
+        [("healthy.cassette.json", {"artifacts": _valid_artifact(), "controlOut": ["{}"]})],
+    )
+    rules = {f["rule"] for f in findings}
+    assert code == 0
+    assert "manifest-needs-snapshot" not in rules
+    assert "gate-needs-controlout" not in rules
+
+
+def test_skipped_cassette_is_visible_and_keeps_advice_with_healthy_sibling(tmp_path):
+    body = "assert:\n  - file_exists: outputs/result.json\n  - question_asked: '.*'\n"
+    scenarios = tmp_path / "scenarios"
+    cassettes = tmp_path / "cassettes"
+    scenarios.mkdir()
+    cassettes.mkdir()
+    f = scenarios / "authored.yaml"
+    f.write_text(
+        "name: a\nbaseline: latest\nsession: (inline)\nfidelity: container\nprompt: hi\n" + body,
+        encoding="utf-8",
+    )
+    _write_cassette(cassettes / "healthy.cassette.json", "../scenarios/authored.yaml", artifacts=_valid_artifact(), controlOut=["{}"], cassetteVersion=13)
+    (cassettes / "broken.cassette.json").write_text("{ not valid json", encoding="utf-8")
+
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        code = scenario.main(["lint", str(f), "--cassette-dir", str(cassettes), "--json"])
+    findings = json.loads(buf.getvalue())
+    rules = {finding["rule"] for finding in findings}
+    skipped = next(finding for finding in findings if finding["rule"] == "cassette-evidence-skipped")
+    assert code == 0
+    assert "broken.cassette.json" in skipped["message"]
+    assert "manifest-needs-snapshot" in rules
+    assert "gate-needs-controlout" in rules
+
+
+def test_unreadable_cassette_is_visible_and_keeps_advice_with_healthy_sibling(tmp_path, monkeypatch):
+    body = "assert:\n  - file_exists: outputs/result.json\n"
+    scenarios = tmp_path / "scenarios"
+    cassettes = tmp_path / "cassettes"
+    scenarios.mkdir()
+    cassettes.mkdir()
+    f = scenarios / "authored.yaml"
+    f.write_text(
+        "name: a\nbaseline: latest\nsession: (inline)\nfidelity: container\nprompt: hi\n" + body,
+        encoding="utf-8",
+    )
+    _write_cassette(cassettes / "healthy.cassette.json", "../scenarios/authored.yaml", artifacts=_valid_artifact(), cassetteVersion=13)
+    broken = cassettes / "unreadable.cassette.json"
+    broken.write_text("{}", encoding="utf-8")
+    original_read_text = Path.read_text
+
+    def deny_broken(path, *args, **kwargs):
+        if path == broken:
+            raise OSError("permission denied")
+        return original_read_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", deny_broken)
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        code = scenario.main(["lint", str(f), "--cassette-dir", str(cassettes), "--json"])
+    findings = json.loads(buf.getvalue())
+    skipped = next(finding for finding in findings if finding["rule"] == "cassette-evidence-skipped")
+    rules = {finding["rule"] for finding in findings}
+    assert code == 0
+    assert "permission denied" in skipped["message"]
+    assert "manifest-needs-snapshot" in rules
+
+
+@pytest.mark.parametrize(
+    "cassette_body, reason",
+    [
+        ("[]", "top level is not a JSON object"),
+        ('{"cassetteVersion": 13}', "missing or empty scenarioSource"),
+        ('{"cassetteVersion": 13, "scenarioSource": "/tmp/authored.yaml"}', "scenarioSource is absolute"),
+        ('{"cassetteVersion": 14, "scenarioSource": "../scenarios/authored.yaml"}', "outside the supported range"),
+    ],
+)
+def test_skipped_cassette_names_why_and_never_suppresses(tmp_path, cassette_body, reason):
+    body = "assert:\n  - file_exists: outputs/result.json\n"
+    scenarios = tmp_path / "scenarios"
+    cassettes = tmp_path / "cassettes"
+    scenarios.mkdir()
+    cassettes.mkdir()
+    f = scenarios / "authored.yaml"
+    f.write_text(
+        "name: a\nbaseline: latest\nsession: (inline)\nfidelity: container\nprompt: hi\n" + body,
+        encoding="utf-8",
+    )
+    (cassettes / "bad.cassette.json").write_text(cassette_body, encoding="utf-8")
+
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        code = scenario.main(["lint", str(f), "--cassette-dir", str(cassettes), "--json"])
+    findings = json.loads(buf.getvalue())
+    skipped = next(finding for finding in findings if finding["rule"] == "cassette-evidence-skipped")
+    assert code == 0
+    assert reason in skipped["message"]
+    assert any(finding["rule"] == "manifest-needs-snapshot" for finding in findings)
+
+
+def test_missing_cassette_dir_is_a_usage_error(tmp_path):
+    f = tmp_path / "scenario.yaml"
+    _write_scenario(f, body="assert:\n  - result: success\n")
+    with pytest.raises(SystemExit) as exc:
+        scenario.main(["lint", str(f), "--cassette-dir", str(tmp_path / "missing"), "--json"])
+    assert exc.value.code == 2
 
 
 # --- vacuous-gate-assert: gate_answers_delivered needs a PRESENCE companion -------------------------

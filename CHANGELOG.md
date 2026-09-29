@@ -222,6 +222,9 @@ All notable changes to this project are documented here. The format is based on
 - **The packaged Action takes a `model` input** for the live `run` lane. It is exported as
   `COWORK_HARNESS_MODEL` when set, so it fills in where a scenario's session sets no `model:`. Left empty,
   it exports nothing, so a job-level `COWORK_HARNESS_MODEL` still applies.
+- **Cassette-aware scenario linting:** `lint --cassette-dir <path>` now scans the same `*.cassette.json`
+  directory shape as replay and verify-cassettes, refuses missing paths, and reports skipped recordings
+  instead of allowing them to suppress replay-evidence advisories.
 - **Object form of `tool_called` / `tool_not_called`:** `{tool, input, input_any, result, scope,
   subagent_type, count}`. It asserts what a call carried (top-level input fields, as regexes), where it
   ran (`main` by default, `subagent` at any depth, or `any`), and what its paired result said.

@@ -12,7 +12,7 @@
 // and the tier-dependent pre-spawn refusals. A consumer's token-free lint lane often runs where the scenario
 // never will.
 import { readdirSync, statSync } from "node:fs";
-import { isAbsolute, join } from "node:path";
+import { isAbsolute, join, win32 } from "node:path";
 import { loadBaseline as realLoadBaseline } from "../baseline.js";
 import { UsageError, renderIssuePath } from "../errors.js";
 import { loadScenarioPure } from "./execute.js";
@@ -38,11 +38,26 @@ const MAX_ISSUES_PER_FILE = 10;
 
 const NOT_A_SCENARIO = "If this file is not a scenario (a session, matrix or answer-policy file), move it out of the linted set.";
 
+/** Value-taking flags shared by the loader pre-pass and scenario.py's own positional scan. */
+export const LINT_VALUE_FLAGS = ["--min-severity", "--output-format", "--cassette-dir"] as const;
+
 /** Join a directory argument and an entry name the way python's `str(Path(dir) / name)` does, so a finding
  *  from here carries the same `file` string as python's own findings for that file: `./d/` and `d//`
  *  collapse to `d`, but a `..` segment is kept (python does not resolve it; `path.join` would). */
 function pyPathJoin(dir: string, name: string): string {
-  if (process.platform === "win32") return join(dir, name);
+  if (process.platform === "win32") {
+    // win32.join() normalizes `..`, while Python's Path(dir) / name keeps that segment in the
+    // diagnostic string. Preserve the spelling so loader and Python findings remain attributable to
+    // the same file on Windows too; `.` and redundant separators are still collapsed like pathlib.
+    const parsed = win32.parse(dir.replaceAll("/", "\\"));
+    const parts = parsed.dir
+      .slice(parsed.root.length)
+      .split("\\")
+      .filter((part) => part && part !== ".");
+    if (parsed.base && parsed.base !== ".") parts.push(parsed.base);
+    parts.push(name.replaceAll("/", "\\"));
+    return parsed.root + parts.join("\\");
+  }
   const abs = dir.startsWith("/");
   const segs = dir.split("/").filter((s) => s !== "" && s !== ".");
   return (abs ? "/" : "") + [...segs, name].join("/");
@@ -87,8 +102,8 @@ export function lintPositionals(args: string[]): string[] {
     const a = args[i];
     if (rest) out.push(a);
     else if (a === "--") rest = true;
-    else if (a === "--min-severity" || a === "--cassette-dir") i++;
-    else if (a.startsWith("--min-severity=") || a.startsWith("--cassette-dir=")) continue;
+    else if ((LINT_VALUE_FLAGS as readonly string[]).includes(a)) i++;
+    else if (LINT_VALUE_FLAGS.some((flag) => a.startsWith(`${flag}=`))) continue;
     else if (!a.startsWith("-")) out.push(a);
   }
   return out;
