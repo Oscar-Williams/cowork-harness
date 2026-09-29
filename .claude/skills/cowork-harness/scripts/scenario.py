@@ -94,19 +94,6 @@ import sys
 from pathlib import Path, PureWindowsPath
 
 
-def _configure_utf8_output():
-    """Keep the standalone linter usable on legacy Windows console encodings."""
-    for stream in (sys.stdout, sys.stderr):
-        reconfigure = getattr(stream, "reconfigure", None)
-        if reconfigure is not None:
-            try:
-                reconfigure(encoding="utf-8")
-            except (OSError, ValueError):
-                pass
-
-
-_configure_utf8_output()
-
 # --- the replay-class taxonomy ---
 # NB: this is NOT a 1:1 mirror of the ALWAYS_CONTENT_KEYS/QUESTION_GATE_KEYS/MANIFEST_KEYS buckets in src/run/cassette.ts. cassette.ts keeps the verdict
 # modifiers (VERDICT_MODIFIER_KEYS) in its content set so they replay as no-op passes; the linter
@@ -1945,6 +1932,7 @@ LINT_RULES = {
     "assertions-key": "ERROR",
     "authored-replay-fidelity": "ERROR",
     "capabilities-on-protocol": "ERROR",
+    "cassette-evidence-skipped": "INFO",
     "container-only-key-off-container": "ERROR",
     "egress-on-protocol": "ERROR",
     "enum-value-invalid": "ERROR",

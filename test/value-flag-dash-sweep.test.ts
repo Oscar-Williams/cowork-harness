@@ -66,7 +66,9 @@ const CASES: Array<[string, string[], string[]]> = [
 
 describe.skipIf(!can)("every value-taking flag refuses a flag-looking value", () => {
   it("the sweep is not empty", () => {
-    for (const [, , flags] of CASES) expect(flags.length).toBeGreaterThan(0);
+    // A per-command floor, so a list that silently shrinks fails here. lint has only three value flags.
+    const floor: Record<string, number> = { lint: LINT_VALUE_FLAGS.length };
+    for (const [cmd, , flags] of CASES) expect(flags.length).toBeGreaterThanOrEqual(floor[cmd] ?? 5);
   });
   for (const [cmd, base, flags] of CASES) {
     for (const flag of flags) {

@@ -22,6 +22,16 @@ All notable changes to this project are documented here. The format is based on
 
 ### Added
 
+- **`lint --cassette-dir <dir>` drops a replay-evidence advisory a committed cassette already covers.** A
+  cassette counts for a scenario when its recorded `scenarioSource` resolves to that file, the same way
+  replay resolves it, and the directory is read as `*.cassette.json` like `replay` and `verify-cassettes`.
+  An advisory is dropped only when every matching cassette proves it. A cassette that cannot be checked
+  (unreadable, not JSON, an unsupported `cassetteVersion`, or no usable `scenarioSource`) keeps the
+  advisory and is reported as INFO `cassette-evidence-skipped`, and a missing directory is a usage error
+  (exit 2). A stale cassette still counts: this checks that the evidence exists, and `verify-cassettes`
+  checks that it is current. `lint --strict --min-severity INFO --cassette-dir <dir>` keeps the actionable
+  INFO findings and drops only the ones a cassette covers.
+
 - **`COWORK_VM_PROVISION_TIMEOUT_S`** (default `900`): how long a microvm run waits for an already-Running
   VM to finish provisioning before failing with a named error (see Fixed).
 - **`vm status` reports `provisioning`**: a new field in its JSON output — `ready`, `pending`, `sealed`,
@@ -364,9 +374,6 @@ All notable changes to this project are documented here. The format is based on
 - **The packaged Action takes a `model` input** for the live `run` lane. It is exported as
   `COWORK_HARNESS_MODEL` when set, so it fills in where a scenario's session sets no `model:`. Left empty,
   it exports nothing, so a job-level `COWORK_HARNESS_MODEL` still applies.
-- **Cassette-aware scenario linting:** `lint --cassette-dir <path>` now scans the same `*.cassette.json`
-  directory shape as replay and verify-cassettes, refuses missing paths, and reports skipped recordings
-  instead of allowing them to suppress replay-evidence advisories.
 - **Object form of `tool_called` / `tool_not_called`:** `{tool, input, input_any, result, scope,
   subagent_type, count}`. It asserts what a call carried (top-level input fields, as regexes), where it
   ran (`main` by default, `subagent` at any depth, or `any`), and what its paired result said.

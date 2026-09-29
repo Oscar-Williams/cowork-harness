@@ -212,7 +212,7 @@ authorable). Reach for this list when debugging a run's behavior, that one while
     (couldn't check — also re-record). Both are `fidelity: cowork`-only; an explicit-tier scenario never
     produces them. (Details: [`docs/cassette.md`](https://github.com/yaniv-golan/cowork-harness/blob/main/docs/cassette.md) § tier staleness — repo-only.)
 
-22. **`lint` can flood CI with replay-evidence INFO advisories.** *Why:* two rules —
+22. **`lint` floods CI with INFO advisories that don't apply to you.** *Why:* two rules —
     `manifest-needs-snapshot` and `gate-needs-controlout` — fire on the mere presence of manifest/gate
     assertion keys. The linter is **static** until you opt in to cassette evidence. With committed
     recordings, pass `lint --cassette-dir <dir>` (or one cassette file): it scans the same `*.cassette.json`

@@ -12,7 +12,7 @@
 // and the tier-dependent pre-spawn refusals. A consumer's token-free lint lane often runs where the scenario
 // never will.
 import { readdirSync, statSync } from "node:fs";
-import { isAbsolute, join, win32 } from "node:path";
+import { isAbsolute, join } from "node:path";
 import { loadBaseline as realLoadBaseline } from "../baseline.js";
 import { UsageError, renderIssuePath } from "../errors.js";
 import { loadScenarioPure } from "./execute.js";
@@ -45,19 +45,7 @@ export const LINT_VALUE_FLAGS = ["--min-severity", "--output-format", "--cassett
  *  from here carries the same `file` string as python's own findings for that file: `./d/` and `d//`
  *  collapse to `d`, but a `..` segment is kept (python does not resolve it; `path.join` would). */
 function pyPathJoin(dir: string, name: string): string {
-  if (process.platform === "win32") {
-    // win32.join() normalizes `..`, while Python's Path(dir) / name keeps that segment in the
-    // diagnostic string. Preserve the spelling so loader and Python findings remain attributable to
-    // the same file on Windows too; `.` and redundant separators are still collapsed like pathlib.
-    const parsed = win32.parse(dir.replaceAll("/", "\\"));
-    const parts = parsed.dir
-      .slice(parsed.root.length)
-      .split("\\")
-      .filter((part) => part && part !== ".");
-    if (parsed.base && parsed.base !== ".") parts.push(parsed.base);
-    parts.push(name.replaceAll("/", "\\"));
-    return parsed.root + parts.join("\\");
-  }
+  if (process.platform === "win32") return join(dir, name);
   const abs = dir.startsWith("/");
   const segs = dir.split("/").filter((s) => s !== "" && s !== ".");
   return (abs ? "/" : "") + [...segs, name].join("/");
