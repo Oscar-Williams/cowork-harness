@@ -867,8 +867,9 @@ built-in absent from the tier's current set.
 
 **Real Cowork behaviour (host-loop, observed on Desktop 2.9939.4):** the plugin's base directory the
 agent substitutes into a skill's text (the skill's own base dir, the `${CLAUDE_PLUGIN_ROOT}` it expands)
-is a host staging path of the form `$TMPDIR/claude-hostloop-plugins/<hash>/…`. That path does not exist
-in the VM, and in the VM shell `$CLAUDE_PLUGIN_ROOT` and `$CLAUDE_SKILL_DIR` are empty. The plugin's
+is a host staging path of the form `$TMPDIR/claude-hostloop-plugins/<hash>/<basename>/…` — a symlink
+Desktop creates only when the host plugin path contains a space; a path with no space is passed
+through as the raw host path. Either way the path does not exist in the VM, and in the VM shell `$CLAUDE_PLUGIN_ROOT` and `$CLAUDE_SKILL_DIR` are empty. The plugin's
 files are reachable in the VM only at `/sessions/<slug>/mnt/.local-plugins/…` or
 `/sessions/<slug>/mnt/.remote-plugins/plugin_<id>/…`.
 

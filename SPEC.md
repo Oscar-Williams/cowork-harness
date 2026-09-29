@@ -604,7 +604,7 @@ there are three families:
 when `--allow-failing` records a failing run on purpose (exit `0`, `ok: true`, `verdict.pass: false`).
 **A `record` refusal after the run publishes the run.** Once the agent has finished and returned a result,
 anything that stops the cassette being written — a failing verdict without `--allow-failing`, an assert on
-an artifact too large to commit, the record-time scan quarantining a host/machine-inventory finding, or any
+an artifact too large to commit (also waived by `--allow-failing`), the record-time scan quarantining a host/machine-inventory finding, or any
 other error before the write (a cassette directory that cannot be created, say) — exits `1` with
 `ok: false`, `error.category: "runtime"`, and that run in `results[0]` (a single file) or on its `failed`
 item as `verdict`/`result` (a batch), and its cost counts toward a batch's `--max-budget-usd` running total
@@ -1048,7 +1048,7 @@ Covered-surface changes follow semver as of `1.0.0` — see [RELEASING.md](./REL
   single-file `--allow-failing` recording of a failing run now says `ok: true` (it said `false`), and
   `record <empty dir/> --dry-run` says `ok: false` (it said `true`, beside exit `2`).
 - *Error envelope (category and `results`) — `record`.* A `record` refusal after the run (a failing
-  verdict without `--allow-failing`, an assert on an artifact too large to commit, a quarantined
+  verdict without `--allow-failing`, an assert on an artifact too large to commit (also waived by `--allow-failing`), a quarantined
   inventory finding, or any other error before the cassette is written) has category `runtime`; it was
   `usage`. Its error envelope carries the refused run in `results[0]` beside the non-null `error`, and a
   batch's `failed` item carries `verdict`/`result`; both were absent. The exit code (`1`) is unchanged

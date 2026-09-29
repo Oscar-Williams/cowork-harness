@@ -115,7 +115,7 @@ All notable changes to this project are documented here. The format is based on
   - *To keep the old behaviour:* read `.results[0].verdict.pass` instead of `.ok`.
 - **A `record` refusal after the run is category `runtime` and carries the run it refused.** Once the
   agent has finished, anything that stops the cassette being written — a failing verdict without
-  `--allow-failing`, an assert on an artifact too large to commit, a quarantined host/machine-inventory
+  `--allow-failing`, an assert on an artifact too large to commit (also waived by `--allow-failing`), a quarantined host/machine-inventory
   finding, or any other error before the write — still exits 1 with `ok: false`, but its category is
   `runtime` (it was `usage`: the scenario loaded and ran, so it is not a usage error), the run is in
   `results[0]` beside the error (a single file) or on the `failed` item's `verdict`/`result` (a batch),
@@ -413,14 +413,16 @@ All notable changes to this project are documented here. The format is based on
   deeper (`docs/plugin-root.md`, `docs/session.md`, the skill's `scenario-schema.md`).
 - **New fidelity gap:** at `hostloop` the plugin path the agent substitutes into a skill's text is the
   run dir's staged copy, whose `/mnt/.local-plugins/…` suffix matches the VM path; real Cowork
-  substitutes `$TMPDIR/claude-hostloop-plugins/<hash>/…`. Both are dead in the VM shell, but a skill that
+  substitutes `$TMPDIR/claude-hostloop-plugins/<hash>/<basename>/…` (a symlink Desktop makes only when
+  the host plugin path contains a space; otherwise the raw host path). Both are dead in the VM shell, but a skill that
   rewrites the host path into a VM path by its suffix passes in the harness and fails in Cowork
   (`docs/fidelity-gaps.md`).
 - **Asserting on a `context: fork` skill's answer.** `subagent_output_contains` covers what a run
   dispatches, not a fork skill invoked through the `Skill` tool, whose answer comes back as the `Skill`
   tool result; `semantic_matches` does not grade that answer either, even with `include_subagent_text`.
-  Use `tool_result_matches` anchored on `completed (forked execution)` (`docs/scenario.md`, the skill's
-  assertion references).
+  For a foreground fork, use `tool_result_matches` anchored on the result agent 2.1.284 builds,
+  `Skill "<name>" completed (forked execution).` (a backgrounded fork's result carries no answer)
+  (`docs/scenario.md`, the skill's assertion references).
 - **What a run's cost counts:** `cost.usd` (and the index row's `costUsd`) is the agent session's own
   spend and leaves out the `semantic_matches` judge and the LLM decider. `max_cost_usd`, `stats` and
   `--max-budget-usd` inherit that scope (`docs/cli.md`, `docs/scenario.md`, `docs/stats.md`, the skill's
