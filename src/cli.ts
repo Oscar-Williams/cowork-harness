@@ -2261,7 +2261,10 @@ async function cmdSkill(rawArgs: string[]) {
     const previewBaseline = loadBaseline("latest");
     resolveLaunchSources(session, previewBaseline, effectiveTier(fidelity, previewBaseline), resume, {
       stageFilters: false,
-      quiet: true, // executeScenario resolves again and prints any warning then; a preview prints none, as before
+      // A real run resolves again in executeScenario and prints any warning (a soft-missing source excluded)
+      // there, once; a preview has no second pass, so it prints them here — it must not list a dropped source
+      // as though it will load.
+      quiet: !dryRun,
     });
   } catch (e) {
     if (e instanceof UsageError) return void fail("skill", "usage", e.message, e.hint, isJson);
@@ -4064,11 +4067,13 @@ function cmdAnswer(args: string[]) {
     answers[key] = q0?.multiSelect ? chooses : chooses[0];
   } else return void fail("answer", "usage", 'answer needs --choose <label> or --answer "<q>=<label>"', undefined, json);
   // `--answer` writes without reading the gate first, so a missing directory or gate surfaces here: the
-  // same usage error `--choose` reports when it cannot read the gate, not a harness failure.
+  // same usage error `--choose` reports when it cannot read the gate. A gate that exists but whose answer
+  // cannot be written (an unwritable directory) is the environment: runtime.
   try {
     answerGate(dir, seq, answers);
   } catch (e) {
-    return void fail("answer", "usage", `cannot answer gate ${seq} in ${dir}: ${String((e as Error).message)}`, undefined, json);
+    const category = e instanceof UsageError ? "usage" : "runtime";
+    return void fail("answer", category, `cannot answer gate ${seq} in ${dir}: ${String((e as Error).message)}`, undefined, json);
   }
   if (json) out(JSON.stringify({ tool: "cowork-harness", command: "answer", ok: true, gate: seq, answers }));
   else log(`✓ answered gate ${seq}: ${JSON.stringify(answers)}`);
@@ -4278,6 +4283,9 @@ async function cmdVerifyRun(args: string[]) {
   // Shape-gate FIRST, before loading anything: a legacy/mixed/pre-completion dir gets a message naming
   // what it IS (see turn-layout.ts's preLayoutMessage), not a generic "no result.json" that reads as
   // corruption when the file is sitting right there at the root.
+  // A path the caller named that does not exist is their input (usage); a directory that exists but holds
+  // no completed run is the prior run's state (runtime, below).
+  if (!existsSync(runDir)) return fail("verify-run", "usage", `verify-run: run dir not found: ${runDir}`, undefined, json);
   let turns: number[];
   try {
     turns = requireTurns(runDir, "verify-run");
@@ -4388,9 +4396,10 @@ async function cmdVerifyRun(args: string[]) {
   try {
     scenario = parseScenarioFile(scenarioFile);
   } catch (e) {
+    // The scenario file is the caller's input: absent or not loadable is a usage error, as it is for `run`.
     return fail(
       "verify-run",
-      "runtime",
+      "usage",
       `verify-run: cannot load scenario ${scenarioFile}: ${(e as Error).message}`,
       undefined,
       isJsonOutput(args),

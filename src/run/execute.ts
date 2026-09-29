@@ -502,7 +502,7 @@ export async function executeScenario(scenario: Scenario, opts: ExecuteOptions =
   // reject a --session-id outside the safe charset rather than collapsing it — distinct ids like
   // "a/b" and "a-b" used to map onto the SAME persisted directory (a silent collision).
   if (opts.sessionId !== undefined && !/^[A-Za-z0-9_-]+$/.test(opts.sessionId))
-    throw new Error(
+    throw new UsageError(
       `--session-id "${opts.sessionId}" may contain only letters, digits, "_" or "-" (no path separators or other characters)`,
     );
   const stable = opts.sessionId ? `sess-${opts.sessionId}` : undefined;

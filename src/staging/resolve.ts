@@ -84,17 +84,18 @@ export function safePathSegment(s: string, what: string): string {
   return s;
 }
 
-/** Require a declared source PATH to be an existing regular file (mirrors the upload `isFile` guard). */
+/** Require a declared source PATH to be an existing regular file (mirrors the upload `isFile` guard). A missing
+ *  or wrong-kind path is the user's input, so both are `UsageError`s. */
 export function requireFile(path: string, what: string): string {
-  if (!existsSync(path)) throw new Error(`${what} not found: ${path}`);
-  if (!statSync(path).isFile()) throw new Error(`${what} must be a file, not a directory: ${path}`);
+  if (!existsSync(path)) throw new UsageError(`${what} not found: ${path}`);
+  if (!statSync(path).isFile()) throw new UsageError(`${what} must be a file, not a directory: ${path}`);
   return path;
 }
 
 /** Require a declared source PATH to be an existing directory (plugins/folders/skills model directories). */
 export function requireDir(path: string, what: string): string {
-  if (!existsSync(path)) throw new Error(`${what} not found: ${path}`);
-  if (!statSync(path).isDirectory()) throw new Error(`${what} must be a directory, not a file: ${path}`);
+  if (!existsSync(path)) throw new UsageError(`${what} not found: ${path}`);
+  if (!statSync(path).isDirectory()) throw new UsageError(`${what} must be a directory, not a file: ${path}`);
   return path;
 }
 

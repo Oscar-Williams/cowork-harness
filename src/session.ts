@@ -707,14 +707,14 @@ export function resolveLaunchSources(
   // Writing settings.json/cowork_settings.json into a user-supplied EXISTING dir would clobber
   // their real Claude config. Require an explicit opt-in; a fresh/non-existent pinned dir is fine.
   if (pinnedConfigDir && existsSync(pinnedConfigDir) && (process.env.COWORK_HARNESS_ALLOW_CONFIG_DIR_WRITE ?? "") === "")
-    throw new Error(
+    throw new UsageError(
       `plugins.config_dir is an existing directory (${pinnedConfigDir}); the harness would overwrite its settings.json/cowork_settings.json. ` +
         `Set COWORK_HARNESS_ALLOW_CONFIG_DIR_WRITE=1 to allow, or use a managed dir (config_dir: null).`,
     );
   // A pinned config_dir that exists but is NOT a directory (e.g. a regular file) would otherwise fail
   // cryptically at the mkdirSync below with ENOTDIR — behind the write escape-hatch above. Fail clearly.
   if (pinnedConfigDir && existsSync(pinnedConfigDir) && !statSync(pinnedConfigDir).isDirectory())
-    throw new Error(`plugins.config_dir exists but is not a directory: ${pinnedConfigDir}`);
+    throw new UsageError(`plugins.config_dir exists but is not a directory: ${pinnedConfigDir}`);
   // Fail-loud is the only path for a declared source. A missing source FAILS by default (the
   // runtimes existsSync-skip the copy, so the agent silently gets a path that does not exist — a
   // confusing late failure, or a manufactured green). COWORK_HARNESS_SOFT_MISSING=1 downgrades every
@@ -742,7 +742,7 @@ export function resolveLaunchSources(
       }
       const dest = safePathSegment(basename(src), "skill basename");
       if (skillDests.has(dest))
-        throw new Error(
+        throw new UsageError(
           `duplicate skill destination "skills/${dest}" — two skills.local entries share a basename (they would overwrite). Rename or relocate one.`,
         );
       skillDests.add(dest);
@@ -759,7 +759,7 @@ export function resolveLaunchSources(
     const src = expand(u);
     // Uploads model attached FILES; a directory would be copied recursively, diverging from Cowork.
     if (existsSync(src) && !statSync(src).isFile())
-      throw new Error(`upload "${src}" is a directory; uploads model attached files. Use folders: for a directory mount.`);
+      throw new UsageError(`upload "${src}" is a directory; uploads model attached files. Use folders: for a directory mount.`);
     mounts.push({ hostPath: src, mountPath: `uploads/${safePathSegment(basename(src), "upload basename")}`, mode: "r", kind: "upload" });
   }
   // Work folders. Real Cowork (Desktop >= MIN) mounts each connected folder at `mnt/<name>` where
@@ -955,9 +955,9 @@ export function resolveLaunchSources(
       if (entry.source !== undefined) {
         const rel = relative(mkRoot, pluginSrc);
         if (rel === "")
-          throw new Error(`cowork-harness: marketplace entry.source "${entry.source}" resolves to the marketplace root itself`);
+          throw new UsageError(`cowork-harness: marketplace entry.source "${entry.source}" resolves to the marketplace root itself`);
         if (rel.startsWith("..") || isAbsolute(rel))
-          throw new Error(`cowork-harness: marketplace entry.source "${entry.source}" escapes the marketplace root`);
+          throw new UsageError(`cowork-harness: marketplace entry.source "${entry.source}" escapes the marketplace root`);
       }
       if (!existsSync(pluginSrc)) {
         if (!pMkt) bareLocalSourceMissing.add(en); // bare name with missing source; post-loop decides
@@ -969,12 +969,12 @@ export function resolveLaunchSources(
       // realpath and require containment before mounting. (Runs only once the source exists, since
       // realpath requires it; the lexical guard already rejected absolute / `..` declared sources.)
       if (!containedRealPath(realpathSync(mkRoot), realpathSync(pluginSrc)))
-        throw new Error(
+        throw new UsageError(
           `cowork-harness: marketplace entry.source "${entry.source ?? `./${pName}`}" resolves outside the marketplace root (symlink escape)`,
         );
       // marketplace plugin sources must be directories (same kind-check as local_plugins / remote_plugins).
       if (!statSync(pluginSrc).isDirectory())
-        throw new Error(`cowork-harness: marketplace entry.source "${entry.source ?? `./${pName}`}" is not a directory`);
+        throw new UsageError(`cowork-harness: marketplace entry.source "${entry.source ?? `./${pName}`}" is not a directory`);
       // A bare `enabled` name (no @marketplace) matches EVERY marketplace defining it → duplicate mounts.
       // Dedupe bare names only; a qualified `foo@mkt` is already pinned to one marketplace by the guard above.
       if (!pMkt) {
@@ -1069,7 +1069,7 @@ export function resolveLaunchSources(
   for (const m of presentMounts) {
     if (seenDest.has(m.mountPath)) {
       const reserved = (FIXED_MOUNT_DIRS as string[]).includes(m.mountPath);
-      throw new Error(
+      throw new UsageError(
         reserved
           ? `mount destination "${m.mountPath}" collides with a reserved Cowork mount — a connected folder resolved to a fixed special-dir name. Rename the folder.`
           : `duplicate mount destination "${m.mountPath}" — two sources map to it (they would overwrite). Rename or qualify one.`,

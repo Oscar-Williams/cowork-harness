@@ -1,5 +1,5 @@
 import { warn, envPositiveNumber } from "../io.js";
-import { UnansweredError, DeciderTimeoutError } from "../errors.js";
+import { UnansweredError, DeciderTimeoutError, UsageError } from "../errors.js";
 import { installTerminationHandler, registerTerminationStep } from "../termination.js";
 import { mkdirSync, readdirSync, existsSync, readFileSync, writeFileSync, renameSync, rmSync } from "node:fs";
 import { join } from "node:path";
@@ -150,8 +150,10 @@ export function answerGate(dir: string, seq: number, answers: Record<string, str
       readErr = e;
     }
   }
+  // The gate the caller named is not there (or not a gate): their input, so a UsageError. A failure to WRITE
+  // the answer below is the environment and propagates as a plain error.
   if (typeof id !== "string" || id === "")
-    throw new Error(
+    throw new UsageError(
       `answerGate: cannot recover the request id for seq ${seq} in ${dir} — refusing to write an id-less response ` +
         `(a response must carry its gate's id so it cannot answer the wrong gate)` +
         (readErr ? `: ${String((readErr as Error)?.message ?? readErr)}` : id === undefined ? "" : `: req file had no string "id"`),

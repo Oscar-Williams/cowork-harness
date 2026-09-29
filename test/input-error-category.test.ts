@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readdirSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -76,6 +76,81 @@ describe.skipIf(!can)("a missing input path is a usage error and leaves no run d
     expect(runsContent(runs)).toEqual([]);
   });
 
+  // The WRONG KIND of path is the same class of input error as a missing one.
+  it("skill <a file, not a folder> hi --dry-run → usage", () => {
+    const runs = mkdtempSync(join(tmpdir(), "iec-runs-"));
+    const f = join(mkdtempSync(join(tmpdir(), "iec-")), "plugin.txt");
+    writeFileSync(f, "x");
+    const r = cli(["skill", f, "hi", "--dry-run"], runs);
+    expect(r.code, r.stderr).toBe(2);
+    expect(r.doc.error.category).toBe("usage");
+  });
+
+  it("skill <plugin> hi --upload <a directory> --dry-run → usage", () => {
+    const runs = mkdtempSync(join(tmpdir(), "iec-runs-"));
+    const plugin = mkdtempSync(join(tmpdir(), "iec-plugin-"));
+    writeFileSync(join(plugin, "SKILL.md"), "---\nname: p\ndescription: d\n---\nbody\n");
+    const r = cli(["skill", plugin, "hi", "--upload", mkdtempSync(join(tmpdir(), "iec-dir-")), "--dry-run"], runs);
+    expect(r.code, r.stderr).toBe(2);
+    expect(r.doc.error.category).toBe("usage");
+  });
+
+  it("skill <plugin> hi --folder <a file> --model x → usage, no run dir", () => {
+    const runs = mkdtempSync(join(tmpdir(), "iec-runs-"));
+    const plugin = mkdtempSync(join(tmpdir(), "iec-plugin-"));
+    writeFileSync(join(plugin, "SKILL.md"), "---\nname: p\ndescription: d\n---\nbody\n");
+    const r = cli(["skill", plugin, "hi", "--folder", join(plugin, "SKILL.md"), "--model", "claude-test-model"], runs);
+    expect(r.code, r.stderr).toBe(2);
+    expect(r.doc.error.category).toBe("usage");
+    expect(runsContent(runs)).toEqual([]);
+  });
+
+  it("skill <plugin> hi --upload a/x.pdf --upload b/x.pdf (one destination) --dry-run → usage", () => {
+    const runs = mkdtempSync(join(tmpdir(), "iec-runs-"));
+    const plugin = mkdtempSync(join(tmpdir(), "iec-plugin-"));
+    writeFileSync(join(plugin, "SKILL.md"), "---\nname: p\ndescription: d\n---\nbody\n");
+    const a = mkdtempSync(join(tmpdir(), "iec-a-"));
+    const b = mkdtempSync(join(tmpdir(), "iec-b-"));
+    writeFileSync(join(a, "x.pdf"), "a");
+    writeFileSync(join(b, "x.pdf"), "b");
+    const r = cli(["skill", plugin, "hi", "--upload", join(a, "x.pdf"), "--upload", join(b, "x.pdf"), "--dry-run"], runs);
+    expect(r.code, r.stderr).toBe(2);
+    expect(r.doc.error.category).toBe("usage");
+  });
+
+  it('skill <plugin> hi --session-id "a/b" --model x → usage, no run dir', () => {
+    const runs = mkdtempSync(join(tmpdir(), "iec-runs-"));
+    const plugin = mkdtempSync(join(tmpdir(), "iec-plugin-"));
+    writeFileSync(join(plugin, "SKILL.md"), "---\nname: p\ndescription: d\n---\nbody\n");
+    const r = cli(["skill", plugin, "hi", "--session-id", "a/b", "--model", "claude-test-model"], runs);
+    expect(r.code, r.stderr).toBe(2);
+    expect(r.doc.error.category).toBe("usage");
+    expect(runsContent(runs)).toEqual([]);
+  });
+
+  it("skill <missing plugin> hi --ablate-skill --dry-run → usage (ablation does not skip the input check)", () => {
+    const runs = mkdtempSync(join(tmpdir(), "iec-runs-"));
+    const missing = join(mkdtempSync(join(tmpdir(), "iec-")), "nope");
+    const r = cli(["skill", missing, "hi", "--ablate-skill", "--dry-run"], runs);
+    expect(r.code, r.stderr).toBe(2);
+    expect(r.doc.error.category).toBe("usage");
+  });
+
+  it("run <scenario whose session declares a skill that does not exist> --model x → usage, no run dir", () => {
+    const runs = mkdtempSync(join(tmpdir(), "iec-runs-"));
+    const work = mkdtempSync(join(tmpdir(), "iec-run-"));
+    writeFileSync(join(work, "session.yaml"), `skills:\n  local:\n    - ./nope\n`);
+    writeFileSync(
+      join(work, "s.yaml"),
+      `name: missing-skill\nprompt: "x"\nfidelity: protocol\nsession: ./session.yaml\nassert:\n  - result: success\n`,
+    );
+    const r = cli(["run", join(work, "s.yaml"), "--model", "claude-test-model"], runs, work);
+    expect(r.code, r.stderr).toBe(2);
+    expect(r.doc.error.category).toBe("usage");
+    expect(r.doc.error.message).toMatch(/not found/);
+    expect(runsContent(runs), "a refused run left a run dir behind").toEqual([]);
+  });
+
   it("run <scenario whose session uploads a missing file> --model x → usage, no run dir", () => {
     const runs = mkdtempSync(join(tmpdir(), "iec-runs-"));
     const work = mkdtempSync(join(tmpdir(), "iec-run-"));
@@ -89,5 +164,91 @@ describe.skipIf(!can)("a missing input path is a usage error and leaves no run d
     expect(r.doc.error.category).toBe("usage");
     expect(r.doc.error.message).toMatch(/not found/);
     expect(runsContent(runs), "a refused run left a run dir behind").toEqual([]);
+  });
+
+  // verify-run: a run dir or scenario file the caller named that is not there is their input. (A run dir that
+  // exists but holds no completed run stays `runtime`: that is the prior run's state, not a typo.)
+  function keptRun(): string {
+    const root = mkdtempSync(join(tmpdir(), "iec-kept-"));
+    const workDir = join(root, "work", "session", "mnt");
+    mkdirSync(join(workDir, "outputs"), { recursive: true });
+    const t1 = join(root, "turns", "1");
+    mkdirSync(t1, { recursive: true });
+    writeFileSync(
+      join(t1, "result.json"),
+      JSON.stringify({
+        scenario: "smoke",
+        fidelity: "container",
+        baseline: "desktop-1.14271.0",
+        result: "success",
+        decisions: [],
+        toolCounts: { Read: 1 },
+        gateDeliveries: [],
+        egress: [],
+        assertions: [],
+        subagents: [],
+        outDir: root,
+        workDir,
+        durationMs: 1,
+        scan: { outputsDeletes: [], hostPathLeaked: false, selfHealRan: false },
+      }),
+    );
+    writeFileSync(join(t1, "run.jsonl"), JSON.stringify({ t: "run", scenario: "smoke" }) + "\n");
+    writeFileSync(join(t1, "trace.json"), JSON.stringify({ questions: [], steps: [] }));
+    return root;
+  }
+
+  it("verify-run <missing run dir> <scenario> → usage", () => {
+    const runs = mkdtempSync(join(tmpdir(), "iec-runs-"));
+    const d = mkdtempSync(join(tmpdir(), "iec-vr-"));
+    writeFileSync(join(d, "s.yaml"), "name: smoke\nprompt: x\nfidelity: container\nassert:\n  - result: success\n");
+    const r = cli(["verify-run", join(d, "nope"), join(d, "s.yaml")], runs);
+    expect(r.code, r.stderr).toBe(2);
+    expect(r.doc.error.category).toBe("usage");
+  });
+
+  it("verify-run <run dir> <missing scenario> → usage", () => {
+    const runs = mkdtempSync(join(tmpdir(), "iec-runs-"));
+    const r = cli(["verify-run", keptRun(), join(mkdtempSync(join(tmpdir(), "iec-vr-")), "nope.yaml")], runs);
+    expect(r.code, r.stderr).toBe(2);
+    expect(r.doc.error.category).toBe("usage");
+  });
+
+  it("verify-run <an empty dir> <scenario> stays runtime (not a completed run)", () => {
+    const runs = mkdtempSync(join(tmpdir(), "iec-runs-"));
+    const d = mkdtempSync(join(tmpdir(), "iec-vr-"));
+    writeFileSync(join(d, "s.yaml"), "name: smoke\nprompt: x\nfidelity: container\nassert:\n  - result: success\n");
+    const r = cli(["verify-run", mkdtempSync(join(tmpdir(), "iec-empty-")), join(d, "s.yaml")], runs);
+    expect(r.code, r.stderr).toBe(2);
+    expect(r.doc.error.category).toBe("runtime");
+  });
+
+  // Under COWORK_HARNESS_SOFT_MISSING a missing source is dropped, not refused. The preview must not show it
+  // as though it will load: the dry run prints the same one exclusion warning the real run prints.
+  it("SOFT_MISSING: skill <missing plugin> hi --dry-run says the plugin is excluded, once", () => {
+    const missing = join(mkdtempSync(join(tmpdir(), "iec-")), "nope");
+    const r = spawnSync("node", [CLI, "skill", missing, "hi", "--dry-run"], {
+      encoding: "utf8",
+      env: { ...inheritedEnv, COWORK_HARNESS_SOFT_MISSING: "1", COWORK_HARNESS_MODEL: "" },
+    });
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stderr.match(/excluded \(COWORK_HARNESS_SOFT_MISSING\)/g)?.length, r.stderr).toBe(1);
+    expect(r.stderr).toContain(missing);
+  });
+
+  // `answer` maps only the caller's input to usage. A gate it found but could not write the answer for (an
+  // unwritable directory) is the environment failing — runtime.
+  it.skipIf(process.getuid?.() === 0)("answer: an unwritable decider dir is a runtime error, not usage", () => {
+    const runs = mkdtempSync(join(tmpdir(), "iec-runs-"));
+    const d = mkdtempSync(join(tmpdir(), "iec-answer-"));
+    writeFileSync(join(d, "req-1.json"), JSON.stringify({ id: "g1", questions: [{ question: "q" }] }));
+    chmodSync(d, 0o500);
+    try {
+      const r = cli(["answer", d, "--gate", "1", "--answer", "q=a"], runs);
+      expect(r.code, r.stderr).toBe(2);
+      expect(r.doc.error.category).toBe("runtime");
+    } finally {
+      chmodSync(d, 0o700);
+    }
   });
 });
