@@ -51,8 +51,9 @@ All notable changes to this project are documented here. The format is based on
   runs at `/var/empty` and reports its realpath, a system path that identifies no one. `verify-cassettes`
   already called it clean, but the policy `init-redact` copies rewrote it, so a cassette lost the evidence
   of where the agent ran. The policy now keeps it (and any path under it with no `..` segment and no `%`)
-  exactly where the scanner calls it clean; the scanner in turn now matches it case-insensitively and when
-  it is quoted in backticks, as the policy does, and still flags a slugged home segment glued on after it.
+  only where the scanner also calls it clean (the policy stays at least as strict); the scanner in turn
+  now matches it case-insensitively and when it is quoted in backticks, as the policy does, and both still
+  flag a slugged home segment glued on after it.
 - **A host path the user supplied no longer fails `host_path_leak`.** At `container`/`microvm` a run
   failed the moment the agent read or quoted an uploaded or connected file that itself contains host paths
   (a kept run's `result.json`, a log, a config) — though nothing leaked from the harness, and real Cowork

@@ -1069,7 +1069,8 @@ counts). Uploads and `mode:r` connected folders are hash-only, and a file over t
   link stops resolving — and if a second root sits inside such a path, a stray `]` follows the token. When you
   write your own rule, bound a lazy repetition that precedes a lookahead the same way (`{1,1024}?`, not
   `+?`): unbounded, a long run of the root with no `/mnt/` costs time proportional to its length squared.
-  Both layers leave `/private/var/empty` alone — the host-loop agent's working directory from Desktop
+  Both layers leave `/private/var/empty` alone (the policy keeps it only where the scanner also calls it
+  clean; it is at least as strict, never looser) — the host-loop agent's working directory from Desktop
   2.7032.0, a system path that identifies no one — together with any path under it that has no `..`
   segment. It is kept only as a whole path, ended by whitespace, a quote, `)`, `]`, a backtick or the end of
   the text; `/private/var/empty.`, `/private/var/emptyish/…`, a path containing `%` (which can spell `..`

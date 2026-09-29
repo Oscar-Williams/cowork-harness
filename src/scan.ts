@@ -372,8 +372,8 @@ function allowed(sample: string, cls: string, allow: AllowPattern[]): boolean {
  *  host-loop agent runs at `/var/empty` and reports its realpath. Exact directory, or a path under it with
  *  no `..` segment (which could walk out of it into a path that does identify someone).
  *
- *  The reference redaction policy (`.cowork-redact.json`) keeps the same set, so a redacted recording is
- *  exactly as clean as this scanner says: compared case-insensitively (the path class and the policy both
+ *  The reference redaction policy (`.cowork-redact.json`) exempts it too, and keeps only what this scanner
+ *  also calls clean (the policy is at least as strict, never looser): compared case-insensitively (the path class and the policy both
  *  match with `i`), and cut at `]` or a backtick, which end a path in the policy but not in this pattern
  *  (a backtick-quoted `/private/var/empty` would otherwise carry the closing backtick into the sample). A
  *  trailing `.`, `,` or `;` ends it in neither, so `/private/var/empty.` is not exempt in either layer; nor is
@@ -393,6 +393,9 @@ function isSystemConstantPath(sample: string): boolean {
     const tail = sample.slice(cut);
     if (new RegExp(PATH_PATTERN.source, PATH_PATTERN.flags.replace("g", "")).test(tail)) return false;
     if (/\/(?:users|home|root|private|var|system|volumes)\//i.test(tail)) return false;
+    // A slugged home segment glued straight onto the cut char (`]-Users-…`) has no boundary the path
+    // pattern's slug arm accepts, but the policy's slug rule does redact it.
+    if (/-(?:users|home|root)-/i.test(tail)) return false;
   }
   if (p.split("/").includes("..")) return false;
   return SYSTEM_CONSTANT_PATHS.some((c) => p === c || p.startsWith(`${c}/`));
