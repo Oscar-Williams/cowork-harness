@@ -105,7 +105,7 @@ Because real Cowork runs host-loop by default, and the bare variable's value at 
 observation, **author for the mount-discovery pattern unconditionally**: never let a VM shell step open a
 path built from `${CLAUDE_PLUGIN_ROOT}`; discover the mount, as shown above.
 
-`CLAUDE_SKILL_DIR` is empty in the in-VM shell too, and the path the agent substitutes into the skill's
+`CLAUDE_SKILL_DIR` is empty in the in-VM shell at host-loop too, and the path the agent substitutes into the skill's
 text does not help: at host-loop it is a HOST path, which does not exist in the VM. Do not rewrite it
 into a VM path by its suffix either — the harness's host path happens to share the VM path's
 `/mnt/.local-plugins/…` suffix, but real Cowork's does not, so that rewrite passes here and fails in
