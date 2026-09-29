@@ -617,7 +617,7 @@ whether it **survives `replay`**. Both are in the key's row below, and the repla
 | `allow_undelivered_deliverables: true` | verdict modifier — suppresses the `undelivered_deliverables` WARN. Working in the scratchpad is Cowork's designed pattern, so a skill that legitimately leaves intermediates, caches or downloaded inputs behind can say so instead of carrying permanent noise. The signal is warn-only and never fails a run on its own; reach for this when the scratch activity is intentional, not to silence a real delivery gap. Also suppresses the sibling `delivery_unobservable` WARN on `lane: remote` (where delivery can't be measured at all — no remote delivery tool is modeled); on that lane the key means "I know delivery is unverifiable here and accept it", **not** "the files were delivered" |
 | `allow_outputs_delete: true` | verdict modifier — accepts a detected outputs delete instead of failing the run, for a skill whose deletion is intended. Needed because omitting `no_delete_in_outputs` does **not** permit deletes: a detected delete fails via the `outputs_delete` signal precisely *because* the key was not authored. **Mutually exclusive** with `no_delete_in_outputs` (asserting both is rejected at load). It silences `outputs_delete`, `outputs_delete_unconfirmed` and `outputs_diff_unavailable`. This WAIVES the harness's post-hoc detection — it does not model Cowork's `allow_cowork_file_delete` approval handshake, so a skill that would catch a real `EPERM` and escalate still behaves differently here |
 | `allow_delete_in: [<mount>…]` | verdict modifier — accepts detected deletes in the named mounts, the per-mount analogue of `allow_outputs_delete` and the modelled counterpart of production's per-mount `fileDeleteApprovedMounts`. Suppresses the `mount_delete` WARN for those mounts and waives them for `no_delete_in_mounts`. **Waives the verdict only** — detection still runs and the hits stay in `result.json` for forensics, exactly as `allow_outputs_delete` behaves. Listing `"outputs"` alongside `no_delete_in_outputs` is rejected at load |
-| `transcript_no_host_path: true` | no host path (`/Users/`, `/opt/cowork/`, `/home/`, `/root/`, and the macOS `/private/var/`, `/private/tmp/`, `/var/folders/`, `/Volumes/` roots — also inside a `file://` or `computer://` link) leaked into model-visible text — **incompatible with `hostloop` AND `protocol`**: hostloop's native file tools legitimately expose real host paths (that's the tier's whole point), and protocol (L0) runs the agent's file tools on the real host cwd with no sealed filesystem, so this assertion fails BY DESIGN at both (the harness warns loud at run start if you assert it anyway); use `container`/`microvm` for this check |
+| `transcript_no_host_path: true` | no host path (`/Users/`, `/opt/cowork/`, `/home/`, `/root/`, and the macOS `/private/var/`, `/private/tmp/`, `/var/folders/`, `/Volumes/` roots — also inside a `file://` or `computer://` link) leaked into model-visible text (a path that came verbatim from the scenario's own input files or prompt is not a leak — see `host_path_leak` below) — **incompatible with `hostloop` AND `protocol`**: hostloop's native file tools legitimately expose real host paths (that's the tier's whole point), and protocol (L0) runs the agent's file tools on the real host cwd with no sealed filesystem, so this assertion fails BY DESIGN at both (the harness warns loud at run start if you assert it anyway); use `container`/`microvm` for this check |
 | `egress_denied: <host>` | the host was blocked by the egress proxy |
 | `egress_allowed: <host>` | the host was allowed through |
 | `artifact_json: {…}` | assert over a JSON artifact's contents — see below |
@@ -780,6 +780,18 @@ or the fidelity tier. Recognize these before "fixing" a non-bug:
   `transcript_no_host_path`. At `fidelity: cowork` the skip follows the **resolved** tier — a `cowork`
   run that lands on `container` is armed. Author `transcript_no_host_path` to enforce cleanliness where
   it is valid (the assertion is incompatible-by-design with `hostloop`/`protocol`).
+  A host path the **user supplied** is not a leak: before the agent runs, the staged uploads and connected
+  folders (and each turn's prompt) are scanned for host paths, and a path the agent later shows **verbatim**
+  is exempt, so quoting a kept run's `result.json` or a log you connected does not fail the run. The
+  exemption is exact: a sub-path of an input path, a different spelling (`/var/…` vs `/private/var/…`), or
+  a path followed by a sentence-final `.` still counts. It never covers a location the harness created
+  for this run (the run dir, the microvm session dir, the staged agent's dir), and it is captured on the
+  first turn only, so a path the agent writes into a connected folder is not exempt on a later turn.
+  Files over 2 MiB, binary files, `.git/` and `node_modules/` are not scanned (past 5,000 files or 64 MiB
+  the rest are skipped too, with a notice) — their paths still count. A result that relied on the
+  exemption carries `scan.hostPathsFromInputs` (and `scan.inputHostPathTokens`, the corpus size) and
+  prints a `::notice::`; the paths themselves are never written to `result.json`. The same rule applies to
+  `transcript_no_host_path`.
 
 - **`scan_unavailable`** (**warn**, live lane only) — `events.jsonl` was missing/corrupt, so
   `RunResult.scan` is undefined and the host-path guard and the outputs-delete **text scan did not run**

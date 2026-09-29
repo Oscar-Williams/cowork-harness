@@ -40,6 +40,17 @@ All notable changes to this project are documented here. The format is based on
   of where the agent ran. The policy now keeps it (and any path under it with no `..` segment) exactly where
   the scanner calls it clean; the scanner in turn now matches it case-insensitively and when it is quoted in
   backticks, as the policy does.
+- **A host path the user supplied no longer fails `host_path_leak`.** At `container`/`microvm` a run
+  failed the moment the agent read or quoted an uploaded or connected file that itself contains host paths
+  (a kept run's `result.json`, a log, a config) — though nothing leaked from the harness, and real Cowork
+  shows the same bytes. Before the agent runs, the staged uploads and connected folders are now scanned for
+  host paths (on the first turn only; each turn's prompt is added too), and a path the agent shows verbatim
+  is exempt. The exemption is exact — a sub-path, another spelling or a different path still fails — and
+  never covers a location the harness created for this run. The same rule applies to
+  `transcript_no_host_path`, so a scenario asserting `transcript_no_host_path: false` against such a path
+  now fails. `result.json`'s `scan` gains two optional counts, `inputHostPathTokens` and
+  `hostPathsFromInputs` (the paths themselves are kept only in a private file in the run dir), and a result
+  that relied on the exemption prints a `::notice::`.
 
 ## [4.0.0] — 2026-09-29
 

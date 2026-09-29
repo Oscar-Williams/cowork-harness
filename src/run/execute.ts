@@ -3,6 +3,8 @@ import { BoundaryError, UsageError, LegacyRunDirError, compactSchemaError } from
 import { ZodError } from "zod";
 import { readFileSync, writeFileSync, appendFileSync, mkdirSync, existsSync, rmSync, readdirSync, renameSync, realpathSync } from "node:fs";
 import { currentTurnEventLines, TURN_START_MARKER } from "./turn-events.js";
+import { hostPathTokens } from "./host-path-tokens.js";
+import { isInputBorneHostPath, readInputHostPathCorpus, type InputHostPathCorpus } from "./input-host-paths.js";
 import { hasTurnDirs, currentTurnFromDirs, turnWriteDir, classifyRunDir, preLayoutMessage } from "./turn-layout.js";
 import { randomUUID, createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
@@ -1250,7 +1252,13 @@ export async function executeScenario(scenario: Scenario, opts: ExecuteOptions =
 
     // Detect deletes across every DELETE-DENIED mount, not just outputs — production's denial is a
     // property of the mount class, so a connected `rw` folder is in scope too.
-    const scan = scanEvents(join(outDir, "events.jsonl"), deleteDeniedRootsFromPlan(plan));
+    // Host paths the user supplied — tokens from the staged input files (captured before the agent ran, on
+    // the first turn) plus this turn's prompt — are not a leak when the agent quotes them back.
+    const inputCorpus: InputHostPathCorpus = {
+      tokens: new Set([...readInputHostPathCorpus(outDir), ...hostPathTokens(String(scenario.prompt ?? ""))]),
+      neverExemptRoots: ownHostRoots(outDir, sessionId, baseline),
+    };
+    const scan = scanEvents(join(outDir, "events.jsonl"), deleteDeniedRootsFromPlan(plan), inputCorpus);
     // A missing or corrupt events.jsonl means the post-run scan (host-path-leak / delete-in-outputs /
     // self-heal) has no trustworthy evidence — treat it as unavailable, never as a clean scan.
     const scanUnavailable = scan.sidecarMissing || scan.malformedLines > 0;
@@ -1855,6 +1863,10 @@ export async function executeScenario(scenario: Scenario, opts: ExecuteOptions =
             // Omitted when empty so an unchanged run's result.json is byte-identical to before.
             ...(scan.mountDeletes.length ? { mountDeletes: scan.mountDeletes } : {}),
             hostPathLeaked: scan.hostPathLeaked,
+            // Input provenance, omitted when zero (byte-identical result.json for a run with no such inputs):
+            // how many host-path tokens the inputs carried, and how many matches that exempted.
+            ...(inputCorpus.tokens.size ? { inputHostPathTokens: inputCorpus.tokens.size } : {}),
+            ...(scan.hostPathsFromInputs ? { hostPathsFromInputs: scan.hostPathsFromInputs } : {}),
             selfHealRan: scan.selfHealRan,
           },
       // The outputs filesystem diff — a sibling of `scan`, so a proven delete survives a missing events.jsonl.
@@ -2638,24 +2650,17 @@ export function hostPathLeaked(text: string): boolean {
   // `computer://` is accepted beside `file://`: a delivered-file link to a host path
   // (`computer:///Users/…`) is exactly how a host path reaches the model's own reply, and so is a
   // backtick-quoted one ("Saved to `/Users/…`").
-  const re =
-    /(^|[\s"'(=:`]|(?:file|computer):\/\/[^\s\/]*)(\/Users\/|\/opt\/cowork\/|\/home\/|\/root\/|\/private\/var\/|\/private\/tmp\/|\/var\/folders\/|\/Volumes\/)/;
-  if (re.test(text)) return true;
-  // also catch URL-encoded (%2FUsers%2F) and backslash (file:\\host\Users) forms by testing a
-  // decoded + backslash-normalized copy. Decode each `%`-escape RUN independently rather than the
+  // URL-encoded (%2FUsers%2F) and backslash (file:\\host\Users) forms are caught by also tokenizing a
+  // decoded + backslash-normalized copy. Each `%`-escape RUN is decoded independently rather than the
   // whole string: decodeURIComponent over the entire text throws on ANY stray `%` (e.g. `build 100%
   // done`), which would silently disable the encoded re-test even when a genuine `%2Fhome%2Fvictim`
-  // is also present. An undecodable run is left verbatim.
-  const decoded = text.replace(/(?:%[0-9A-Fa-f]{2})+/g, (m) => {
-    try {
-      return decodeURIComponent(m);
-    } catch {
-      return m;
-    }
-  });
-  const normalized = decoded.replace(/\\/g, "/");
-  return normalized !== text && re.test(normalized);
+  // is also present. An undecodable run is left verbatim. The pattern and the decoding live in
+  // host-path-tokens.ts, shared with the input-provenance exemption (input-host-paths.ts), so the two can
+  // never disagree about what a host path is.
+  return hostPathTokens(text).length > 0;
 }
+
+export { hostPathTokens };
 
 // Operations that UNLINK a name. Scoped to match the real product's enforcement, which was measured
 // directly against the outputs mount with raw syscalls (not shell commands, which mask the syscall
@@ -3500,12 +3505,36 @@ function outputsDeleteSnippet(cmd: string, mount = "outputs"): string {
   return (ops.length ? ops.join("; ") : expanded).split(EMPTY_JOIN_GUARD).join("").trim().slice(0, 160);
 }
 
+/** Host roots the harness created for THIS run: the run dir (which holds the container session tree), the
+ *  microvm session dir and the staged agent's dir — raw and realpath spellings both. A host path at or under
+ *  one of them in model-visible text is what a sandbox leak looks like, so input provenance never exempts
+ *  it. Mount SOURCE paths are deliberately not here: they reach model-visible text only at hostloop, where
+ *  the signal is skipped. */
+export function ownHostRoots(outDir: string, sessionId: string, baseline: PlatformBaseline): string[] {
+  const roots = [resolve(outDir), join(VM_WORK_HOST, sessionId)];
+  const staged = (baseline.agentBinary?.stagedPath ?? "").replace(/^~(?=$|\/)/, homedir());
+  if (staged) roots.push(dirname(staged));
+  if (process.env.COWORK_AGENT_BINARY) roots.push(dirname(resolve(process.env.COWORK_AGENT_BINARY)));
+  for (const r of [...roots]) {
+    try {
+      const real = realpathSync(r);
+      if (real !== r) roots.push(real);
+    } catch {
+      /* not on disk (e.g. no microvm session dir): the raw spelling is enough */
+    }
+  }
+  return roots;
+}
+
 /** Scan a run's events.jsonl for limitation-fidelity signals (moved from cli.ts). */
 export function scanEvents(
   file: string,
   /** Writable (`rw`) user-visible mount names to attribute deletes to. Production denies unlink/rmdir on
    *  EVERY such mount, not just `outputs`. Defaults to outputs-only so existing callers are unchanged. */
   rwMounts: string[] = ["outputs"],
+  /** Host-path tokens the USER supplied (captured from the staged inputs before the agent ran). A matched
+   *  token found here verbatim is not a leak; omitted ⇒ every match leaks, as before. */
+  inputCorpus?: InputHostPathCorpus,
 ): {
   outputsDeletes: string[];
   /** POSITIONAL companion of `outputsDeletes` — same length, same order — saying why each entry was
@@ -3517,6 +3546,9 @@ export function scanEvents(
    *  and every committed cassette are defined in terms of it. */
   mountDeletes: { mount: string; command: string }[];
   hostPathLeaked: boolean;
+  /** Distinct host-path tokens in model-visible text that were exempted because they came verbatim from
+   *  the scenario's inputs (`inputCorpus`). A pass that relied on the exemption is visible through this. */
+  hostPathsFromInputs: number;
   selfHealRan: boolean;
   // events.jsonl was absent/unreadable — the scan produced NO evidence. Distinct from a clean scan:
   // callers must NOT persist an all-false scan for this case (that reads as "scanned, found nothing").
@@ -3531,6 +3563,7 @@ export function scanEvents(
     outputsDeleteBasis: [] as ("fs-diff" | "named" | "inferred")[],
     mountDeletes: [] as { mount: string; command: string }[],
     hostPathLeaked: false,
+    hostPathsFromInputs: 0,
     selfHealRan: false,
     sidecarMissing: false,
     malformedLines: 0,
@@ -3552,6 +3585,16 @@ export function scanEvents(
     return out;
   }
   const selfHealRe = /\/sessions\/[^\s"]*\/mnt\/\.local-plugins/;
+  // A text leaks iff it carries a host-path token that did NOT come from the user's inputs.
+  const exempted = new Set<string>();
+  const leaks = (text: string): boolean => {
+    let leaked = false;
+    for (const t of hostPathTokens(text)) {
+      if (isInputBorneHostPath(t, inputCorpus)) exempted.add(t);
+      else leaked = true;
+    }
+    return leaked;
+  };
   for (const l of lines) {
     let msg: any;
     try {
@@ -3565,12 +3608,12 @@ export function scanEvents(
     // detection assistant-only (those are tool_use blocks the agent emits).
     if (msg.type !== "assistant" && msg.type !== "user" && msg.type !== "system") continue;
     // A standalone `system` message carries top-level string content (no message.content array).
-    if (msg.type === "system" && typeof msg.content === "string" && hostPathLeaked(msg.content)) out.hostPathLeaked = true;
+    if (msg.type === "system" && typeof msg.content === "string" && leaks(msg.content)) out.hostPathLeaked = true;
     for (const block of msg.message?.content ?? []) {
       // A `thinking` block can leak a host path in the reasoning text (e.g. quoting an absolute path).
       if (block.type === "thinking") {
         const t = block.thinking ?? block.text;
-        if (typeof t === "string" && hostPathLeaked(t)) out.hostPathLeaked = true;
+        if (typeof t === "string" && leaks(t)) out.hostPathLeaked = true;
       }
       // delete/self-heal detection must cover BOTH bash surfaces — native `Bash` (container/microvm
       // tiers) AND `mcp__workspace__bash` (host-loop, where native Bash is disabled). Same `command`
@@ -3589,18 +3632,19 @@ export function scanEvents(
         }
         if (selfHealRe.test(cmd)) out.selfHealRan = true;
       }
-      if (block.type === "text" && typeof block.text === "string" && hostPathLeaked(block.text)) out.hostPathLeaked = true;
+      if (block.type === "text" && typeof block.text === "string" && leaks(block.text)) out.hostPathLeaked = true;
       if (block.type === "tool_result") {
         // tool_result.content is a string or an array of {type:"text", text} blocks (Bash output, etc.)
         const c = block.content;
         if (typeof c === "string") {
-          if (hostPathLeaked(c)) out.hostPathLeaked = true;
+          if (leaks(c)) out.hostPathLeaked = true;
         } else if (Array.isArray(c)) {
-          for (const sub of c) if (typeof sub?.text === "string" && hostPathLeaked(sub.text)) out.hostPathLeaked = true;
+          for (const sub of c) if (typeof sub?.text === "string" && leaks(sub.text)) out.hostPathLeaked = true;
         }
       }
     }
   }
+  out.hostPathsFromInputs = exempted.size;
   return out;
 }
 

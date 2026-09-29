@@ -9,6 +9,7 @@ import { resolveMounts } from "../baseline.js";
 import { spawnEnv, baseAgentArgs } from "./argv.js";
 import { stageWorkspace } from "./stage.js";
 import { capturePreRunManifest } from "../run/pre-run-manifest.js";
+import { captureInputHostPathCorpus } from "../run/input-host-paths.js";
 import { runtimeAuthEnv, SECRET_ENV_KEYS } from "./host-env.js";
 
 /**
@@ -124,6 +125,9 @@ export function spawnMicroVm(
   // The full manifest is internally gated on plan.capturePreRun|record and !plan.resume; the small
   // outputs-only baseline the outputs-delete diff reads is taken first, on every turn.
   capturePreRunManifest(plan, mntHost, outDir, "microvm");
+  // Host-path tokens in the user's staged inputs, so the post-run host_path_leak scan can tell a path the
+  // user supplied from one the sandbox leaked. First turn only (a no-op on resume).
+  captureInputHostPathCorpus(plan, mntHost, outDir);
   const mcpVm = mcpStaged ? `${configVm}/mcp.json` : undefined;
   // (Local marketplaces are resolved to --plugin-dir in buildLaunchPlan; the registry
   // is inert in cowork mode — SPEC §6. No registration step.)

@@ -2746,6 +2746,12 @@
       ".scan.hostPathLeaked": {
         "type": "boolean"
       },
+      ".scan.hostPathsFromInputs": {
+        "type": "integer"
+      },
+      ".scan.inputHostPathTokens": {
+        "type": "integer"
+      },
       ".scan.mountDeletes": {
         "type": "array"
       },

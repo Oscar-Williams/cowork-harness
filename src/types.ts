@@ -2007,7 +2007,15 @@ export interface RunResult {
      *  every such mount, so a delete in a connected folder is a real detection that used to produce no
      *  signal at all. Reported, not verdict-moving — the harness detects where production ENFORCES. */
     mountDeletes?: { mount: string; command: string }[];
+    /** A host path that did NOT come from the scenario's inputs appeared in model-visible text. */
     hostPathLeaked: boolean;
+    /** How many distinct host-path tokens the scenario's inputs carried — the staged uploads and connected
+     *  folders (captured before the agent ran, on the first turn) plus the turn's prompt. The tokens
+     *  themselves are private paths and are never written here. Omitted when zero. */
+    inputHostPathTokens?: number;
+    /** How many distinct host-path tokens in model-visible text were exempted from `hostPathLeaked` because
+     *  they came verbatim from those inputs. Omitted when zero; non-zero means a clean scan relied on it. */
+    hostPathsFromInputs?: number;
     selfHealRan: boolean;
   };
   /** The outputs-delete FILESYSTEM diff for this turn (live lane only): `outputs/` snapshotted at turn start
