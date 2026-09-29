@@ -109,17 +109,24 @@ All notable changes to this project are documented here. The format is based on
 - **`record`'s `ok` means "exited 0" in every arm.** The recording's own verdict is `results[0].verdict.pass`
   (a single file) or `items[].verdict.pass` (a batch). Two outputs change: a single-file `record
   --allow-failing` of a failing run printed `ok: false` beside exit 0 and now prints `ok: true`; `record
-  <empty dir/> --dry-run` printed `ok: true` beside exit 2 and now prints `ok: false`. Whenever a run
-  completed, its verdict is in the document: when `record` refuses to freeze a failing run (no
-  `--allow-failing`), it still exits 1 with `ok: false`, but the run is now in `results[0]` (a single file)
-  or on its `failed` item's `verdict`/`result` (a batch), and its cost counts against a batch's
-  `--max-budget-usd`. That refusal printed `results: []`, so `.results[0].verdict.pass` raised and the run's
-  cost was lost. A refusal before any run (credentials, model, budget, policy) still has `results: []`.
+  <empty dir/> --dry-run` printed `ok: true` beside exit 2 and now prints `ok: false`.
   - *Who is affected:* a consumer that read `ok` from `record --allow-failing` as the run's verdict,
-    including the packaged Action's `ok` output for `command: record`; and one that branched on the
-    verdict refusal's `error.category`, which is now `runtime` instead of `usage` — the scenario loaded
-    and ran, so it is not a usage error.
+    including the packaged Action's `ok` output for `command: record`.
   - *To keep the old behaviour:* read `.results[0].verdict.pass` instead of `.ok`.
+- **A `record` refusal after the run is category `runtime` and carries the run it refused.** Once the
+  agent has finished, anything that stops the cassette being written — a failing verdict without
+  `--allow-failing`, an assert on an artifact too large to commit, a quarantined host/machine-inventory
+  finding, or any other error before the write — still exits 1 with `ok: false`, but its category is
+  `runtime` (it was `usage`: the scenario loaded and ran, so it is not a usage error), the run is in
+  `results[0]` beside the error (a single file) or on the `failed` item's `verdict`/`result` (a batch),
+  and a batch counts its cost toward `--max-budget-usd`'s running total, which stops a batch only at
+  `--concurrency 1`. These refusals printed `results: []`, so `.results[0].verdict.pass` raised and the
+  run's cost was lost. A refusal before the run (credentials, model, budget, policy), and a run that ends
+  in a thrown error before returning a result (an unanswered gate, say), still have `results: []`.
+  - *Who is affected:* a consumer that branched on `error.category == "usage"` for these refusals, or
+    that assumed a non-null `error` means an empty `results`.
+  - *To keep the old behaviour:* none; read `error.category` as `runtime` for them, and `results[0]` for
+    the run.
 - **`gates <dir>` without `--follow` refuses a directory that does not exist, and a malformed gate
   request.** Both exited 0 with nothing printed, which is also what a directory with no pending gate
   prints. A missing directory is now a usage error and a request that cannot be parsed is a runtime

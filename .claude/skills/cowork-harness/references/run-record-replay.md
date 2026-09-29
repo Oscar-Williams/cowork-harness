@@ -60,10 +60,12 @@ stops meaning anything.
 **`record <file>` exit codes.** `2` means the scenario did not load. `1` means it loaded and this record
 was refused: before the spend (`on_unanswered: prompt`, an unsatisfiable assert pairing, the host-inventory
 destination refusal, a slug collision, a scenario that resolves no model, and the `--max-budget-usd`
-refusal — `1` on `record` since 4.0.0, still `2` on `run`/`skill`), or after it, when the run's verdict
-failed and `--allow-failing` was not passed. That last refusal is the only one that ran the agent, so its
-`--output-format json` document carries the run in `results[0]` (verdict and cost) with
-`error.category: "runtime"`; every pre-spend refusal has `results: []`.
+refusal — `1` on `record` since 4.0.0, still `2` on `run`/`skill`), or after it, once the agent has
+finished: a failing verdict without `--allow-failing`, an assert on an artifact too large to commit, a
+quarantined inventory finding, or any other error before the cassette is written. Only the after-the-run
+refusals report the run: under `--output-format json` they carry it in `results[0]` (verdict and
+cost) with `error.category: "runtime"`; every pre-spend refusal, and a run that throws before returning a
+result (an unanswered gate), has `results: []`.
 
 **Decide WHERE the cassette lives before you record it — a cassette cannot be moved afterwards.**
 Without `--out`, `record` writes `cassettes/<scenario-name-slug>.cassette.json` (gitignored by

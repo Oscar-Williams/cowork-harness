@@ -969,15 +969,18 @@ document, last, right before the exit (progress lines stay on stderr):
 
 `ok` is the exit code's verdict on every `record` path (ok ⇔ exit 0) — a recorded item's own verdict is
 `items[].verdict.pass`, a single file's is `results[0].verdict.pass`, and the two differ when
-`--allow-failing` records a failing run. A run that completed but failed its verdict, which `record`
-refuses to freeze without `--allow-failing`, is still published: a batch's `failed` item carries its
-`verdict` and `result`, and a single file exits 1 with `ok: false`, `error.category: "runtime"` and the run
+`--allow-failing` records a failing run. A refusal after the agent finished — a failing verdict
+without `--allow-failing`, an assert on an artifact too large to commit, a quarantined inventory finding,
+or any other error before the cassette is written — still publishes the run: a batch's `failed` item
+carries its `verdict` and `result` (and its cost counts toward the running total, which stops a batch only
+at `--concurrency 1`), and a single file exits 1 with `ok: false`, `error.category: "runtime"` and the run
 in `results[0]`, so `.results[0].verdict.pass` and the run's cost stay readable. A file that does not load
 is a `failed` item. A batch the
 `--max-budget-usd` cap stopped early exits 0, so `ok: true` can come with `skipped-budget` items. A sweep
 with nothing stale prints `ok: true` and `items: []`. A refusal before the first recording (credentials,
 an unresolved model, the budget pre-flight, a slug collision) prints the standard error envelope instead,
-with `results: []` because no run happened.
+with `results: []` because no run happened; so does a run that throws before returning a result (an
+unanswered gate).
 
 ### Parallel re-records (`--concurrency`)
 
