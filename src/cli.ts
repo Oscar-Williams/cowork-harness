@@ -1911,7 +1911,11 @@ async function cmdRun(rawArgs: string[]) {
   if (repeatN === undefined) {
     const badInputs: { file: string; message: string; hint?: string }[] = [];
     for (let i = 0; i < files.length; i++) {
-      const refusal = scenarioInputRefusal(loaded[i], modelFlag, { quiet: true, ablateSkill: flags.ablateSkill });
+      const refusal = scenarioInputRefusal(loaded[i], modelFlag, {
+        quiet: true,
+        ablateSkill: flags.ablateSkill,
+        unloadableBaseline: "skip",
+      });
       if (refusal) badInputs.push({ file: files[i], message: refusal.message, hint: refusal.hint });
     }
     // One file keeps the message (and hint) executeScenario would have thrown, unprefixed; a batch names

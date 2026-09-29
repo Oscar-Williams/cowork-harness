@@ -770,8 +770,8 @@ ablation drops the plugin from the run but the path is still the caller's input;
 an input error and the preview reports it as `model: null`. `record <file> --dry-run` makes the same check
 over its scenario's session, so both previews surface a bad input path; there it is a refusal of a scenario
 that loaded, so it exits `1`. `record <dir/> --dry-run` makes the same check per scenario and lists each
-input the real record would refuse (an input path, effort or baseline name, or a tier-vacuous negative tool
-assertion) under `inputErrors[]` (`{file, message, hint?}`) in its payload, with a `⚠ input error:` stderr
+input the real record would refuse (an input path, effort or baseline name, a baseline file that does not
+load, or a tier-vacuous negative tool assertion) under `inputErrors[]` (`{file, message, hint?}`) in its payload, with a `⚠ input error:` stderr
 line that survives `--quiet`; `record <file> --dry-run` reports a tier-vacuous assertion the same way. It is
 additive, so `ok` and the exit code do not change (such a scenario is a `failed` item on the real
 `record <dir/>`); a gate that wants it checks `.ok and (.inputErrors == [])`. The previews check existence and kind, not the git tracked-set filter, which only a

@@ -271,9 +271,8 @@ describe.skipIf(!can)("input pre-checks: baselines, --repeat, hints and the budg
     inputErrors?: { file: string; message: string; hint?: string }[];
   };
 
-  it("record <dir/> --dry-run: a baseline that fails to LOAD is left to the real record (exit 0, payload)", () => {
-    // The pre-check answers input-path questions; a malformed baseline file is not one it can answer, just
-    // as a session that does not load is skipped. It must not crash the preview.
+  it("record <dir/> --dry-run: a baseline that fails to LOAD is an inputErrors[] entry (exit 0, payload)", () => {
+    // The directory preview must not crash on one file; the real record fails that item, so it is listed.
     const d = fixture();
     writeFileSync(join(d, "bad-baseline.json"), "{not json");
     writeFileSync(join(d, "sc", "a.yaml"), SCENARIO("a", "../ok.yaml"));
@@ -282,7 +281,30 @@ describe.skipIf(!can)("input pre-checks: baselines, --repeat, hints and the budg
     expect(r.code, r.all).toBe(0);
     const doc = JSON.parse(r.stdout) as Doc;
     expect(doc.ok).toBe(true);
-    expect(doc.inputErrors).toEqual([]);
+    expect(doc.inputErrors).toHaveLength(1);
+    expect(doc.inputErrors![0].file).toMatch(/m\.yaml$/);
+    expect(doc.inputErrors![0].message).toMatch(/does not load: .*JSON/);
+  });
+
+  it("record <file> --dry-run: a baseline that fails to LOAD fails as before (internal, exit 2)", () => {
+    // Pin: a single-file preview must not green what the real record crashes on.
+    const d = fixture();
+    writeFileSync(join(d, "bad-baseline.json"), "{not json");
+    writeFileSync(join(d, "sc", "m.yaml"), SCENARIO("m", "../ok.yaml", `baseline: ${join(d, "bad-baseline.json")}\n`));
+    const r = cli(["record", "sc/m.yaml", "--dry-run", "--output-format", "json"], d);
+    expect(r.code, r.all).toBe(2);
+    const env = envelope(r.stdout);
+    expect(env.ok).toBe(false);
+    expect(env.error?.category).toBe("internal");
+  });
+
+  it("run <dir/>: a baseline that fails to LOAD is left to that scenario's turn, not the pre-check", () => {
+    const d = fixture();
+    writeFileSync(join(d, "bad-baseline.json"), "{not json");
+    writeFileSync(join(d, "sc", "a.yaml"), SCENARIO("a", "../ok.yaml"));
+    writeFileSync(join(d, "sc", "m.yaml"), SCENARIO("m", "../ok.yaml", `baseline: ${join(d, "bad-baseline.json")}\n`));
+    const r = cli(["run", "sc/"], d);
+    expect(r.all).toMatch(SPAWN_GUARD); // `a` runs first; the pre-check did not throw on `m`
   });
 
   it("record <dir/> --dry-run: a baseline NAME that resolves nowhere is an inputErrors[] entry, hint carried", () => {

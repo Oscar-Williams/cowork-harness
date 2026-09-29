@@ -4050,7 +4050,8 @@ export async function cmdRecord(args: string[]) {
         // record stops at the model refusal first, and without a model the effort check would report a
         // confusing second reason for the same file.
         else {
-          const bad = scenarioInputRefusal(sc, modelOverride);
+          // A baseline file that does not load is listed too: the real record fails that item.
+          const bad = scenarioInputRefusal(sc, modelOverride, { unloadableBaseline: "report" });
           if (bad) inputErrors.push({ file: f, message: bad.message, ...(bad.hint !== undefined ? { hint: bad.hint } : {}) });
         }
         // Path-dependent: reported, never gating. `preSpendVerdicts` re-runs promptPolicyRejection, which is

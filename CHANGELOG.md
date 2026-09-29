@@ -10,7 +10,7 @@ All notable changes to this project are documented here. The format is based on
 
 - **`record --dry-run` reports the inputs a real record would refuse under a new `inputErrors[]` key.**
   On a directory: an input path, effort or baseline name a scenario's session or file names that the real
-  `record` would refuse, and a `tool_not_called` / `subagent_tool_absent` its tier can never violate. On a
+  `record` would refuse, a baseline file that does not load, and a `tool_not_called` / `subagent_tool_absent` its tier can never violate. On a
   single file (whose paths were already refused): the tier-vacuous assertion. Each entry is `{file,
   message, hint?}`, with a `⚠ input error:` line on stderr that `--quiet` does not mute. The preview's exit
   code and `ok` are unchanged: the real `record` fails that scenario, so treat an entry as a failure to
